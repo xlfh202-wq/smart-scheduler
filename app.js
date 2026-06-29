@@ -49,6 +49,14 @@
   // 시간 슬롯 표시: 시간이 있으면 HH:MM~HH:MM, 순번형이면 label
   const slotName = (s) => (s.start && s.end) ? `${s.start}~${s.end}` : (s.label || '슬롯');
 
+  // 최근 3회 달성률: 배열 또는 옛 문자열을 3칸 배열로 정규화 / 표시
+  const recent3 = (v) => {
+    if (Array.isArray(v)) return [v[0], v[1], v[2]].map((x) => (x == null ? '' : String(x)).replace(/[^\d.]/g, ''));
+    if (typeof v === 'string' && v.trim()) { const n = v.split(/[^\d.]+/).filter(Boolean); return [n[0] || '', n[1] || '', n[2] || '']; }
+    return ['', '', ''];
+  };
+  const recentText = (v) => recent3(v).filter(Boolean).map((x) => x + '%').join(' / ');
+
   function groupByWeek(days) {
     const map = new Map();
     days.forEach((d) => {
@@ -146,7 +154,7 @@
       ['준비물량', det.prep],
       ['가격', det.price],
       ['마진', det.margin],
-      ['최근 달성률', det.recent],
+      ['최근 달성률', recentText(det.recent)],
       ['방송 분량', p.durationMin ? p.durationMin + '분' : ''],
       ['배정', [p.pd && 'PD ' + p.pd, p.host && 'MC ' + p.host, p.studio && 'ST ' + p.studio].filter(Boolean).join(' / ')],
       ['비고(PD)', p.memo],
@@ -424,7 +432,7 @@
       ['준비물량', pr.prep],
       ['가격', pr.price],
       ['마진', pr.margin],
-      ['최근 달성률', pr.recent],
+      ['최근 달성률', recentText(pr.recent)],
       ['방송 분량', pr.durationMin ? pr.durationMin + '분' : ''],
       ['마지막 수정', b.editedBy ? `${b.editedBy}${b.editedAt ? ' · ' + fmtTs(b.editedAt) : ''}` : ''],
     ].filter((r) => r[1]);
@@ -556,6 +564,29 @@
       class=${`w-full px-2 py-1.5 text-[12px] bg-transparent outline-none focus:bg-amber-50 ${color || ''}`} />`;
   }
 
+  // 최근 3회 달성률: 3칸 분할, 숫자만 입력 → 뒤에 % 자동 표기
+  function Recent3Cell({ value, onCommit, readOnly }) {
+    const [a, setA] = useState(recent3(value));
+    useEffect(() => { setA(recent3(value)); }, [JSON.stringify(recent3(value))]);
+    if (readOnly) {
+      return html`<div class="flex divide-x divide-slate-200 text-center">
+        ${a.map((x, i) => html`<div key=${i} class="flex-1 px-0.5 py-1.5 text-[12px] tabular-nums">${x ? x + '%' : '·'}</div>`)}
+      </div>`;
+    }
+    const commit = (arr) => onCommit(arr.some(Boolean) ? arr.slice() : ['', '', '']);
+    return html`<div class="flex divide-x divide-slate-200">
+      ${a.map((x, i) => html`
+        <div key=${i} class="flex-1 flex items-center justify-center px-0.5">
+          <input value=${x} inputmode="numeric" placeholder="-"
+            onInput=${(e) => { const v = e.target.value.replace(/[^\d.]/g, ''); setA((p) => p.map((y, j) => (j === i ? v : y))); }}
+            onBlur=${() => commit(a)}
+            onKeyDown=${(e) => { if (e.key === 'Enter') e.target.blur(); }}
+            class="w-7 py-1.5 text-[12px] tabular-nums text-right bg-transparent outline-none focus:bg-amber-50" />
+          ${x && html`<span class="text-[10px] text-slate-400">%</span>`}
+        </div>`)}
+    </div>`;
+  }
+
   /* =====================================================================
    *  최종편성안 (엑셀 레이아웃 표 · 직접 편집 가능)
    * ===================================================================== */
@@ -578,7 +609,7 @@
           slotName(r.slot), p ? (p.pending ? '미정' : '확정') : '',
           p ? ((p.productName || '') + items) : '', p ? (det.note || '') : '', p ? (det.comp || '') : '',
           p ? (det.prep || '') : '', p ? (det.price || '') : '', p ? (det.margin || '') : '',
-          p ? (det.recent || '') : '', p ? (p.pd || '') : '', p ? (p.host || '') : '',
+          p ? recentText(det.recent) : '', p ? (p.pd || '') : '', p ? (p.host || '') : '',
           p ? (p.studio || '') : '', p ? (p.memo || '') : '',
         ]);
         if (r.firstOfDay) {
@@ -714,7 +745,7 @@
                 <th class=${th} style=${{ width: '78px' }}>준비물량</th>
                 <th class=${th} style=${{ width: '88px' }}>가격</th>
                 <th class=${th} style=${{ width: '64px' }}>마진</th>
-                <th class=${th} style=${{ width: '90px' }}>최근달성률</th>
+                <th class=${th} style=${{ width: '128px' }}>최근 3회 달성률</th>
                 <th class=${th} style=${{ width: '74px' }}>PD</th>
                 <th class=${th} style=${{ width: '74px' }}>쇼호스트</th>
                 <th class=${th} style=${{ width: '64px' }}>스튜디오</th>
@@ -763,7 +794,8 @@
                     <td class=${`${td} p-0`}>${p ? Cell(det.prep, (val) => store.updatePlacementContent(p.id, { detail: { prep: val } }), { ph: '00억…', color: 'tabular-nums' }) : ''}</td>
                     <td class=${`${td} p-0`}>${p ? Cell(det.price, (val) => store.updatePlacementContent(p.id, { detail: { price: val } }), { ph: '가격…', color: 'tabular-nums' }) : ''}</td>
                     <td class=${`${td} p-0`}>${p ? Cell(det.margin, (val) => store.updatePlacementContent(p.id, { detail: { margin: val } }), { ph: '마진…', color: 'tabular-nums' }) : ''}</td>
-                    <td class=${`${td} p-0`}>${p ? Cell(det.recent, (val) => store.updatePlacementContent(p.id, { detail: { recent: val } }), { ph: '예: 92/88/95%', color: 'tabular-nums' }) : ''}</td>
+                    <td class=${`${td} p-0`}>${p ? html`<${Recent3Cell} value=${det.recent} readOnly=${readOnly}
+                      onCommit=${(val) => store.updatePlacementContent(p.id, { detail: { recent: val } })} />` : ''}</td>
                     <td class=${`${td} p-0`}>${p ? castCell(p, 'pd') : ''}</td>
                     <td class=${`${td} p-0`}>${p ? castCell(p, 'host') : ''}</td>
                     <td class=${`${td} p-0`}>${p ? castCell(p, 'studio') : ''}</td>
@@ -1023,9 +1055,10 @@
       name: init.name || '', note: init.note || '', issue: init.issue || '',
       comp: init.comp || '', prep: init.prep || '', price: init.price || '', margin: init.margin || '',
       durationMin: init.durationMin || '', sme: !!init.sme, special: !!init.special, isNew: !!init.isNew,
-      groupCode: init.groupCode || '', recent: init.recent || '',
+      groupCode: init.groupCode || '', recent: recent3(init.recent),
       items: (init.items || []).join('\n'), // 동시 묶음 상품 목록
     });
+    const setRecent = (i) => (e) => { const v = e.target.value.replace(/[^\d.]/g, ''); setF((s) => ({ ...s, recent: s.recent.map((x, j) => (j === i ? v : x)) })); };
     const itemLines = f.items.split('\n').map((s) => s.trim()).filter(Boolean);
     const initSlot = state.days.flatMap((d) => d.slots).find((s) => s.id === ctx.slotId);
     const orderMode = !!(initSlot && initSlot.label && !initSlot.start);
@@ -1049,7 +1082,7 @@
       const product = {
         name, note: f.note, issue: f.issue, comp: f.comp, prep: f.prep,
         price: f.price, margin: f.margin, sme: f.sme, special: f.special, isNew: f.isNew,
-        groupCode: f.groupCode, recent: f.recent,
+        groupCode: f.groupCode, recent: f.recent.some(Boolean) ? f.recent : undefined,
         durationMin: (fashion || orderMode) ? (f.durationMin ? parseInt(f.durationMin, 10) : null) : durMin,
         items: items.length ? items : undefined,
         dongsi: items.length > 1,
@@ -1125,7 +1158,16 @@
           <${Field} label="준비물량"><input value=${f.prep} onInput=${set('prep')} class=${inputCls} placeholder="예: 5억 / 3,000세트" /><//>
           <${Field} label="가격"><input value=${f.price} onInput=${set('price')} class=${inputCls} placeholder="예: 179,000원" /><//>
           <${Field} label="마진"><input value=${f.margin} onInput=${set('margin')} class=${inputCls} placeholder="예: 50T / 46%" /><//>
-          <${Field} label="최근 3회 실적 (달성률)"><input value=${f.recent} onInput=${set('recent')} class=${inputCls} placeholder="예: 92% / 88% / 95%" /><//>
+          <${Field} label="최근 3회 달성률 (숫자만, % 자동)">
+            <div class="flex items-center gap-1.5">
+              ${[0, 1, 2].map((i) => html`
+                <div key=${i} class="flex-1 flex items-center rounded border border-slate-300 focus-within:border-brand px-2">
+                  <input value=${f.recent[i]} onInput=${setRecent(i)} inputmode="numeric" placeholder=${`${i + 1}회`}
+                    class="w-full py-1.5 text-[13px] tabular-nums text-right bg-transparent outline-none" />
+                  <span class="text-[12px] text-ink-soft pl-0.5">%</span>
+                </div>`)}
+            </div>
+          <//>
           ${(fashion || orderMode) && html`<${Field} label="방송 분량(분)"><input type="number" value=${f.durationMin} onInput=${set('durationMin')} class=${inputCls} placeholder="예: 30" /><//>`}
         </div>
         <div class="flex items-center gap-5 pt-1">
