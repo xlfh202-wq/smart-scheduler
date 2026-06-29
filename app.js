@@ -1612,8 +1612,6 @@
               ${roleCfg.canManage && html`<button onClick=${() => setBackup(true)}
                 class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0"
                 title="자동 백업 목록 / 특정 시점으로 복원">백업/복원</button>`}
-              ${roleCfg.canManage && html`<button onClick=${() => confirm('모든 데이터를 초기화할까요?') && store.resetAll()}
-                class="text-[12px] px-2 py-1.5 rounded text-ink-soft hover:text-brand whitespace-nowrap shrink-0" title="초기화">초기화</button>`}
               <button onClick=${logout}
                 class="text-[12px] px-2 py-1.5 rounded border border-slate-300 text-ink-soft hover:border-brand hover:text-brand whitespace-nowrap shrink-0" title="로그아웃">로그아웃</button>
             </div>
