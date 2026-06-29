@@ -501,16 +501,16 @@
                 ? html`<span class="text-[11px] font-normal text-emerald-600 ml-1">· 마지막 저장 ${fmtTs(lastSnap.ts)}</span>`
                 : html`<span class="text-[11px] font-normal text-slate-400 ml-1">· 저장 안 됨</span>`}
             </h2>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap justify-end">
               <button onClick=${fillFromBids}
-                class="text-xs px-2.5 py-1 rounded border border-cyan-300 text-cyan-700 bg-white hover:bg-cyan-50"
+                class="text-xs px-2.5 py-1 rounded border border-cyan-300 text-cyan-700 bg-white hover:bg-cyan-50 whitespace-nowrap shrink-0"
                 title="이 달의 입찰을 편성표에 일괄 반영 (기존 편성은 교체)">입찰 일괄 편성</button>
               <button onClick=${() => setAddDayOpen(true)}
-                class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand">+ 편성일 추가</button>
+                class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0">+ 편성일 추가</button>
               <button onClick=${() => setSnapOpen(true)}
-                class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand">저장본 ${snaps.length}</button>
+                class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0">저장본 ${snaps.length}</button>
               <button onClick=${() => setSaveOpen(true)}
-                class="text-xs font-semibold px-3 py-1 rounded bg-brand text-white hover:bg-brand-dark">편성 저장</button>
+                class="text-xs font-semibold px-3 py-1 rounded bg-brand text-white hover:bg-brand-dark whitespace-nowrap shrink-0">편성 저장</button>
             </div>
           </div>
           <div class="space-y-4">
@@ -559,6 +559,25 @@
    * ===================================================================== */
   function FinalScheduleView({ state }) {
     const prog = activeProgramObj(state);
+    const capRef = useRef(null);
+    const [saving, setSaving] = useState(false);
+    const { year, month } = state.view;
+    async function saveImage() {
+      const el = capRef.current;
+      if (!window.html2canvas || !el) { alert('이미지 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.'); return; }
+      setSaving(true);
+      try {
+        const canvas = await window.html2canvas(el, {
+          backgroundColor: '#ffffff', scale: 2, useCORS: true,
+          windowWidth: el.scrollWidth, width: el.scrollWidth, height: el.scrollHeight,
+        });
+        const a = document.createElement('a');
+        a.download = `${prog.name}_${year}-${String(month).padStart(2, '0')}_최종편성안.png`;
+        a.href = canvas.toDataURL('image/png');
+        document.body.appendChild(a); a.click(); a.remove();
+      } catch (e) { alert('이미지 저장 실패: ' + e.message); }
+      setSaving(false);
+    }
     const days = daysInView(state).slice().sort((a, b) => a.date.localeCompare(b.date));
     const slotStart = (s) => (s.start ? U.toMin(s.start) : 9999);
     // 행 구성: 날짜 → 슬롯(시간순) → 편성(placement)
@@ -585,12 +604,16 @@
     return html`
       <div class="flex-1 overflow-auto p-4 bg-slate-100">
         <div class="flex items-center justify-between mb-3 max-w-[1500px]">
-          <h2 class="text-base font-bold text-ink">${prog.name} · ${state.view.year}년 ${state.view.month}월 최종편성안
+          <h2 class="text-base font-bold text-ink">${prog.name} · ${year}년 ${month}월 최종편성안
             <span class="text-[12px] font-normal text-ink-soft">총 ${total}편성 · 셀을 클릭해 직접 수정</span></h2>
-          <button onClick=${() => window.print()}
-            class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand">🖨 인쇄 / PDF</button>
+          <button onClick=${saveImage} disabled=${saving}
+            class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand disabled:opacity-50">
+            ${saving ? '이미지 생성 중…' : '🖼 이미지 저장 (PNG)'}</button>
         </div>
-        <div class="bg-white rounded-lg shadow-sm overflow-hidden max-w-[1500px]">
+        <div ref=${capRef} class="bg-white rounded-lg shadow-sm overflow-hidden max-w-[1500px]">
+          <div class="px-3 py-2 border-b-2 border-brand text-[13px] font-bold text-ink">
+            ${prog.name} · ${year}년 ${month}월 최종편성안 <span class="font-normal text-ink-soft">(총 ${total}편성)</span>
+          </div>
           <table class="w-full text-[12px] border-collapse">
             <thead class="sticky top-0">
               <tr>
@@ -1362,15 +1385,6 @@
       return () => window.removeEventListener('keydown', onKey);
     }, []);
 
-    function importAll() {
-      const seed = window.BID_SEED;
-      if (!seed || !seed.length) { alert('시드 데이터(bidSeed.js)를 찾을 수 없습니다.'); return; }
-      if (!confirm(`엑셀에서 추출한 2026년 입찰 ${seed.length}건을 불러옵니다.\n(이미 있는 입찰은 중복 제외)\n계속할까요?`)) return;
-      const r = store.importBids(seed);
-      alert(`완료: 입찰 ${r.added}건 추가` +
-        (r.newSlots ? `, 시간대 ${r.newSlots}개 생성` : '') +
-        (r.dup ? `, 중복 ${r.dup}건 제외` : ''));
-    }
     function doLogin(a) {
       try { localStorage.setItem(window.AUTH.storageKey, JSON.stringify({ ...a, ts: Date.now() })); } catch (e) {}
       store.setUser(a.name);
@@ -1394,12 +1408,12 @@
     return html`
       <div class="flex flex-col h-screen">
         <header class="shrink-0 bg-white border-b border-slate-200">
-          <div class="flex items-center gap-4 px-4 py-2">
-            <div class="flex items-center gap-2">
-              <div class="w-8 h-8 rounded-lg bg-brand text-white grid place-items-center font-black text-[11px] leading-none">PGM</div>
-              <div>
-                <div class="font-extrabold text-ink leading-tight">방송제작부문 · 테마PGM 편성 스케줄러</div>
-                <div class="text-[11px] text-ink-soft flex items-center gap-1">
+          <div class="flex items-center gap-x-3 gap-y-2 px-4 py-2 flex-wrap">
+            <div class="flex items-center gap-2 shrink-0">
+              <div class="w-8 h-8 rounded-lg bg-brand text-white grid place-items-center font-black text-[11px] leading-none shrink-0">PGM</div>
+              <div class="min-w-0">
+                <div class="font-extrabold text-ink leading-tight whitespace-nowrap">테마PGM 편성 스케줄러</div>
+                <div class="text-[11px] text-ink-soft flex items-center gap-1 whitespace-nowrap">
                   롯데홈쇼핑
                   ${sbStatus && (() => {
                     const warn = sbStatus === 'connecting' || sbStatus === 'local';
@@ -1412,8 +1426,8 @@
                 </div>
               </div>
             </div>
-            <${MonthNav} view=${state.view} />
-            <nav class="ml-2 flex items-center gap-1">
+            <div class="shrink-0"><${MonthNav} view=${state.view} /></div>
+            <nav class="flex items-center gap-1 shrink-0">
               ${allowed.includes('bids') && html`<button onClick=${() => setTab('bids')}
                 class=${tabCls(curTab === 'bids')}>MD 입찰보드</button>`}
               ${allowed.includes('schedule') && html`<button onClick=${() => setTab('schedule')}
@@ -1421,13 +1435,13 @@
               ${allowed.includes('final') && html`<button onClick=${() => setTab('final')}
                 class=${tabCls(curTab === 'final')}>최종편성안</button>`}
             </nav>
-            <div class="ml-auto flex items-center gap-2">
-              <span class="flex items-center gap-1 text-[12px] px-2 py-1 rounded-full whitespace-nowrap"
+            <div class="ml-auto flex items-center gap-2 flex-wrap justify-end">
+              <span class="flex items-center gap-1 text-[12px] px-2 py-1 rounded-full whitespace-nowrap shrink-0"
                 style=${{ background: roleCfg.color + '18', color: roleCfg.color }} title="현재 로그인 — 모든 수정이 이 이름으로 기록됩니다">
                 <span class="w-1.5 h-1.5 rounded-full" style=${{ background: roleCfg.color }}></span>
                 <b>${roleCfg.label}</b><span class="opacity-80">· ${auth.name}</span>
               </span>
-              <div class="flex items-center rounded border border-slate-300 bg-white overflow-hidden">
+              <div class="flex items-center rounded border border-slate-300 bg-white overflow-hidden shrink-0">
                 <button onClick=${() => store.undo()} disabled=${!store.canUndo()}
                   class="px-2 py-1.5 text-[13px] hover:bg-slate-100 disabled:opacity-30 disabled:cursor-default"
                   title="되돌리기 (Ctrl/Cmd+Z)">↶</button>
@@ -1435,20 +1449,17 @@
                   class="px-2 py-1.5 text-[13px] border-l border-slate-200 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-default"
                   title="다시 (Ctrl/Cmd+Shift+Z)">↷</button>
               </div>
-              ${roleCfg.canManage && html`<button onClick=${importAll}
-                class="text-[13px] px-3 py-1.5 rounded border border-cyan-300 text-cyan-700 bg-white hover:bg-cyan-50"
-                title="엑셀에서 추출한 2026년 전체 입찰을 불러옵니다">엑셀 2026 불러오기</button>`}
               <button onClick=${() => setHistory(true)}
-                class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand">
+                class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0">
                 변경 이력 <span class="text-[11px] text-ink-soft">(${state.changeLog.length})</span>
               </button>
               ${roleCfg.canManage && html`<button onClick=${() => setBackup(true)}
-                class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand"
+                class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0"
                 title="자동 백업 목록 / 특정 시점으로 복원">백업/복원</button>`}
               ${roleCfg.canManage && html`<button onClick=${() => confirm('모든 데이터를 초기화할까요?') && store.resetAll()}
-                class="text-[12px] px-2 py-1.5 rounded text-ink-soft hover:text-brand" title="초기화">초기화</button>`}
+                class="text-[12px] px-2 py-1.5 rounded text-ink-soft hover:text-brand whitespace-nowrap shrink-0" title="초기화">초기화</button>`}
               <button onClick=${logout}
-                class="text-[12px] px-2 py-1.5 rounded border border-slate-300 text-ink-soft hover:border-brand hover:text-brand" title="로그아웃">로그아웃</button>
+                class="text-[12px] px-2 py-1.5 rounded border border-slate-300 text-ink-soft hover:border-brand hover:text-brand whitespace-nowrap shrink-0" title="로그아웃">로그아웃</button>
             </div>
           </div>
         </header>
@@ -1466,7 +1477,7 @@
       </div>`;
   }
   const tabCls = (active) =>
-    `text-[13px] font-semibold px-3 py-1.5 rounded-lg transition ${active ? 'bg-brand text-white' : 'text-ink-soft hover:bg-slate-100'}`;
+    `text-[13px] font-semibold px-3 py-1.5 rounded-lg transition whitespace-nowrap shrink-0 ${active ? 'bg-brand text-white' : 'text-ink-soft hover:bg-slate-100'}`;
 
   ReactDOM.createRoot(document.getElementById('root')).render(html`<${App} />`);
 })();
