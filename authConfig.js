@@ -33,6 +33,15 @@ window.AUTH = {
       canManage: true,
       color: '#da291c',
     },
+    admin: {
+      label: '관리자',
+      desc: '편성 + 관리 권한',
+      password: 'ltpdadmin',
+      tabs: ['schedule', 'final', 'bids'],
+      canManage: true,
+      isAdmin: true, // 데이터가 날아갈 수 있는 기능(이력 초기화·백업 복원) 권한
+      color: '#7c3aed',
+    },
   },
   // PD 소속 구분 (로그인 드롭다운). MD 팀은 앱의 전체 팀 목록을 사용.
   pdTeams: ['리빙PD', '식품PD', '잡화&뷰티PD', '패션PD'],

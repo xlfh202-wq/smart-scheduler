@@ -1142,7 +1142,7 @@
   /* =====================================================================
    *  변경 이력 팝업
    * ===================================================================== */
-  function HistoryModal({ state, onClose, canManage }) {
+  function HistoryModal({ state, onClose, isAdmin }) {
     const curYm = `${state.view.year}-${String(state.view.month).padStart(2, '0')}`;
     const [q, setQ] = useState('');
     const [action, setAction] = useState('all');
@@ -1206,8 +1206,8 @@
               ${actions.map((a) => html`<option key=${a} value=${a}>${a === 'all' ? '전체 동작' : a}</option>`)}
             </select>
             <span class="text-[11px] text-ink-soft ml-auto">${logs.length}건</span>
-            ${canManage && html`<button onClick=${clearAll}
-              class="text-[11px] px-2 py-1 rounded border border-rose-300 text-rose-600 bg-white hover:bg-rose-50 whitespace-nowrap">이력 초기화</button>`}
+            ${isAdmin && html`<button onClick=${clearAll}
+              class="text-[11px] px-2 py-1 rounded border border-rose-300 text-rose-600 bg-white hover:bg-rose-50 whitespace-nowrap" title="관리자 전용">이력 초기화 🔒</button>`}
           </div>
 
           <div class="flex-1 overflow-y-auto">
@@ -1246,7 +1246,7 @@
   /* =====================================================================
    *  백업 / 복원
    * ===================================================================== */
-  function BackupModal({ onClose }) {
+  function BackupModal({ onClose, isAdmin }) {
     const [items, setItems] = useState(null);
     const [busy, setBusy] = useState('');
     const [msg, setMsg] = useState('');
@@ -1315,8 +1315,10 @@
                           <td class="px-4 py-2 tabular-nums whitespace-nowrap">${fmtTs(b.ts)}</td>
                           <td class="px-3 py-2"><${Badge} color=${b.kind === 'manual' ? '#da291c' : '#0891b2'}>${b.kind === 'manual' ? '수동' : '자동'}<//></td>
                           <td class="px-3 py-2 text-right">
-                            <button onClick=${() => restore(b.id)} disabled=${busy === b.id}
-                              class="text-[12px] text-brand hover:underline disabled:opacity-50">${busy === b.id ? '복원 중…' : '이 시점으로 복원'}</button>
+                            ${isAdmin
+                              ? html`<button onClick=${() => restore(b.id)} disabled=${busy === b.id}
+                                  class="text-[12px] text-brand hover:underline disabled:opacity-50">${busy === b.id ? '복원 중…' : '이 시점으로 복원'}</button>`
+                              : html`<span class="text-[11px] text-slate-400" title="복원은 관리자만 가능합니다">🔒 관리자 전용</span>`}
                           </td>
                         </tr>`)}
                     </tbody>
@@ -1466,13 +1468,13 @@
             </div>
           </div>
           <div class="text-[12px] font-medium text-ink-soft mt-4 mb-1.5">역할 선택</div>
-          <div class="grid grid-cols-2 gap-2">
+          <div class="grid grid-cols-3 gap-2">
             ${Object.entries(roles).map(([key, cfg]) => html`
               <button type="button" key=${key} onClick=${() => { setRole(key); setTeam(''); setErr(''); }}
-                class=${`rounded-lg border px-3 py-2 text-left transition ${role === key ? 'border-transparent text-white shadow' : 'border-slate-300 bg-white text-ink hover:border-slate-400'}`}
+                class=${`rounded-lg border px-2 py-2 text-center transition ${role === key ? 'border-transparent text-white shadow' : 'border-slate-300 bg-white text-ink hover:border-slate-400'}`}
                 style=${role === key ? { background: cfg.color } : {}}>
                 <div class="font-bold text-sm">${cfg.label}</div>
-                <div class=${`text-[11px] ${role === key ? 'text-white/85' : 'text-ink-soft'}`}>${cfg.desc}</div>
+                <div class=${`text-[10px] leading-tight mt-0.5 ${role === key ? 'text-white/85' : 'text-ink-soft'}`}>${cfg.desc}</div>
               </button>`)}
           </div>
           <div class="mt-4 space-y-2.5">
@@ -1627,8 +1629,8 @@
             : html`<${BidBoard} state=${state} />`}
         </main>
 
-        ${history && html`<${HistoryModal} state=${state} canManage=${roleCfg.canManage} onClose=${() => setHistory(false)} />`}
-        ${backup && html`<${BackupModal} onClose=${() => setBackup(false)} />`}
+        ${history && html`<${HistoryModal} state=${state} isAdmin=${roleCfg.isAdmin} onClose=${() => setHistory(false)} />`}
+        ${backup && html`<${BackupModal} isAdmin=${roleCfg.isAdmin} onClose=${() => setBackup(false)} />`}
       </div>`;
   }
   const tabCls = (active) =>
