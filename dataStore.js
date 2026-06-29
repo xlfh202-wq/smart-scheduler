@@ -1,0 +1,781 @@
+/* =====================================================================
+ * dataStore.js  —  데이터 계층 추상화
+ * ---------------------------------------------------------------------
+ * 모든 화면(편성표/입찰보드/이력)은 이 인터페이스만 통해 데이터를 읽고 씁니다.
+ * 1단계: LocalStore (브라우저 localStorage)
+ * 2단계: 동일한 인터페이스의 SupabaseStore 로 교체하면 멀티유저/서버저장 전환.
+ *
+ *   store.getState()            -> 현재 전체 상태 (읽기전용 스냅샷)
+ *   store.subscribe(fn)         -> 변경 구독, 해제 함수 반환
+ *   store.<mutation>(...)       -> 상태 변경 + changeLog 기록 + 구독자 통지
+ * ===================================================================== */
+
+(function (global) {
+  'use strict';
+
+  const STORAGE_KEY = 'choiyura-scheduler-v3';
+  const uid = () => Math.random().toString(36).slice(2, 10);
+  const nowISO = () => new Date().toISOString();
+
+  /* ---------- 도메인 상수 ---------- */
+  const TEAMS = [
+    { id: 'home_app',  name: '가전팀',   color: '#2563eb' },
+    { id: 'living',    name: '리빙팀',   color: '#0891b2' },
+    { id: 'beauty1',   name: '뷰티1팀',  color: '#db2777' },
+    { id: 'beauty2',   name: '뷰티2팀',  color: '#e11d48' },
+    { id: 'health1',   name: '건식1팀',  color: '#16a34a' },
+    { id: 'health2',   name: '건식2팀',  color: '#65a30d' },
+    { id: 'food',      name: '식품팀',   color: '#ea580c' },
+    { id: 'kitchen',   name: '주방팀',   color: '#d97706' },
+    { id: 'fashion',   name: '패션잡화', color: '#7c3aed' },
+    { id: 'etc',       name: '기타',     color: '#64748b' },
+  ];
+
+  // 표준 편성 시간대 템플릿
+  const THU_SLOTS = [
+    { start: '20:45', end: '21:45' }, // 60분
+    { start: '21:45', end: '22:50' }, // 65분
+  ];
+  const SAT_SLOTS = [
+    { start: '08:20', end: '09:20' },
+    { start: '09:20', end: '10:20' },
+    { start: '10:20', end: '10:35' }, // 15분
+  ];
+  const WEEKDAY_KO = ['일', '월', '화', '수', '목', '금', '토'];
+
+  /* ---------- 시간 유틸 ---------- */
+  function toMin(hhmm) {
+    const [h, m] = hhmm.split(':').map(Number);
+    return h * 60 + m;
+  }
+  function toHHMM(min) {
+    const h = Math.floor(min / 60) % 24;
+    const m = min % 60;
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+  }
+  function slotDuration(slot) {
+    let d = toMin(slot.end) - toMin(slot.start);
+    if (d < 0) d += 24 * 60;
+    return d;
+  }
+
+  /* ---------- 프로그램(테마PGM) ---------- */
+  const MAIN_PROGRAM = 'pgm_최유라쇼';
+  const PROGRAM_COLORS = ['#da291c', '#2563eb', '#0891b2', '#db2777', '#16a34a', '#ea580c',
+    '#7c3aed', '#d97706', '#0d9488', '#e11d48', '#4f46e5', '#65a30d', '#9333ea', '#475569'];
+  // 영스타일 수/금 → 하나로 병합, 리빙통합/패션통합 탭 제외
+  const PROGRAM_MERGE = { 'pgm_영스타일수': 'pgm_영스타일', 'pgm_영스타일금': 'pgm_영스타일' };
+  const EXCLUDE_PROGRAMS = new Set(['pgm_리빙통합', 'pgm_패션통합']);
+  const normProgId = (id) => PROGRAM_MERGE[id] || id;
+
+  function mergedTeams() {
+    const base = TEAMS.slice();
+    const extra = (typeof window !== 'undefined' && window.PROGRAM_CONFIG && window.PROGRAM_CONFIG.teams) || [];
+    const byId = new Set(base.map((t) => t.id));
+    extra.forEach((t) => { if (!byId.has(t.id)) { base.push(t); byId.add(t.id); } });
+    return base;
+  }
+
+  function parseDur(name) {
+    const m = String(name || '').match(/\((\d{1,3})\s*분?\)/);
+    return m ? parseInt(m[1], 10) : null;
+  }
+
+  /* ---------- 초기 시드 (2026년 목/토 표준 편성) ---------- */
+  function buildSeedDays(year, month, programId) {
+    const days = [];
+    const last = new Date(year, month, 0).getDate();
+    for (let d = 1; d <= last; d++) {
+      const date = new Date(year, month - 1, d);
+      const wd = date.getDay(); // 0=일 ... 4=목 ... 6=토
+      let template = null;
+      if (wd === 4) template = THU_SLOTS;
+      else if (wd === 6) template = SAT_SLOTS;
+      if (!template) continue;
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      days.push({
+        id: 'day_' + programId + '_' + dateStr,
+        programId, date: dateStr, weekday: wd,
+        slots: template.map((s) => ({ id: 'slot_' + uid(), start: s.start, end: s.end, std: true })),
+      });
+    }
+    return days;
+  }
+
+  function buildYearDays(year, programId) {
+    let days = [];
+    for (let m = 1; m <= 12; m++) days = days.concat(buildSeedDays(year, m, programId));
+    return days;
+  }
+
+  function seedPrograms() {
+    const seed = (typeof window !== 'undefined' && window.PROGRAM_SEED);
+    let list = (seed && seed.programs) ? seed.programs.slice() : [{ id: MAIN_PROGRAM, name: '최유라쇼' }];
+    const out = []; const seen = new Set();
+    list.forEach((p) => {
+      if (EXCLUDE_PROGRAMS.has(p.id)) return;
+      const id = normProgId(p.id);
+      if (seen.has(id)) return;
+      seen.add(id);
+      out.push({ id, name: id === 'pgm_영스타일' ? '영스타일' : p.name });
+    });
+    out.sort((a, b) => (a.id === MAIN_PROGRAM ? -1 : b.id === MAIN_PROGRAM ? 1 : 0));
+    return out.map((p, i) => ({ ...p, color: PROGRAM_COLORS[i % PROGRAM_COLORS.length] }));
+  }
+
+  function seedState() {
+    return {
+      meta: { title: '롯데홈쇼핑 테마PGM' },
+      view: { year: 2026, month: 7 },
+      programs: seedPrograms(),
+      activeProgram: MAIN_PROGRAM,
+      teams: mergedTeams(),
+      days: buildYearDays(2026, MAIN_PROGRAM), // 최유라쇼 표준 목/토 (입찰용)
+      bids: [],         // MD 입찰
+      placements: [],   // PD 편성 (확정): + programId, detail{}, memo(PD 비고)
+      snapshots: [],
+      changeLog: [],
+    };
+  }
+
+  /* ===================================================================
+   *  LocalStore
+   * =================================================================== */
+  function LocalStore() {
+    let saveBackend = null; // 설정 시 localStorage 대신 이 함수로 저장 (Supabase 등)
+    let currentUser = null; // 로그인한 사용자 표시명 — 이 브라우저 한정(서버 동기화 안 함)
+    let state = load();
+    const subs = new Set();
+
+    function load() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) return JSON.parse(raw);
+      } catch (e) { /* ignore */ }
+      const s = seedState();
+      applyProgramSeed(s); // 14개 프로그램 확정편성안 자동 적재
+      applySeedBids(s);    // 최유라쇼 MD 입찰 자동 적재
+      persist(s);
+      return s;
+    }
+    // 프로그램 확정편성(window.PROGRAM_SEED)을 placements로 적재
+    function applyProgramSeed(s) {
+      const seed = (typeof window !== 'undefined' && window.PROGRAM_SEED);
+      if (!seed || !seed.rows) return;
+      seed.rows.forEach((row) => {
+        if (EXCLUDE_PROGRAMS.has(row.programId)) return;
+        const programId = normProgId(row.programId);
+        let day = s.days.find((d) => d.programId === programId && d.date === row.date);
+        if (!day) {
+          const dt = new Date(row.date + 'T00:00:00');
+          day = { id: 'day_' + programId + '_' + row.date, programId,
+                  date: row.date, weekday: dt.getDay(), slots: [] };
+          s.days.push(day);
+        }
+        let slot;
+        if (row.label) { // 순번형 슬롯 (시간 없음)
+          slot = day.slots.find((x) => x.label === row.label);
+          if (!slot) { slot = { id: 'slot_' + uid(), start: '', end: '', label: row.label }; day.slots.push(slot); }
+        } else {
+          slot = day.slots.find((x) => x.start === row.start && x.end === row.end);
+          if (!slot) {
+            slot = { id: 'slot_' + uid(), start: row.start, end: row.end };
+            day.slots.push(slot);
+            day.slots.sort((a, b) => toMin(a.start) - toMin(b.start));
+          }
+        }
+        const dt = row.detail || {};
+        s.placements.push({
+          id: uid(), slotId: slot.id, programId, sourceBidId: null, teamId: 'etc',
+          productName: row.name, detail: dt, memo: '',
+          note: dt.note || '', durationMin: parseDur(row.name),
+          pd: '', host: '', studio: '', moveCount: 0, createdAt: nowISO(),
+        });
+      });
+      s.days.sort((a, b) => a.date.localeCompare(b.date));
+      s.changeLog.unshift({ id: uid(), ts: nowISO(), user: 'system', action: '초기적재',
+        productName: '', teamName: '', from: '', to: '', detail: `테마PGM 확정편성 ${seed.rows.length}건 자동 적재` });
+    }
+    // 시드 입찰(window.BID_SEED)을 최유라쇼에 채움 (이력 없이)
+    function applySeedBids(s) {
+      const seed = (typeof window !== 'undefined' && window.BID_SEED) || [];
+      if (!seed.length) return;
+      seed.forEach((row) => {
+        let day = s.days.find((d) => d.programId === MAIN_PROGRAM && d.date === row.date);
+        if (!day) {
+          const dt = new Date(row.date + 'T00:00:00');
+          day = { id: 'day_' + MAIN_PROGRAM + '_' + row.date, programId: MAIN_PROGRAM,
+                  date: row.date, weekday: dt.getDay(), slots: [] };
+          s.days.push(day);
+        }
+        let slot = day.slots.find((x) => x.start === row.start && x.end === row.end);
+        if (!slot) {
+          slot = { id: 'slot_' + uid(), start: row.start, end: row.end };
+          day.slots.push(slot);
+          day.slots.sort((a, b) => toMin(a.start) - toMin(b.start));
+        }
+        s.bids.push({ id: uid(), teamId: row.teamId, dayId: day.id, slotId: slot.id,
+                      product: row.product, createdAt: nowISO() });
+      });
+      s.days.sort((a, b) => a.date.localeCompare(b.date));
+      s.changeLog.unshift({ id: uid(), ts: nowISO(), user: 'system', action: '초기적재',
+        productName: '', teamName: '', from: '', to: '', detail: `최유라쇼 MD 입찰 ${seed.length}건 자동 적재` });
+    }
+    function persist(s) {
+      if (saveBackend) { saveBackend(s); return; }
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch (e) {}
+    }
+    // ----- 되돌리기(undo)/다시(redo) 이력 -----
+    const MAX_UNDO = 30;
+    let undoStack = [];
+    let redoStack = [];
+    let baseline = null; // 마지막 커밋 시점 상태(JSON)
+    function recordHistory() {
+      if (baseline !== null) {
+        undoStack.push(baseline);
+        if (undoStack.length > MAX_UNDO) undoStack.shift();
+        redoStack = [];
+      }
+      baseline = JSON.stringify(state);
+    }
+    function notify() { persist(state); subs.forEach((fn) => fn(state)); }
+    function emit() {
+      recordHistory();
+      notify();
+    }
+    function log(entry) {
+      state.changeLog.unshift({
+        id: uid(), ts: nowISO(), user: currentUser || '익명',
+        action: '', productName: '', teamName: '', from: '', to: '', detail: '',
+        ...entry,
+      });
+    }
+    // 변경 주체/시각 기록 (카드 "마지막 수정" 표시용)
+    function stamp(o) { if (o) { o.editedBy = currentUser || ''; o.editedAt = nowISO(); } return o; }
+
+    /* --- 조회 헬퍼 --- */
+    function findSlot(slotId) {
+      for (const day of state.days) {
+        const s = day.slots.find((x) => x.id === slotId);
+        if (s) return { day, slot: s };
+      }
+      return null;
+    }
+    function slotLabel(slotId) {
+      const f = findSlot(slotId);
+      if (!f) return '(삭제됨)';
+      const dnum = Number(f.day.date.slice(8));
+      const t = (f.slot.start && f.slot.end) ? `${f.slot.start}~${f.slot.end}` : (f.slot.label || '슬롯');
+      return `${dnum}일(${WEEKDAY_KO[f.day.weekday]}) ${t}`;
+    }
+    function teamName(teamId) {
+      const t = state.teams.find((x) => x.id === teamId);
+      return t ? t.name : '';
+    }
+    // 같은 시간대 슬롯이 있으면 재사용, 없으면 생성
+    function ensureSlotOnDay(day, start, end) {
+      let slot = day.slots.find((x) => x.start === start && x.end === end);
+      if (!slot) {
+        slot = { id: 'slot_' + uid(), start, end };
+        day.slots.push(slot);
+        day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
+      }
+      return slot;
+    }
+    function detailOf(pr) {
+      return { note: pr.note, issue: pr.issue, comp: pr.comp, prep: pr.prep, price: pr.price,
+               margin: pr.margin, sme: pr.sme, special: pr.special, isNew: pr.isNew, groupCode: pr.groupCode };
+    }
+    function placementFromBid(bid, slotId, programId) {
+      const pr = bid.product || {};
+      return {
+        id: uid(), slotId, programId, sourceBidId: bid.id, teamId: bid.teamId,
+        productName: pr.name, note: pr.note || '', memo: '', detail: detailOf(pr),
+        items: pr.items, durationMin: pr.durationMin || null,
+        pd: '', host: '', studio: '', moveCount: 0, createdAt: nowISO(),
+      };
+    }
+
+    /* =============================================================
+     *  변이 (mutations)
+     * ============================================================= */
+    const api = {
+      getState: () => state,
+      subscribe(fn) { subs.add(fn); return () => subs.delete(fn); },
+      // 로그인 식별 — 이 브라우저에서만 유지(서버 미동기화), 이후 모든 변경에 이름 기록
+      setUser(name) { currentUser = name || null; },
+      getUser: () => currentUser,
+
+      // ----- 저장 백엔드(Supabase) 연동 훅 -----
+      _snapshot: () => state,
+      _useBackend(saveFn) { saveBackend = saveFn; },
+      _hydrate(newState) { // 서버에서 받은 상태로 교체 (재저장 안 함, 이력 초기화)
+        state = newState; baseline = JSON.stringify(state); undoStack = []; redoStack = [];
+        subs.forEach((fn) => fn(state));
+      },
+
+      // ----- 되돌리기 / 다시 -----
+      undo() {
+        if (!undoStack.length) return false;
+        redoStack.push(JSON.stringify(state));
+        const prev = undoStack.pop();
+        state = JSON.parse(prev);
+        baseline = prev;
+        notify();
+        return true;
+      },
+      redo() {
+        if (!redoStack.length) return false;
+        undoStack.push(JSON.stringify(state));
+        const next = redoStack.pop();
+        state = JSON.parse(next);
+        baseline = next;
+        notify();
+        return true;
+      },
+      canUndo: () => undoStack.length,
+      canRedo: () => redoStack.length,
+
+      // ----- 유틸 노출 -----
+      util: { toMin, toHHMM, slotDuration, slotLabel, teamName, findSlot, WEEKDAY_KO, MAIN_PROGRAM },
+
+      /* ---------- 프로그램 ---------- */
+      setActiveProgram(programId) {
+        state.activeProgram = programId;
+        this.ensureMonth(state.view.year, state.view.month, programId);
+        emit();
+      },
+
+      /* ---------- 월/연 이동 ---------- */
+      // 활성 프로그램에 해당 월의 날(목/토)이 없으면 생성 (최유라쇼만 표준 자동생성)
+      ensureMonth(year, month, programId) {
+        const pid = programId || state.activeProgram || MAIN_PROGRAM;
+        if (pid !== MAIN_PROGRAM) return; // 그 외 프로그램은 엑셀 편성일만 사용
+        const prefix = `${year}-${String(month).padStart(2, '0')}`;
+        if (state.days.some((d) => d.programId === pid && d.date.startsWith(prefix))) return;
+        state.days = state.days.concat(buildYearDays(year, pid).filter((d) => d.date.startsWith(prefix)))
+          .sort((a, b) => a.date.localeCompare(b.date));
+      },
+      setView(year, month) {
+        this.ensureMonth(year, month);
+        state.view = { year, month };
+        emit();
+      },
+      shiftView(delta) {
+        let { year, month } = state.view;
+        month += delta;
+        while (month > 12) { month -= 12; year += 1; }
+        while (month < 1) { month += 12; year -= 1; }
+        this.setView(year, month);
+      },
+
+      /* ---------- 입찰 (MD) — 입력 즉시 편성표에 자동 반영 ---------- */
+      // {teamId, dayId, slotId?|(start,end), product, autoPlace=true}
+      addBid({ teamId, dayId, slotId, start, end, product, autoPlace = true }) {
+        const day = state.days.find((d) => d.id === dayId);
+        if (!day) return;
+        let slot = slotId ? day.slots.find((s) => s.id === slotId) : null;
+        if (!slot && start && end) slot = ensureSlotOnDay(day, start, end);
+        if (!slot) return;
+        const bid = stamp({ id: uid(), teamId, dayId, slotId: slot.id, product, createdAt: nowISO() });
+        state.bids.push(bid);
+        if (autoPlace) {
+          state.placements.push(stamp(placementFromBid(bid, slot.id, day.programId)));
+          log({ action: '입찰', productName: product.name, teamName: teamName(teamId),
+                to: slotLabel(slot.id), detail: `${teamName(teamId)} 입찰 → 편성표 자동반영` });
+        } else {
+          log({ action: '입찰등록', productName: product.name, teamName: teamName(teamId), to: slotLabel(slot.id) });
+        }
+        emit();
+        return bid;
+      },
+      updateBid(bidId, patch) {
+        const b = state.bids.find((x) => x.id === bidId);
+        if (!b) return;
+        if (patch.product) b.product = { ...b.product, ...patch.product };
+        const day = state.days.find((d) => d.id === b.dayId);
+        if (patch.start && patch.end && day) {
+          b.slotId = ensureSlotOnDay(day, patch.start, patch.end).id;
+        } else if (patch.slotId) b.slotId = patch.slotId;
+        // 연결된 편성(placement) 동기화
+        const pl = state.placements.find((p) => p.sourceBidId === bidId);
+        if (pl) {
+          pl.slotId = b.slotId; pl.productName = b.product.name;
+          pl.detail = detailOf(b.product); pl.items = b.product.items;
+          pl.durationMin = b.product.durationMin || null;
+          stamp(pl);
+        }
+        stamp(b);
+        log({ action: '입찰수정', productName: b.product.name, teamName: teamName(b.teamId),
+              to: slotLabel(b.slotId) });
+        emit();
+      },
+      deleteBid(bidId) {
+        const b = state.bids.find((x) => x.id === bidId);
+        if (!b) return;
+        state.bids = state.bids.filter((x) => x.id !== bidId);
+        state.placements = state.placements.filter((p) => p.sourceBidId !== bidId);
+        log({ action: '입찰삭제', productName: b.product.name, teamName: teamName(b.teamId) });
+        emit();
+      },
+
+      // 엑셀 일괄 가져오기: [{teamId, date, start, end, product}] → 날짜·시간대로 슬롯 매핑
+      importBids(list) {
+        let added = 0, newSlots = 0, newDays = 0, dup = 0;
+        (list || []).forEach((row) => {
+          let day = state.days.find((d) => d.programId === MAIN_PROGRAM && d.date === row.date);
+          if (!day) {
+            const dt = new Date(row.date + 'T00:00:00');
+            day = { id: 'day_' + MAIN_PROGRAM + '_' + row.date, programId: MAIN_PROGRAM,
+                    date: row.date, weekday: dt.getDay(), slots: [] };
+            state.days.push(day);
+            state.days.sort((a, b) => a.date.localeCompare(b.date));
+            newDays++;
+          }
+          let slot = day.slots.find((s) => s.start === row.start && s.end === row.end);
+          if (!slot) {
+            slot = { id: 'slot_' + uid(), start: row.start, end: row.end };
+            day.slots.push(slot);
+            day.slots.sort((a, b) => toMin(a.start) - toMin(b.start));
+            newSlots++;
+          }
+          const exists = state.bids.some((b) => b.teamId === row.teamId && b.slotId === slot.id &&
+            b.product && b.product.name === row.product.name);
+          if (exists) { dup++; return; }
+          state.bids.push({ id: uid(), teamId: row.teamId, dayId: day.id, slotId: slot.id,
+                            product: row.product, createdAt: nowISO() });
+          added++;
+        });
+        log({ action: '엑셀가져오기', detail: `입찰 ${added}건 추가` +
+              (newSlots ? ` · 시간대 ${newSlots}개 생성` : '') +
+              (newDays ? ` · 편성일 ${newDays}개 생성` : '') +
+              (dup ? ` · 중복 ${dup}건 제외` : '') });
+        emit();
+        return { added, newSlots, newDays, dup };
+      },
+
+      /* ---------- 편성 (PD) ---------- */
+      // 입찰을 슬롯에 편성
+      assignBid(bidId, slotId) {
+        const b = state.bids.find((x) => x.id === bidId);
+        if (!b) return;
+        const f = findSlot(slotId);
+        const pr = b.product || {};
+        const p = {
+          id: uid(), slotId, programId: f ? f.day.programId : MAIN_PROGRAM,
+          sourceBidId: bidId, teamId: b.teamId,
+          productName: pr.name, note: pr.note || '', memo: '',
+          detail: { note: pr.note, issue: pr.issue, comp: pr.comp, price: pr.price, margin: pr.margin, sme: pr.sme },
+          durationMin: pr.durationMin || null,
+          pd: '', host: '', studio: '', moveCount: 0, createdAt: nowISO(),
+        };
+        stamp(p);
+        state.placements.push(p);
+        log({ action: '편성', productName: p.productName, teamName: teamName(b.teamId),
+              from: '입찰풀', to: slotLabel(slotId) });
+        emit();
+        return p;
+      },
+      // 빈 카드(입찰 없이) 직접 편성
+      addPlacement(slotId, { productName, teamId, note }) {
+        const f = findSlot(slotId);
+        const p = {
+          id: uid(), slotId, programId: f ? f.day.programId : state.activeProgram,
+          sourceBidId: null, teamId: teamId || 'etc',
+          productName: productName || '(미정)', note: note || '', memo: '', detail: {}, durationMin: null,
+          pd: '', host: '', studio: '', moveCount: 0, createdAt: nowISO(),
+        };
+        stamp(p);
+        state.placements.push(p);
+        log({ action: '편성', productName: p.productName, teamName: teamName(p.teamId),
+              from: '신규', to: slotLabel(slotId) });
+        emit();
+        return p;
+      },
+      movePlacement(placementId, toSlotId) {
+        const p = state.placements.find((x) => x.id === placementId);
+        if (!p || p.slotId === toSlotId) return;
+        const fromLabel = slotLabel(p.slotId);
+        p.slotId = toSlotId;
+        p.moveCount = (p.moveCount || 0) + 1;
+        stamp(p);
+        log({ action: '이동', productName: p.productName, teamName: teamName(p.teamId),
+              from: fromLabel, to: slotLabel(toSlotId), detail: `${p.moveCount}회차 이동` });
+        emit();
+      },
+      removePlacement(placementId) {
+        const p = state.placements.find((x) => x.id === placementId);
+        if (!p) return;
+        state.placements = state.placements.filter((x) => x.id !== placementId);
+        log({ action: '편성제외', productName: p.productName, teamName: teamName(p.teamId),
+              from: slotLabel(p.slotId) });
+        emit();
+      },
+      updatePlacementMeta(placementId, patch) {
+        const p = state.placements.find((x) => x.id === placementId);
+        if (!p) return;
+        Object.assign(p, patch);
+        stamp(p);
+        log({ action: '배정변경', productName: p.productName, teamName: teamName(p.teamId),
+              detail: `PD:${p.pd||'-'} / 쇼호스트:${p.host||'-'} / 스튜디오:${p.studio||'-'}` });
+        emit();
+      },
+      // 최종편성안 직접 수정: { productName?, items?, detail:{note,comp,prep,price,margin,...} }
+      updatePlacementContent(placementId, patch) {
+        const p = state.placements.find((x) => x.id === placementId);
+        if (!p) return;
+        if (patch.productName !== undefined) p.productName = patch.productName;
+        if (patch.items !== undefined) p.items = patch.items;
+        if (patch.memo !== undefined) p.memo = patch.memo;
+        if (patch.detail) p.detail = { ...(p.detail || {}), ...patch.detail };
+        stamp(p);
+        log({ action: '편성수정', productName: p.productName, teamName: teamName(p.teamId),
+              detail: '최종편성안 직접수정' });
+        emit();
+      },
+
+      /* ---------- 슬롯/요일 편집 ---------- */
+      // 슬롯 시간 직접 수정 (입찰보드·편성표 인라인)
+      updateSlotTime(slotId, { start, end }) {
+        const f = findSlot(slotId);
+        if (!f) return;
+        const old = (f.slot.start && f.slot.end) ? `${f.slot.start}~${f.slot.end}` : (f.slot.label || '슬롯');
+        f.slot.start = start; f.slot.end = end;
+        delete f.slot.label;
+        f.day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
+        log({ action: '시간수정', from: old, to: `${start}~${end}`, detail: `${f.day.date} 시간 수정` });
+        emit();
+      },
+      updateSlotLabel(slotId, label) {
+        const f = findSlot(slotId);
+        if (!f) return;
+        const old = f.slot.label || '';
+        f.slot.label = label;
+        log({ action: '슬롯명수정', from: old, to: label });
+        emit();
+      },
+      splitSlot(slotId, firstMinutes) {
+        const f = findSlot(slotId);
+        if (!f) return;
+        const total = slotDuration(f.slot);
+        if (!firstMinutes || firstMinutes <= 0 || firstMinutes >= total) return;
+        const startMin = toMin(f.slot.start);
+        const mid = toHHMM(startMin + firstMinutes);
+        const second = { id: 'slot_' + uid(), start: mid, end: f.slot.end };
+        f.slot.end = mid;
+        const idx = f.day.slots.findIndex((s) => s.id === slotId);
+        f.day.slots.splice(idx + 1, 0, second);
+        log({ action: '시간분할', to: `${f.slot.start}~${mid} / ${mid}~${second.end}`,
+              detail: `${slotLabel(slotId)} 분할` });
+        emit();
+      },
+      // 시간대 추가({start,end}) 또는 순번 추가({order:true} → 다음 N부 자동)
+      addSlot(dayId, opts) {
+        const day = state.days.find((d) => d.id === dayId);
+        if (!day) return;
+        if (opts && opts.order) {
+          const n = day.slots.filter((s) => s.label).length + 1;
+          const slot = { id: 'slot_' + uid(), start: '', end: '', label: `${n}부` };
+          day.slots.push(slot);
+          log({ action: '순번추가', to: slot.label, detail: `${day.date} ${slot.label} 추가` });
+        } else {
+          const { start, end } = opts;
+          const slot = { id: 'slot_' + uid(), start, end };
+          day.slots.push(slot);
+          day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
+          log({ action: '시간추가', to: `${start}~${end}`, detail: `${day.date} 시간대 추가` });
+        }
+        emit();
+      },
+      removeSlot(slotId) {
+        const f = findSlot(slotId);
+        if (!f) return;
+        const had = state.placements.filter((p) => p.slotId === slotId);
+        state.bids = state.bids.filter((b) => b.slotId !== slotId);
+        state.placements = state.placements.filter((p) => p.slotId !== slotId);
+        const lbl = (f.slot.start && f.slot.end) ? `${f.slot.start}~${f.slot.end}` : (f.slot.label || '슬롯');
+        f.day.slots = f.day.slots.filter((s) => s.id !== slotId);
+        log({ action: '슬롯삭제', from: lbl,
+              detail: had.length ? `편성 ${had.length}건 함께 삭제` : '' });
+        emit();
+      },
+      addDay(dateStr) {
+        const pid = state.activeProgram || MAIN_PROGRAM;
+        if (state.days.some((d) => d.programId === pid && d.date === dateStr)) return;
+        const dt = new Date(dateStr);
+        const wd = dt.getDay();
+        const day = { id: 'day_' + pid + '_' + dateStr, programId: pid, date: dateStr, weekday: wd, slots: [] };
+        state.days.push(day);
+        state.days.sort((a, b) => a.date.localeCompare(b.date));
+        log({ action: '편성일추가', to: `${dateStr}(${WEEKDAY_KO[wd]})` });
+        emit();
+      },
+      removeDay(dayId) {
+        const day = state.days.find((d) => d.id === dayId);
+        if (!day) return;
+        const slotIds = new Set(day.slots.map((s) => s.id));
+        state.placements = state.placements.filter((p) => !slotIds.has(p.slotId));
+        state.days = state.days.filter((d) => d.id !== dayId);
+        log({ action: '편성일삭제', from: day.date });
+        emit();
+      },
+
+      // 입찰보드의 입찰을 편성표로 일괄 반영 (해당 월 기존 편성은 지우고 입찰로 채움)
+      fillScheduleFromBids(year, month, programId) {
+        const pid = programId || state.activeProgram;
+        const ids = this.monthSlotIds(year, month, pid);
+        const prefix = `${year}-${String(month).padStart(2, '0')}`;
+        const monthDayIds = new Set(state.days
+          .filter((d) => d.programId === pid && d.date.startsWith(prefix)).map((d) => d.id));
+        // 1) 해당 월의 기존 편성 삭제
+        const removed = state.placements.filter((p) => ids.has(p.slotId)).length;
+        state.placements = state.placements.filter((p) => !ids.has(p.slotId));
+        // 2) 해당 월의 입찰을 편성으로 생성
+        let placed = 0;
+        state.bids.filter((b) => monthDayIds.has(b.dayId)).forEach((b) => {
+          state.placements.push(placementFromBid(b, b.slotId, pid));
+          placed++;
+        });
+        // 3) 입찰·편성이 없는 비표준 빈 슬롯 정리 (옛 확정편성 잔여 슬롯 제거)
+        state.days.filter((d) => monthDayIds.has(d.id)).forEach((d) => {
+          d.slots = d.slots.filter((s) => s.std
+            || state.bids.some((b) => b.slotId === s.id)
+            || state.placements.some((p) => p.slotId === s.id));
+        });
+        log({ action: '입찰일괄편성', detail: `${year}년 ${month}월 — 기존 ${removed}건 삭제 · 입찰 ${placed}건 편성반영` });
+        emit();
+        return { removed, placed };
+      },
+
+      /* ---------- 편성안 저장(스냅샷) ---------- */
+      monthSlotIds(year, month, programId) {
+        const pid = programId || state.activeProgram;
+        const prefix = `${year}-${String(month).padStart(2, '0')}`;
+        const ids = new Set();
+        state.days.filter((d) => d.programId === pid && d.date.startsWith(prefix))
+          .forEach((d) => d.slots.forEach((s) => ids.add(s.id)));
+        return ids;
+      },
+      // 현재 월의 편성을 스냅샷으로 저장
+      saveSnapshot(year, month, label) {
+        if (!state.snapshots) state.snapshots = [];
+        const programId = state.activeProgram;
+        const ids = this.monthSlotIds(year, month, programId);
+        const pls = state.placements.filter((p) => ids.has(p.slotId)).map((p) => ({ ...p }));
+        const snap = {
+          id: uid(), ts: nowISO(), year, month, programId, label: label || '',
+          user: currentUser || '익명', placements: pls, count: pls.length,
+        };
+        state.snapshots.unshift(snap);
+        log({ action: '편성저장',
+              detail: `${year}년 ${month}월 편성 ${pls.length}건 저장${label ? ' · ' + label : ''}` });
+        emit();
+        return snap;
+      },
+      restoreSnapshot(id) {
+        const snap = (state.snapshots || []).find((s) => s.id === id);
+        if (!snap) return;
+        const ids = this.monthSlotIds(snap.year, snap.month, snap.programId);
+        state.placements = state.placements.filter((p) => !ids.has(p.slotId));
+        let restored = 0, missing = 0;
+        snap.placements.forEach((p) => {
+          if (ids.has(p.slotId)) { state.placements.push({ ...p, id: uid() }); restored++; }
+          else missing++;
+        });
+        log({ action: '편성복원',
+              detail: `${snap.year}년 ${snap.month}월 ${restored}건 복원${missing ? ` · ${missing}건 누락(시간대 변경)` : ''}` });
+        emit();
+        return { restored, missing };
+      },
+      deleteSnapshot(id) {
+        const snap = (state.snapshots || []).find((s) => s.id === id);
+        if (!snap) return;
+        state.snapshots = state.snapshots.filter((s) => s.id !== id);
+        log({ action: '저장본삭제', detail: `${snap.year}년 ${snap.month}월 저장본 삭제` });
+        emit();
+      },
+
+      /* ---------- 전체 초기화 ---------- */
+      resetAll() {
+        state = seedState();
+        applyProgramSeed(state);
+        applySeedBids(state);
+        emit();
+      },
+    };
+
+    return api;
+  }
+
+  /* ===================================================================
+   *  Supabase 연결 (단일 문서 동기화 + Realtime)
+   *  - 앱 상태 전체를 app_state(id='main') 한 행에 jsonb로 저장
+   *  - 변경 시 디바운스 업서트, 다른 접속자에는 Realtime으로 즉시 반영
+   * =================================================================== */
+  function connectSupabase(store, cfg) {
+    const client = global.supabase.createClient(cfg.url, cfg.key);
+    let ready = false;
+    let serverOk = true;   // 테이블 미생성 등으로 실패하면 false → 로컬 모드
+    let timer = null;
+    const myRevs = new Set(); // 내가 보낸 저장의 nonce (echo 식별용)
+    const status = (s) => global.__SB_STATUS && global.__SB_STATUS(s);
+    function disableServer(reason) {
+      if (!serverOk) return;
+      serverOk = false;
+      console.warn('[supabase] 서버 저장 비활성화 → 로컬(localStorage) 모드. 이유:', reason,
+        '\napp_state 테이블 생성 SQL 실행 후 새로고침하면 서버 동기화가 켜집니다.');
+      status('local');
+    }
+
+    store._useBackend((state) => {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {} // 로컬 폴백
+      if (!ready || !serverOk) return;
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        try {
+          const rev = uid() + uid();
+          state._rev = rev; // 데이터 안에 nonce → realtime echo 식별
+          myRevs.add(rev);
+          if (myRevs.size > 20) myRevs.delete(myRevs.values().next().value);
+          const { error } = await client.from('app_state')
+            .upsert({ id: 'main', data: state, updated_at: new Date().toISOString() });
+          if (error) disableServer(error.message);
+          else status('saved');
+        } catch (e) { disableServer(e.message); }
+      }, 600);
+    });
+
+    (async () => {
+      try {
+        const { data, error } = await client.from('app_state')
+          .select('data').eq('id', 'main').maybeSingle();
+        if (error) { disableServer(error.message); ready = true; return; }
+        if (data && data.data) store._hydrate(data.data);
+        else await client.from('app_state').upsert({ id: 'main', data: store._snapshot(), updated_at: new Date().toISOString() });
+        ready = true;
+        status('connected');
+        client.channel('app_state_main')
+          .on('postgres_changes',
+            { event: '*', schema: 'public', table: 'app_state', filter: 'id=eq.main' },
+            (payload) => {
+              const incoming = payload.new && payload.new.data;
+              if (!incoming) return;
+              if (incoming._rev && myRevs.has(incoming._rev)) return; // 내가 보낸 변경(echo) 무시
+              store._hydrate(incoming);
+            })
+          .subscribe();
+      } catch (e) { disableServer(e.message); ready = true; }
+    })();
+    return store;
+  }
+
+  global.createDataStore = function () {
+    const store = LocalStore();
+    const cfg = global.SUPABASE;
+    if (cfg && cfg.enabled && global.supabase && global.supabase.createClient) {
+      return connectSupabase(store, cfg);
+    }
+    return store;
+  };
+  global.SchedulerConstants = { TEAMS, WEEKDAY_KO };
+})(window);

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>최유라쇼 편성 스케줄러</title>
+
+  <!-- Pretendard 폰트 -->
+  <link rel="stylesheet" as="style" crossorigin
+        href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+
+  <!-- Tailwind (Play CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Pretendard', 'system-ui', 'sans-serif'] },
+          colors: {
+            brand: { DEFAULT: '#da291c', dark: '#b21f14', light: '#fde8e6' },
+            ink:   { DEFAULT: '#1f2937', soft: '#6b7280' },
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- React (UMD, 클래식 스크립트 → file:// 더블클릭 동작) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- htm: 빌드 없이 JSX 유사 문법 -->
+  <script crossorigin src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
+  <!-- Supabase JS (멀티유저 / 서버 저장) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    html, body { height: 100%; }
+    body { background: #f1f5f9; color: #1f2937; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    .drop-active { outline: 2px dashed #da291c; outline-offset: -3px; background: #fde8e6 !important; }
+    .card-drag { cursor: grab; }
+    .card-drag:active { cursor: grabbing; }
+    [draggable="true"] { -webkit-user-drag: element; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- Supabase 연결 설정 -->
+  <script src="supabaseConfig.js?v=29"></script>
+  <!-- 역할별 공용 비밀번호 / 권한 -->
+  <script src="authConfig.js?v=29"></script>
+  <!-- 데이터 계층 (클래식 스크립트) -->
+  <script src="dataStore.js?v=29"></script>
+  <!-- 엑셀: 최유라쇼 MD 입찰 시드 -->
+  <script src="bidSeed.js?v=29"></script>
+  <!-- 엑셀: 14개 테마PGM 확정편성안 시드 -->
+  <script src="programSeed.js?v=29"></script>
+  <!-- 프로그램별 입찰팀 + 작성항목 스키마 -->
+  <script src="programConfig.js?v=29"></script>
+  <!-- 앱 (htm, 클래식 스크립트) -->
+  <script src="app.js?v=29"></script>
+</body>
+</html>
