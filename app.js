@@ -1492,12 +1492,15 @@
     const teamList = role === 'md'
       ? (window.AUTH.mdTeams || Array.from(new Set((teams || []).map((t) => t.name))))
       : (window.AUTH.pdTeams || []);
+    const needsTeam = role !== 'admin'; // 관리자는 비밀번호만 입력
     function submit(e) {
       e && e.preventDefault();
-      if (!team) { setErr('팀(소속)을 선택하세요.'); return; }
-      if (!name.trim()) { setErr('이름을 입력하세요.'); return; }
+      if (needsTeam) {
+        if (!team) { setErr('팀(소속)을 선택하세요.'); return; }
+        if (!name.trim()) { setErr('이름을 입력하세요.'); return; }
+      }
       if (pw !== r.password) { setErr('비밀번호가 올바르지 않습니다.'); return; }
-      onLogin({ role, team, name: name.trim() });
+      onLogin(needsTeam ? { role, team, name: name.trim() } : { role, team: '', name: '관리자' });
     }
     return html`
       <div class="min-h-screen grid place-items-center bg-slate-100 p-4">
@@ -1520,6 +1523,7 @@
               </button>`)}
           </div>
           <div class="mt-4 space-y-2.5">
+            ${needsTeam && html`
             <label class="block">
               <div class="text-[12px] font-medium text-ink-soft mb-1">팀 / 소속 <span class="text-brand">*</span></div>
               <select value=${team} onChange=${(e) => setTeam(e.target.value)} class=${inputCls}>
@@ -1531,12 +1535,13 @@
               <div class="text-[12px] font-medium text-ink-soft mb-1">이름 <span class="text-brand">*</span></div>
               <input value=${name} onInput=${(e) => setName(e.target.value)} class=${inputCls}
                 placeholder="예: 홍길동" />
-            </label>
+            </label>`}
             <label class="block">
               <div class="text-[12px] font-medium text-ink-soft mb-1">${r.label} 공용 비밀번호 <span class="text-brand">*</span></div>
-              <input type="password" value=${pw} onInput=${(e) => setPw(e.target.value)} class=${inputCls} placeholder="비밀번호" />
+              <input type="password" value=${pw} onInput=${(e) => setPw(e.target.value)} class=${inputCls} placeholder="비밀번호" autofocus=${!needsTeam} />
             </label>
           </div>
+          ${!needsTeam && html`<div class="mt-2 text-[12px] text-ink-soft">관리자는 비밀번호만 입력하면 입장합니다.</div>`}
           ${err && html`<div class="mt-2 text-[12px] text-brand">${err}</div>`}
           <button type="submit" class="mt-4 w-full py-2 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark">입장</button>
           <div class="mt-3 text-[11px] text-slate-400 leading-relaxed">
