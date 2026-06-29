@@ -1490,7 +1490,7 @@
     const r = roles[role];
     // 팀 목록: MD = 앱 전체 팀, PD = 지정 PD 구분
     const teamList = role === 'md'
-      ? Array.from(new Set((teams || []).map((t) => t.name)))
+      ? (window.AUTH.mdTeams || Array.from(new Set((teams || []).map((t) => t.name))))
       : (window.AUTH.pdTeams || []);
     function submit(e) {
       e && e.preventDefault();
