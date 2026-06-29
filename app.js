@@ -570,6 +570,20 @@
         const canvas = await window.html2canvas(el, {
           backgroundColor: '#ffffff', scale: 2, useCORS: true,
           windowWidth: el.scrollWidth, width: el.scrollWidth, height: el.scrollHeight,
+          onclone: (doc) => {
+            // html2canvas 는 <input> 텍스트를 세로로 잘리게 렌더 → 같은 모양 <div>로 치환(클론에서만)
+            const root = doc.getElementById('final-capture');
+            if (!root) return;
+            root.querySelectorAll('input, textarea').forEach((inp) => {
+              const div = doc.createElement('div');
+              div.textContent = inp.value || '';
+              div.className = inp.className;
+              div.style.whiteSpace = 'pre-wrap';
+              div.style.lineHeight = '1.5';
+              div.style.minHeight = '1.5em';
+              inp.parentNode.replaceChild(div, inp);
+            });
+          },
         });
         const a = document.createElement('a');
         a.download = `${prog.name}_${year}-${String(month).padStart(2, '0')}_최종편성안.png`;
@@ -610,7 +624,7 @@
             class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand disabled:opacity-50">
             ${saving ? '이미지 생성 중…' : '🖼 이미지 저장 (PNG)'}</button>
         </div>
-        <div ref=${capRef} class="bg-white rounded-lg shadow-sm overflow-hidden max-w-[1500px]">
+        <div ref=${capRef} id="final-capture" class="bg-white rounded-lg shadow-sm overflow-hidden max-w-[1500px]">
           <div class="px-3 py-2 border-b-2 border-brand text-[13px] font-bold text-ink">
             ${prog.name} · ${year}년 ${month}월 최종편성안 <span class="font-normal text-ink-soft">(총 ${total}편성)</span>
           </div>
