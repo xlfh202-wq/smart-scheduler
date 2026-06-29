@@ -144,6 +144,7 @@
   function LocalStore() {
     let saveBackend = null; // 설정 시 localStorage 대신 이 함수로 저장 (Supabase 등)
     let currentUser = null; // 로그인한 사용자 표시명 — 이 브라우저 한정(서버 동기화 안 함)
+    let backupAPI = null;   // Supabase 백업/복원 구현 (connectSupabase 에서 주입)
     let state = load();
     const subs = new Set();
 
@@ -312,6 +313,22 @@
       _hydrate(newState) { // 서버에서 받은 상태로 교체 (재저장 안 함, 이력 초기화)
         state = newState; baseline = JSON.stringify(state); undoStack = []; redoStack = [];
         subs.forEach((fn) => fn(state));
+      },
+
+      // ----- 백업 / 복원 -----
+      _setBackupAPI(api) { backupAPI = api; },
+      backupNow() { return backupAPI ? backupAPI.now('manual') : Promise.resolve({ error: '서버 연결 시에만 백업할 수 있습니다.' }); },
+      listBackups() { return backupAPI ? backupAPI.list() : Promise.resolve({ items: [], error: '서버 미연결' }); },
+      restoreBackup(id) { return backupAPI ? backupAPI.restore(id) : Promise.resolve({ error: '서버 미연결' }); },
+      exportJSON() { return JSON.stringify(state, null, 2); },
+      // 백업 시점 데이터로 전체 교체 → notify() 가 서버('main')에도 저장하여 다른 접속자에 전파
+      _applyRestore(data) {
+        state = data;
+        state.changeLog = state.changeLog || [];
+        state.changeLog.unshift({ id: uid(), ts: nowISO(), user: currentUser || '익명',
+          action: '백업복원', productName: '', teamName: '', from: '', to: '', detail: '백업 시점으로 전체 복원' });
+        baseline = JSON.stringify(state); undoStack = []; redoStack = [];
+        notify();
       },
 
       // ----- 되돌리기 / 다시 -----
@@ -575,12 +592,12 @@
         if (!day) return;
         if (opts && opts.order) {
           const n = day.slots.filter((s) => s.label).length + 1;
-          const slot = { id: 'slot_' + uid(), start: '', end: '', label: `${n}부` };
+          const slot = { id: 'slot_' + uid(), start: '', end: '', label: `${n}부`, manual: true };
           day.slots.push(slot);
           log({ action: '순번추가', to: slot.label, detail: `${day.date} ${slot.label} 추가` });
         } else {
           const { start, end } = opts;
-          const slot = { id: 'slot_' + uid(), start, end };
+          const slot = { id: 'slot_' + uid(), start, end, manual: true };
           day.slots.push(slot);
           day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
           log({ action: '시간추가', to: `${start}~${end}`, detail: `${day.date} 시간대 추가` });
@@ -740,10 +757,63 @@
           const { error } = await client.from('app_state')
             .upsert({ id: 'main', data: state, updated_at: new Date().toISOString() });
           if (error) disableServer(error.message);
-          else status('saved');
+          else { status('saved'); maybeAutoBackup(); }
         } catch (e) { disableServer(e.message); }
       }, 600);
     });
+
+    /* ----- 백업/복원 (app_state 테이블에 id='backup_...' 행으로 보관) ----- */
+    const BK_PREFIX = 'backup_';
+    const AUTO_MIN = 60; // 변경이 있으면 최대 N분마다 1회 자동 백업
+    const lastAutoTs = () => Number(localStorage.getItem('sched-last-autobackup') || 0);
+    const setLastAutoTs = (t) => { try { localStorage.setItem('sched-last-autobackup', String(t)); } catch (e) {} };
+    async function doBackup(kind) {
+      try {
+        const snap = JSON.parse(JSON.stringify(store._snapshot()));
+        delete snap._rev;
+        const id = BK_PREFIX + new Date().toISOString().replace(/[:.]/g, '-') + '_' + (kind || 'auto');
+        const { error } = await client.from('app_state')
+          .upsert({ id, data: snap, updated_at: new Date().toISOString() });
+        if (error) return { error: error.message };
+        if (kind === 'auto') setLastAutoTs(Date.now());
+        pruneBackups();
+        return { ok: true, id };
+      } catch (e) { return { error: e.message }; }
+    }
+    function maybeAutoBackup() {
+      if (!serverOk) return;
+      if (Date.now() - lastAutoTs() >= AUTO_MIN * 60000) doBackup('auto');
+    }
+    async function listBackups() {
+      try {
+        const { data, error } = await client.from('app_state')
+          .select('id,updated_at').like('id', BK_PREFIX + '%')
+          .order('updated_at', { ascending: false }).limit(80);
+        if (error) return { items: [], error: error.message };
+        return { items: (data || []).map((r) => ({ id: r.id, ts: r.updated_at,
+          kind: r.id.endsWith('_manual') ? 'manual' : 'auto' })) };
+      } catch (e) { return { items: [], error: e.message }; }
+    }
+    async function restoreBackup(id) {
+      try {
+        const { data, error } = await client.from('app_state').select('data').eq('id', id).maybeSingle();
+        if (error || !data || !data.data) return { error: (error && error.message) || '백업을 찾을 수 없습니다.' };
+        await doBackup('auto'); // 복원 직전 현재 상태도 자동 백업(되돌리기 안전망)
+        const d = data.data; delete d._rev;
+        store._applyRestore(d);
+        return { ok: true };
+      } catch (e) { return { error: e.message }; }
+    }
+    async function pruneBackups(keep = 60) {
+      try {
+        const { data } = await client.from('app_state').select('id').like('id', BK_PREFIX + '%')
+          .order('updated_at', { ascending: false });
+        if (!data || data.length <= keep) return;
+        const old = data.slice(keep).map((r) => r.id);
+        if (old.length) await client.from('app_state').delete().in('id', old);
+      } catch (e) {}
+    }
+    store._setBackupAPI({ now: doBackup, list: listBackups, restore: restoreBackup });
 
     (async () => {
       try {
@@ -754,6 +824,7 @@
         else await client.from('app_state').upsert({ id: 'main', data: store._snapshot(), updated_at: new Date().toISOString() });
         ready = true;
         status('connected');
+        maybeAutoBackup(); // 접속 시 마지막 자동백업이 오래됐으면 1회 백업
         client.channel('app_state_main')
           .on('postgres_changes',
             { event: '*', schema: 'public', table: 'app_state', filter: 'id=eq.main' },

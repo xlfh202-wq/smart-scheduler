@@ -227,13 +227,13 @@
             class=${`text-xs px-2.5 py-1 rounded-full border ${mode === 'order' ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft'}`}>순번 (N부)</button>
         </div>
         ${mode === 'time'
-          ? html`<${Field} label=${`방송 시간 — ${dur}분`}>
+          ? html`<${Field} label=${`방송 시간 (24시간) — ${dur}분`}>
               <div class="flex items-center gap-1.5">
-                <input type="time" value=${s} onInput=${(ev) => setS(ev.target.value)} class=${inputCls} />
+                <${TimeInput} value=${s} onChange=${setS} />
                 <span class="text-ink-soft">~</span>
-                <input type="time" value=${e} onInput=${(ev) => setE(ev.target.value)} class=${inputCls} />
+                <${TimeInput} value=${e} onChange=${setE} />
               </div>
-              <div class="text-[11px] text-ink-soft mt-1">큰 띠 안에서 자유롭게 (예: 20:45~21:05 = 20분)</div>
+              <div class="text-[11px] text-ink-soft mt-1">24시간제 (예: 20:45~21:05 = 20분)</div>
             <//>`
           : html`<${Field} label="순번명"><input value=${label} onInput=${(ev) => setLabel(ev.target.value)} class=${inputCls} placeholder="예: 1부" /><//>`}
       <//>`;
@@ -344,10 +344,10 @@
     return html`
       <${Modal} title=${`${fmtDay(day)} · 시간대 추가`} onClose=${onClose} onSave=${save}>
         <div class="grid grid-cols-2 gap-3">
-          <${Field} label="시작 시간"><input type="time" value=${start} onInput=${(e) => setStart(e.target.value)} class=${inputCls} /><//>
-          <${Field} label="종료 시간"><input type="time" value=${end} onInput=${(e) => setEnd(e.target.value)} class=${inputCls} /><//>
+          <${Field} label="시작 시간 (24시간)"><${TimeInput} value=${start} onChange=${setStart} /><//>
+          <${Field} label="종료 시간 (24시간)"><${TimeInput} value=${end} onChange=${setEnd} /><//>
         </div>
-        <div class="text-[12px] text-ink-soft">특별편성 등으로 앞뒤 시간대를 추가할 수 있습니다.</div>
+        <div class="text-[12px] text-ink-soft">24시간제로 입력하세요 (예: 20:45). 특별편성 등으로 앞뒤 시간대를 추가할 수 있습니다.</div>
       <//>`;
   }
 
@@ -802,7 +802,7 @@
           </div>
           ${days.length === 0 && html`<div class="text-sm text-slate-400 py-8 text-center">이 달에는 편성일이 없습니다. 위 “+ 편성일 추가”로 추가하세요.</div>`}
           ${days.map((day) => {
-            const shownSlots = day.slots.filter((slot) => !isMain || slot.std || state.bids.some((b) => b.slotId === slot.id));
+            const shownSlots = day.slots.filter((slot) => !isMain || slot.std || slot.manual || state.bids.some((b) => b.slotId === slot.id));
             return html`
             <div key=${day.id} class="rounded-xl border border-slate-200 bg-white overflow-hidden">
               <div class="flex items-center justify-between px-3 py-1.5 bg-slate-100">
@@ -963,11 +963,11 @@
                 <select value=${slotId} onChange=${(e) => setSlotId(e.target.value)} class=${inputCls}>
                   ${day.slots.map((s) => html`<option key=${s.id} value=${s.id}>${slotName(s)}</option>`)}
                 </select><//>`
-            : html`<${Field} label=${`방송 시간 — ${durMin}분`}>
+            : html`<${Field} label=${`방송 시간 (24시간) — ${durMin}분`}>
                 <div class="flex items-center gap-1.5">
-                  <input type="time" value=${start} onInput=${(e) => setStart(e.target.value)} class=${inputCls} />
+                  <${TimeInput} value=${start} onChange=${setStart} />
                   <span class="text-ink-soft">~</span>
-                  <input type="time" value=${end} onInput=${(e) => setEnd(e.target.value)} class=${inputCls} />
+                  <${TimeInput} value=${end} onChange=${setEnd} />
                 </div><//>`}
         </div>
         ${!orderMode && bands.length > 0 && html`
@@ -1081,9 +1081,105 @@
   }
 
   /* =====================================================================
+   *  백업 / 복원
+   * ===================================================================== */
+  function BackupModal({ onClose }) {
+    const [items, setItems] = useState(null);
+    const [busy, setBusy] = useState('');
+    const [msg, setMsg] = useState('');
+    async function refresh() {
+      const r = await store.listBackups();
+      setItems(r.items || []);
+      if (r.error) setMsg('목록 오류: ' + r.error);
+    }
+    useEffect(() => { refresh(); }, []);
+    async function backupNow() {
+      setBusy('now'); setMsg('');
+      const r = await store.backupNow();
+      setBusy('');
+      setMsg(r.ok ? '✓ 백업 완료' : '백업 실패: ' + (r.error || ''));
+      refresh();
+    }
+    async function restore(id) {
+      if (!confirm('이 시점으로 전체 데이터(입찰·편성·시간대·이력)를 되돌립니다.\n현재 상태는 복원 직전 자동 백업되니 안심하세요. 계속할까요?')) return;
+      setBusy(id); setMsg('');
+      const r = await store.restoreBackup(id);
+      setBusy('');
+      if (r.ok) { onClose(); } else setMsg('복원 실패: ' + (r.error || ''));
+    }
+    function download() {
+      try {
+        const blob = new Blob([store.exportJSON()], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `scheduler-backup-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      } catch (e) { setMsg('내보내기 실패: ' + e.message); }
+    }
+    return html`
+      <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick=${onClose}>
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick=${(e) => e.stopPropagation()}>
+          <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200">
+            <h3 class="font-bold text-ink">백업 / 복원</h3>
+            <button onClick=${onClose} class="text-ink-soft hover:text-brand text-lg leading-none">✕</button>
+          </div>
+          <div class="px-4 py-3 border-b border-slate-200 flex items-center gap-2 flex-wrap">
+            <button onClick=${backupNow} disabled=${busy === 'now'}
+              class="text-[13px] font-semibold px-3 py-1.5 rounded bg-brand text-white hover:bg-brand-dark disabled:opacity-50">
+              ${busy === 'now' ? '백업 중…' : '지금 백업'}</button>
+            <button onClick=${download}
+              class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand">JSON 내보내기</button>
+            <button onClick=${refresh}
+              class="text-[13px] px-2.5 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand">새로고침</button>
+            ${msg && html`<span class="text-[12px] ${msg.startsWith('✓') ? 'text-emerald-600' : 'text-brand'}">${msg}</span>`}
+          </div>
+          <div class="px-4 py-2 text-[11px] text-ink-soft border-b border-slate-100 bg-slate-50">
+            변경이 있으면 <b>최대 1시간마다 자동 백업</b>되고, 복원 직전에도 자동 백업됩니다. 최근 60개 보관(이전 것은 자동 삭제).
+          </div>
+          <div class="flex-1 overflow-y-auto">
+            ${items === null
+              ? html`<div class="text-center text-slate-400 py-10 text-sm">불러오는 중…</div>`
+              : items.length === 0
+                ? html`<div class="text-center text-slate-400 py-10 text-sm">백업이 없습니다. “지금 백업”을 눌러 첫 백업을 만드세요.</div>`
+                : html`<table class="w-full text-[13px]">
+                    <thead class="sticky top-0 bg-slate-50 text-ink-soft text-left">
+                      <tr><th class="px-4 py-2 font-medium">백업 시각</th><th class="px-3 py-2 font-medium">종류</th><th class="px-3 py-2 font-medium text-right">동작</th></tr>
+                    </thead>
+                    <tbody>
+                      ${items.map((b) => html`
+                        <tr key=${b.id} class="border-t border-slate-100 hover:bg-slate-50">
+                          <td class="px-4 py-2 tabular-nums whitespace-nowrap">${fmtTs(b.ts)}</td>
+                          <td class="px-3 py-2"><${Badge} color=${b.kind === 'manual' ? '#da291c' : '#0891b2'}>${b.kind === 'manual' ? '수동' : '자동'}<//></td>
+                          <td class="px-3 py-2 text-right">
+                            <button onClick=${() => restore(b.id)} disabled=${busy === b.id}
+                              class="text-[12px] text-brand hover:underline disabled:opacity-50">${busy === b.id ? '복원 중…' : '이 시점으로 복원'}</button>
+                          </td>
+                        </tr>`)}
+                    </tbody>
+                  </table>`}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  /* =====================================================================
    *  공용 모달 / 폼 요소
    * ===================================================================== */
   const inputCls = 'w-full text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none';
+  // 24시간제 시간 입력 (오전/오후 없이 HH:MM) — type=time 의 로케일 12시간 표기 회피
+  function normTime(v) {
+    v = String(v == null ? '' : v).replace(/[^\d:]/g, '');
+    if (v.indexOf(':') === -1 && v.length >= 3) v = v.slice(0, 2) + ':' + v.slice(2, 4);
+    const i = v.indexOf(':');
+    if (i !== -1) v = v.slice(0, i + 1) + v.slice(i + 1).replace(/:/g, '');
+    return v.slice(0, 5);
+  }
+  function TimeInput({ value, onChange, className }) {
+    return html`<input type="text" inputmode="numeric" maxlength="5" value=${value || ''}
+      onInput=${(e) => onChange(normTime(e.target.value))}
+      placeholder="20:45" class=${`${className || inputCls} tabular-nums`} />`;
+  }
   function Field({ label, children }) {
     return html`<label class="block"><div class="text-[12px] font-medium text-ink-soft mb-1">${label}</div>${children}</label>`;
   }
@@ -1238,6 +1334,7 @@
     const [auth, setAuth] = useState(loadAuth);
     const [tab, setTab] = useState('schedule'); // schedule | bids | final
     const [history, setHistory] = useState(false);
+    const [backup, setBackup] = useState(false);
     const [sbStatus, setSbStatus] = useState(
       (window.SUPABASE && window.SUPABASE.enabled) ? 'connecting' : null);
     useEffect(() => {
@@ -1345,6 +1442,9 @@
                 class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand">
                 변경 이력 <span class="text-[11px] text-ink-soft">(${state.changeLog.length})</span>
               </button>
+              ${roleCfg.canManage && html`<button onClick=${() => setBackup(true)}
+                class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand"
+                title="자동 백업 목록 / 특정 시점으로 복원">백업/복원</button>`}
               ${roleCfg.canManage && html`<button onClick=${() => confirm('모든 데이터를 초기화할까요?') && store.resetAll()}
                 class="text-[12px] px-2 py-1.5 rounded text-ink-soft hover:text-brand" title="초기화">초기화</button>`}
               <button onClick=${logout}
@@ -1362,6 +1462,7 @@
         </main>
 
         ${history && html`<${HistoryModal} state=${state} onClose=${() => setHistory(false)} />`}
+        ${backup && html`<${BackupModal} onClose=${() => setBackup(false)} />`}
       </div>`;
   }
   const tabCls = (active) =>
