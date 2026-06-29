@@ -566,31 +566,46 @@
       const el = capRef.current;
       if (!window.html2canvas || !el) { alert('이미지 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.'); return; }
       setSaving(true);
+      let clone = null;
       try {
-        const canvas = await window.html2canvas(el, {
-          backgroundColor: '#ffffff', scale: 2, useCORS: true,
-          windowWidth: el.scrollWidth, width: el.scrollWidth, height: el.scrollHeight,
-          onclone: (doc) => {
-            // html2canvas 는 <input> 텍스트를 세로로 잘리게 렌더 → 같은 모양 <div>로 치환(클론에서만)
-            const root = doc.getElementById('final-capture');
-            if (!root) return;
-            root.querySelectorAll('input, textarea').forEach((inp) => {
-              const div = doc.createElement('div');
-              div.textContent = inp.value || '';
-              div.className = inp.className;
-              div.style.whiteSpace = 'pre-wrap';
-              div.style.lineHeight = '1.5';
-              div.style.minHeight = '1.5em';
-              inp.parentNode.replaceChild(div, inp);
-            });
-          },
+        // 화면 밖에 복제본을 만들어 "컴팩트 모드"로 캡처 (원본 표·편집은 그대로)
+        const liveFields = el.querySelectorAll('input, textarea');
+        clone = el.cloneNode(true);
+        clone.id = '';
+        // 입력칸 → 정적 텍스트(세로 잘림 방지) + 본문 글자 키움
+        clone.querySelectorAll('input, textarea').forEach((cf, i) => {
+          const div = document.createElement('div');
+          div.textContent = liveFields[i] ? liveFields[i].value : '';
+          div.className = cf.className;
+          div.style.whiteSpace = 'pre-wrap';
+          div.style.lineHeight = '1.3';
+          div.style.fontSize = '14px';
+          div.style.padding = '0';
+          cf.parentNode.replaceChild(div, cf);
         });
+        // 표를 내용 폭으로(불필요한 가로 여백 제거) + 글자 키움 + 행 여백 축소
+        clone.style.width = 'max-content';
+        clone.style.maxWidth = 'none';
+        const table = clone.querySelector('table');
+        if (table) table.style.width = 'auto';
+        const thead = clone.querySelector('thead');
+        if (thead) thead.style.position = 'static';
+        clone.querySelectorAll('th').forEach((c) => { c.style.padding = '5px 9px'; c.style.fontSize = '13.5px'; });
+        clone.querySelectorAll('td').forEach((c) => {
+          c.style.padding = '4px 9px'; c.style.lineHeight = '1.3'; c.style.fontSize = '14px';
+          c.style.maxWidth = '260px'; // 긴 문장 칸은 적당히 줄바꿈해 폭 제한
+        });
+        clone.style.position = 'fixed';
+        clone.style.left = '-100000px';
+        clone.style.top = '0';
+        document.body.appendChild(clone);
+        const canvas = await window.html2canvas(clone, { backgroundColor: '#ffffff', scale: 2, useCORS: true });
         const a = document.createElement('a');
         a.download = `${prog.name}_${year}-${String(month).padStart(2, '0')}_최종편성안.png`;
         a.href = canvas.toDataURL('image/png');
         document.body.appendChild(a); a.click(); a.remove();
       } catch (e) { alert('이미지 저장 실패: ' + e.message); }
-      setSaving(false);
+      finally { if (clone && clone.parentNode) clone.parentNode.removeChild(clone); setSaving(false); }
     }
     const days = daysInView(state).slice().sort((a, b) => a.date.localeCompare(b.date));
     const slotStart = (s) => (s.start ? U.toMin(s.start) : 9999);
