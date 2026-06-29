@@ -65,8 +65,19 @@
     '#7c3aed', '#d97706', '#0d9488', '#e11d48', '#4f46e5', '#65a30d', '#9333ea', '#475569'];
   // 영스타일 수/금 → 하나로 병합, 리빙통합/패션통합 탭 제외
   const PROGRAM_MERGE = { 'pgm_영스타일수': 'pgm_영스타일', 'pgm_영스타일금': 'pgm_영스타일' };
-  const EXCLUDE_PROGRAMS = new Set(['pgm_리빙통합', 'pgm_패션통합']);
+  const EXCLUDE_PROGRAMS = new Set(['pgm_리빙통합', 'pgm_패션통합', 'pgm_레포츠PGM텐션업']);
   const normProgId = (id) => PROGRAM_MERGE[id] || id;
+  // 제외 프로그램(텐션업 등)의 잔여 데이터를 상태에서 정리
+  function pruneExcluded(s) {
+    if (!s) return s;
+    if (s.programs) s.programs = s.programs.filter((p) => !EXCLUDE_PROGRAMS.has(p.id));
+    if (s.days) s.days = s.days.filter((d) => !EXCLUDE_PROGRAMS.has(d.programId));
+    if (s.placements) s.placements = s.placements.filter((p) => !EXCLUDE_PROGRAMS.has(p.programId));
+    if (s.snapshots) s.snapshots = s.snapshots.filter((x) => !EXCLUDE_PROGRAMS.has(x.programId));
+    if (s.bids && s.days) { const ids = new Set(s.days.map((d) => d.id)); s.bids = s.bids.filter((b) => ids.has(b.dayId)); }
+    if (s.activeProgram && EXCLUDE_PROGRAMS.has(s.activeProgram)) s.activeProgram = MAIN_PROGRAM;
+    return s;
+  }
 
   function mergedTeams() {
     const base = TEAMS.slice();
@@ -151,7 +162,7 @@
     function load() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) return JSON.parse(raw);
+        if (raw) return pruneExcluded(JSON.parse(raw));
       } catch (e) { /* ignore */ }
       const s = seedState();
       applyProgramSeed(s); // 14개 프로그램 확정편성안 자동 적재
@@ -245,8 +256,11 @@
       notify();
     }
     function log(entry) {
+      const v = state.view || {};
       state.changeLog.unshift({
         id: uid(), ts: nowISO(), user: currentUser || '익명',
+        programId: state.activeProgram || null,
+        ym: v.year ? `${v.year}-${String(v.month).padStart(2, '0')}` : null,
         action: '', productName: '', teamName: '', from: '', to: '', detail: '',
         ...entry,
       });
@@ -321,7 +335,7 @@
       _snapshot: () => state,
       _useBackend(saveFn) { saveBackend = saveFn; },
       _hydrate(newState) { // 서버에서 받은 상태로 교체 (재저장 안 함, 이력 초기화)
-        state = newState; baseline = JSON.stringify(state); undoStack = []; redoStack = [];
+        state = pruneExcluded(newState); baseline = JSON.stringify(state); undoStack = []; redoStack = [];
         subs.forEach((fn) => fn(state));
       },
 
@@ -721,6 +735,26 @@
         if (!snap) return;
         state.snapshots = state.snapshots.filter((s) => s.id !== id);
         log({ action: '저장본삭제', detail: `${snap.year}년 ${snap.month}월 저장본 삭제` });
+        emit();
+      },
+
+      /* ---------- 변경이력 초기화 ---------- */
+      clearChangeLog() {
+        state.changeLog = [];
+        emit();
+      },
+
+      /* ---------- 프로그램 삭제 (탭 + 관련 데이터 제거) ---------- */
+      removeProgram(programId) {
+        const slotIds = new Set();
+        state.days.filter((d) => d.programId === programId).forEach((d) => d.slots.forEach((s) => slotIds.add(s.id)));
+        state.days = state.days.filter((d) => d.programId !== programId);
+        state.placements = state.placements.filter((p) => p.programId !== programId && !slotIds.has(p.slotId));
+        state.bids = state.bids.filter((b) => !slotIds.has(b.slotId));
+        state.programs = (state.programs || []).filter((p) => p.id !== programId);
+        state.snapshots = (state.snapshots || []).filter((s) => s.programId !== programId);
+        if (state.activeProgram === programId) state.activeProgram = MAIN_PROGRAM;
+        log({ action: '프로그램삭제', detail: `${programId} 삭제` });
         emit();
       },
 

@@ -937,7 +937,6 @@
               </div>
               ${fashion ? html`
                 <div class="px-3 py-2.5">
-                  <div class="text-[11px] text-ink-soft mb-1.5">날짜 단위 입찰 (1·2부 배정은 PD)</div>
                   <div class="flex flex-wrap gap-1.5 items-start">
                     ${teamBids.filter((b) => b.dayId === day.id).map((b) => html`<${BidChip} key=${b.id} state=${state} b=${b}
                         onEdit=${() => setModal({ dayId: day.id, bid: b })} />`)}
@@ -1098,7 +1097,7 @@
           <//>
           ${fashion
             ? html`<${Field} label="시간/순번">
-                <div class="text-[12px] text-ink-soft px-2 py-1.5 rounded bg-slate-50 border border-slate-200">날짜에만 입찰합니다. <b>1·2부 배정은 PD</b>가 진행해요.</div><//>`
+                <div class="text-[12px] text-ink-soft px-2 py-1.5 rounded bg-slate-50 border border-slate-200">날짜 단위로 입찰합니다.</div><//>`
             : orderMode
             ? html`<${Field} label="희망 슬롯(순번)">
                 <select value=${slotId} onChange=${(e) => setSlotId(e.target.value)} class=${inputCls}>
@@ -1143,12 +1142,23 @@
   /* =====================================================================
    *  변경 이력 팝업
    * ===================================================================== */
-  function HistoryModal({ state, onClose }) {
+  function HistoryModal({ state, onClose, canManage }) {
+    const curYm = `${state.view.year}-${String(state.view.month).padStart(2, '0')}`;
     const [q, setQ] = useState('');
     const [action, setAction] = useState('all');
+    const [prog, setProg] = useState(state.activeProgram);
+    const [ym, setYm] = useState(curYm);
+    const progName = (id) => { const p = (state.programs || []).find((x) => x.id === id); return p ? p.name : id; };
+    const ymList = Array.from(new Set(state.changeLog.map((l) => l.ym).filter(Boolean))).sort().reverse();
     let logs = state.changeLog;
+    if (prog !== 'all') logs = logs.filter((l) => l.programId === prog);
+    if (ym !== 'all') logs = logs.filter((l) => l.ym === ym);
     if (action !== 'all') logs = logs.filter((l) => l.action === action);
     if (q.trim()) logs = logs.filter((l) => (l.productName || '').includes(q.trim()) || (l.teamName || '').includes(q.trim()) || (l.user || '').includes(q.trim()));
+    function clearAll() {
+      if (!confirm('변경 이력을 모두 삭제합니다. (편성·입찰 데이터는 그대로) 계속할까요?')) return;
+      store.clearChangeLog();
+    }
 
     // 상품별 이동 횟수 요약
     const moveSummary = useMemo(() => {
@@ -1180,13 +1190,24 @@
               </div>
             </div>`}
 
-          <div class="flex items-center gap-2 px-4 py-2 border-b border-slate-200">
+          <div class="flex items-center gap-2 px-4 py-2 border-b border-slate-200 flex-wrap">
+            <select value=${prog} onChange=${(e) => setProg(e.target.value)} class="text-xs px-2 py-1 rounded border border-slate-300">
+              <option value="all">전체 프로그램</option>
+              ${(state.programs || []).map((p) => html`<option key=${p.id} value=${p.id}>${p.name}</option>`)}
+            </select>
+            <select value=${ym} onChange=${(e) => setYm(e.target.value)} class="text-xs px-2 py-1 rounded border border-slate-300">
+              <option value="all">전체 월</option>
+              ${ymList.map((y) => html`<option key=${y} value=${y}>${y.replace('-', '년 ')}월</option>`)}
+              ${!ymList.includes(curYm) ? html`<option value=${curYm}>${curYm.replace('-', '년 ')}월</option>` : ''}
+            </select>
             <input value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="상품/팀/작성자 검색"
-              class="text-xs px-2 py-1 rounded border border-slate-300 outline-none w-48" />
+              class="text-xs px-2 py-1 rounded border border-slate-300 outline-none w-40" />
             <select value=${action} onChange=${(e) => setAction(e.target.value)} class="text-xs px-2 py-1 rounded border border-slate-300">
               ${actions.map((a) => html`<option key=${a} value=${a}>${a === 'all' ? '전체 동작' : a}</option>`)}
             </select>
             <span class="text-[11px] text-ink-soft ml-auto">${logs.length}건</span>
+            ${canManage && html`<button onClick=${clearAll}
+              class="text-[11px] px-2 py-1 rounded border border-rose-300 text-rose-600 bg-white hover:bg-rose-50 whitespace-nowrap">이력 초기화</button>`}
           </div>
 
           <div class="flex-1 overflow-y-auto">
@@ -1608,7 +1629,7 @@
             : html`<${BidBoard} state=${state} />`}
         </main>
 
-        ${history && html`<${HistoryModal} state=${state} onClose=${() => setHistory(false)} />`}
+        ${history && html`<${HistoryModal} state=${state} canManage=${roleCfg.canManage} onClose=${() => setHistory(false)} />`}
         ${backup && html`<${BackupModal} onClose=${() => setBackup(false)} />`}
       </div>`;
   }
