@@ -20,8 +20,8 @@ window.AUTH = {
       label: 'MD',
       desc: '상품 입찰 (입찰보드)',
       password: 'ltmd2026',
-      tabs: ['bids'],          // 접근 가능한 탭
-      canManage: false,        // 엑셀 일괄/초기화 등 관리 기능
+      tabs: ['bids', 'finalview'], // 입찰보드 + 최종편성안 조회(읽기전용)
+      canManage: false,            // 엑셀 일괄/초기화 등 관리 기능
       color: '#0891b2',
     },
     pd: {
@@ -32,6 +32,16 @@ window.AUTH = {
       tabs: ['schedule', 'final', 'bids'],
       canManage: true,
       color: '#da291c',
+    },
+  },
+  // PD 소속 구분 (로그인 드롭다운). MD 팀은 앱의 전체 팀 목록을 사용.
+  pdTeams: ['리빙PD', '식품PD', '잡화&뷰티PD', '패션PD'],
+  // 캐스팅 드롭다운 옵션 (프로그램별). 현재 최유라쇼만 지정.
+  casting: {
+    'pgm_최유라쇼': {
+      pd: ['강성현', '안유미', '최휘성', '김동언'],
+      host: ['홍성보', '한성희', '김민영', '기타'],
+      studio: ['250', '080', '120', '기타'],
     },
   },
 };

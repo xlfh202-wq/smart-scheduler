@@ -285,7 +285,17 @@
     }
     function detailOf(pr) {
       return { note: pr.note, issue: pr.issue, comp: pr.comp, prep: pr.prep, price: pr.price,
-               margin: pr.margin, sme: pr.sme, special: pr.special, isNew: pr.isNew, groupCode: pr.groupCode };
+               margin: pr.margin, sme: pr.sme, special: pr.special, isNew: pr.isNew, groupCode: pr.groupCode,
+               recent: pr.recent };
+    }
+    // 패션 등 날짜 단위 입찰용: 하루의 '미정' 버킷 슬롯 (1·2부 구분은 PD가 나중에)
+    function ensureBucketSlotOnDay(day) {
+      let slot = day.slots.find((x) => x.bucket);
+      if (!slot) {
+        slot = { id: 'slot_' + uid(), start: '', end: '', label: '미정', bucket: true, manual: true };
+        day.slots.unshift(slot);
+      }
+      return slot;
     }
     function placementFromBid(bid, slotId, programId) {
       const pr = bid.product || {};
@@ -388,10 +398,11 @@
 
       /* ---------- 입찰 (MD) — 입력 즉시 편성표에 자동 반영 ---------- */
       // {teamId, dayId, slotId?|(start,end), product, autoPlace=true}
-      addBid({ teamId, dayId, slotId, start, end, product, autoPlace = true }) {
+      addBid({ teamId, dayId, slotId, start, end, product, autoPlace = true, bucket = false }) {
         const day = state.days.find((d) => d.id === dayId);
         if (!day) return;
         let slot = slotId ? day.slots.find((s) => s.id === slotId) : null;
+        if (!slot && bucket) slot = ensureBucketSlotOnDay(day);
         if (!slot && start && end) slot = ensureSlotOnDay(day, start, end);
         if (!slot) return;
         const bid = stamp({ id: uid(), teamId, dayId, slotId: slot.id, product, createdAt: nowISO() });
@@ -544,10 +555,11 @@
         if (patch.productName !== undefined) p.productName = patch.productName;
         if (patch.items !== undefined) p.items = patch.items;
         if (patch.memo !== undefined) p.memo = patch.memo;
+        if (patch.pending !== undefined) p.pending = patch.pending;
         if (patch.detail) p.detail = { ...(p.detail || {}), ...patch.detail };
         stamp(p);
         log({ action: '편성수정', productName: p.productName, teamName: teamName(p.teamId),
-              detail: '최종편성안 직접수정' });
+              detail: patch.pending !== undefined ? (patch.pending ? '미정 표시' : '확정 표시') : '최종편성안 직접수정' });
         emit();
       },
 

@@ -146,6 +146,7 @@
       ['준비물량', det.prep],
       ['가격', det.price],
       ['마진', det.margin],
+      ['최근 달성률', det.recent],
       ['방송 분량', p.durationMin ? p.durationMin + '분' : ''],
       ['배정', [p.pd && 'PD ' + p.pd, p.host && 'MC ' + p.host, p.studio && 'ST ' + p.studio].filter(Boolean).join(' / ')],
       ['비고(PD)', p.memo],
@@ -423,6 +424,7 @@
       ['준비물량', pr.prep],
       ['가격', pr.price],
       ['마진', pr.margin],
+      ['최근 달성률', pr.recent],
       ['방송 분량', pr.durationMin ? pr.durationMin + '분' : ''],
       ['마지막 수정', b.editedBy ? `${b.editedBy}${b.editedAt ? ' · ' + fmtTs(b.editedAt) : ''}` : ''],
     ].filter((r) => r[1]);
@@ -557,11 +559,41 @@
   /* =====================================================================
    *  최종편성안 (엑셀 레이아웃 표 · 직접 편집 가능)
    * ===================================================================== */
-  function FinalScheduleView({ state }) {
+  function FinalScheduleView({ state, readOnly }) {
     const prog = activeProgramObj(state);
     const capRef = useRef(null);
     const [saving, setSaving] = useState(false);
     const { year, month } = state.view;
+    const castOpts = (window.AUTH.casting && window.AUTH.casting[state.activeProgram]) || null;
+    function saveExcel() {
+      if (!window.XLSX) { alert('엑셀 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.'); return; }
+      const header = ['방송일', '요일', '시간', '상태', '상품명', '내용/타이틀', '구성', '준비물량', '가격', '마진', '최근달성률', 'PD', '쇼호스트', '스튜디오', '비고(PD)'];
+      const aoa = [header]; const merges = []; let ri = 1;
+      rows.forEach((r) => {
+        const p = r.p; const det = (p && p.detail) || {};
+        const dnum = Number(r.day.date.slice(8)); const mm = Number(r.day.date.slice(5, 7));
+        const items = (p && p.items && p.items.length > 1) ? '\n· ' + p.items.join('\n· ') : '';
+        aoa.push([
+          r.firstOfDay ? `${mm}/${dnum}` : '', r.firstOfDay ? U.WEEKDAY_KO[r.day.weekday] : '',
+          slotName(r.slot), p ? (p.pending ? '미정' : '확정') : '',
+          p ? ((p.productName || '') + items) : '', p ? (det.note || '') : '', p ? (det.comp || '') : '',
+          p ? (det.prep || '') : '', p ? (det.price || '') : '', p ? (det.margin || '') : '',
+          p ? (det.recent || '') : '', p ? (p.pd || '') : '', p ? (p.host || '') : '',
+          p ? (p.studio || '') : '', p ? (p.memo || '') : '',
+        ]);
+        if (r.firstOfDay) {
+          const span = dayCount[r.day.date];
+          if (span > 1) { merges.push({ s: { r: ri, c: 0 }, e: { r: ri + span - 1, c: 0 } }); merges.push({ s: { r: ri, c: 1 }, e: { r: ri + span - 1, c: 1 } }); }
+        }
+        ri++;
+      });
+      const ws = window.XLSX.utils.aoa_to_sheet(aoa);
+      ws['!merges'] = merges;
+      ws['!cols'] = [{ wch: 7 }, { wch: 5 }, { wch: 12 }, { wch: 6 }, { wch: 26 }, { wch: 24 }, { wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 22 }];
+      const wb = window.XLSX.utils.book_new();
+      window.XLSX.utils.book_append_sheet(wb, ws, `${year}년${month}월`);
+      window.XLSX.writeFile(wb, `${prog.name}_${year}-${String(month).padStart(2, '0')}_최종편성안.xlsx`);
+    }
     async function saveImage() {
       const el = capRef.current;
       if (!window.html2canvas || !el) { alert('이미지 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.'); return; }
@@ -629,56 +661,94 @@
     const th = 'px-2 py-1.5 text-left font-semibold border border-slate-300 bg-brand text-white whitespace-nowrap';
     const td = 'px-2 py-1.5 border border-slate-200 align-top';
     const tdMerge = 'px-2 py-1.5 border border-slate-200 align-middle text-center bg-slate-50';
+    // 셀: 읽기전용이면 텍스트, 아니면 인라인 편집
+    const Cell = (value, onCommit, o) => {
+      o = o || {};
+      return readOnly
+        ? html`<div class=${`px-2 py-1.5 text-[12px] whitespace-pre-wrap ${o.color || ''}`}>${value || ''}</div>`
+        : html`<${EditCell} value=${value} onCommit=${onCommit} placeholder=${o.ph || ''} color=${o.color || ''} />`;
+    };
+    // 캐스팅(PD/쇼호스트/스튜디오): 최유라쇼 등은 드롭다운, 아니면 자유입력
+    const castCell = (p, field) => {
+      const v = p[field] || '';
+      if (readOnly) return html`<div class="px-2 py-1.5 text-[12px]">${v}</div>`;
+      if (castOpts && castOpts[field]) {
+        const opts = castOpts[field];
+        return html`<select value=${v} onChange=${(e) => store.updatePlacementMeta(p.id, { [field]: e.target.value })}
+          class="w-full px-1.5 py-1.5 text-[12px] bg-transparent outline-none focus:bg-amber-50 cursor-pointer">
+          <option value="">-</option>
+          ${opts.map((o) => html`<option key=${o} value=${o}>${o}</option>`)}
+          ${v && !opts.includes(v) ? html`<option value=${v}>${v}</option>` : ''}
+        </select>`;
+      }
+      return html`<${EditCell} value=${v} onCommit=${(val) => store.updatePlacementMeta(p.id, { [field]: val })} />`;
+    };
 
     return html`
       <div class="flex-1 overflow-auto p-4 bg-slate-100">
-        <div class="flex items-center justify-between mb-3 max-w-[1500px]">
+        <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
           <h2 class="text-base font-bold text-ink">${prog.name} · ${year}년 ${month}월 최종편성안
-            <span class="text-[12px] font-normal text-ink-soft">총 ${total}편성 · 셀을 클릭해 직접 수정</span></h2>
-          <button onClick=${saveImage} disabled=${saving}
-            class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand disabled:opacity-50">
-            ${saving ? '이미지 생성 중…' : '🖼 이미지 저장 (PNG)'}</button>
+            <span class="text-[12px] font-normal text-ink-soft">총 ${total}편성${readOnly ? ' · 조회 전용' : ' · 셀을 클릭해 직접 수정'}</span></h2>
+          <div class="flex items-center gap-2">
+            <button onClick=${saveExcel}
+              class="text-xs px-2.5 py-1 rounded border border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50 whitespace-nowrap shrink-0">📊 엑셀 저장 (XLSX)</button>
+            <button onClick=${saveImage} disabled=${saving}
+              class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand disabled:opacity-50 whitespace-nowrap shrink-0">
+              ${saving ? '이미지 생성 중…' : '🖼 이미지 저장 (PNG)'}</button>
+          </div>
         </div>
-        <div ref=${capRef} id="final-capture" class="bg-white rounded-lg shadow-sm overflow-hidden max-w-[1500px]">
+        <div ref=${capRef} id="final-capture" class="bg-white rounded-lg shadow-sm overflow-hidden">
           <div class="px-3 py-2 border-b-2 border-brand text-[13px] font-bold text-ink">
             ${prog.name} · ${year}년 ${month}월 최종편성안 <span class="font-normal text-ink-soft">(총 ${total}편성)</span>
           </div>
           <table class="w-full text-[12px] border-collapse">
             <thead class="sticky top-0">
               <tr>
-                <th class=${th} style=${{ width: '90px' }}>방송일</th>
-                <th class=${th} style=${{ width: '40px' }}>요일</th>
-                <th class=${th} style=${{ width: '110px' }}>시간</th>
+                <th class=${th} style=${{ width: '70px' }}>방송일</th>
+                <th class=${th} style=${{ width: '36px' }}>요일</th>
+                <th class=${th} style=${{ width: '104px' }}>시간</th>
+                <th class=${th} style=${{ width: '58px' }}>상태</th>
                 <th class=${th}>상품명</th>
                 <th class=${th}>내용 / 타이틀</th>
                 <th class=${th}>구성</th>
-                <th class=${th} style=${{ width: '80px' }}>준비물량</th>
-                <th class=${th} style=${{ width: '90px' }}>가격</th>
-                <th class=${th} style=${{ width: '70px' }}>마진</th>
+                <th class=${th} style=${{ width: '78px' }}>준비물량</th>
+                <th class=${th} style=${{ width: '88px' }}>가격</th>
+                <th class=${th} style=${{ width: '64px' }}>마진</th>
+                <th class=${th} style=${{ width: '90px' }}>최근달성률</th>
+                <th class=${th} style=${{ width: '74px' }}>PD</th>
+                <th class=${th} style=${{ width: '74px' }}>쇼호스트</th>
+                <th class=${th} style=${{ width: '64px' }}>스튜디오</th>
                 <th class=${th}>비고 (PD)</th>
               </tr>
             </thead>
             <tbody>
-              ${rows.length === 0 && html`<tr><td class=${td} colspan="10"><div class="text-center text-slate-400 py-8">이 달 편성이 없습니다.</div></td></tr>`}
+              ${rows.length === 0 && html`<tr><td class=${td} colspan="15"><div class="text-center text-slate-400 py-8">이 달 편성이 없습니다.</div></td></tr>`}
               ${rows.map((r, i) => {
                 const p = r.p; const det = (p && p.detail) || {};
                 const dnum = Number(r.day.date.slice(8));
                 const m = Number(r.day.date.slice(5, 7));
                 const wd = U.WEEKDAY_KO[r.day.weekday];
                 const wdColor = r.day.weekday === 6 ? 'text-blue-600' : r.day.weekday === 0 ? 'text-red-500' : 'text-ink';
+                const pend = p && p.pending;
                 return html`
-                  <tr key=${i} class=${`${r.firstOfDay ? 'border-t-2 border-t-slate-300' : ''} hover:bg-amber-50`}>
+                  <tr key=${i} class=${`${r.firstOfDay ? 'border-t-2 border-t-slate-300' : ''} ${pend ? 'bg-amber-100' : 'hover:bg-amber-50'}`}>
                     ${r.firstOfDay && html`
                       <td class=${`${tdMerge} font-semibold tabular-nums text-ink`} rowSpan=${dayCount[r.day.date]}>${m}/${dnum}</td>
                       <td class=${`${tdMerge} font-semibold ${wdColor}`} rowSpan=${dayCount[r.day.date]}>${wd}</td>`}
                     <td class=${`${td} tabular-nums font-medium ${r.compete ? 'text-amber-700' : ''}`}>
                       ${slotName(r.slot)} ${r.compete && html`<span class="text-[10px] text-amber-600">●경쟁</span>`}
                     </td>
+                    <td class=${`${td} text-center`}>
+                      ${p ? (readOnly
+                        ? (pend ? html`<${Badge} color="#d97706">미정<//>` : html`<span class="text-[11px] text-emerald-600">확정</span>`)
+                        : html`<label class="flex items-center justify-center gap-1 text-[11px] cursor-pointer ${pend ? 'text-amber-700 font-semibold' : 'text-ink-soft'}">
+                            <input type="checkbox" checked=${!!pend} onChange=${(e) => store.updatePlacementContent(p.id, { pending: e.target.checked })} /> 미정</label>`)
+                        : ''}
+                    </td>
                     <td class=${`${td} p-0`}>
                       ${p ? html`<div>
                           <div class="flex items-center gap-1 pr-2">
-                            <${EditCell} value=${p.productName} color="font-semibold text-ink"
-                              onCommit=${(val) => store.updatePlacementContent(p.id, { productName: val })} />
+                            ${Cell(p.productName, (val) => store.updatePlacementContent(p.id, { productName: val }), { color: 'font-semibold text-ink' })}
                             ${(p.items && p.items.length > 1) && html`<span class="shrink-0 text-[10px] text-violet-600">동시 ${p.items.length}착장</span>`}
                             ${det.isNew && html`<span class="shrink-0 text-[10px] text-cyan-600">新</span>`}
                           </div>
@@ -687,19 +757,17 @@
                         </div>`
                         : html`<span class="px-2 text-slate-300">—</span>`}
                     </td>
-                    <td class=${`${td} p-0`}>${p ? html`<${EditCell} value=${det.note}
-                      onCommit=${(val) => store.updatePlacementContent(p.id, { detail: { note: val } })} placeholder="내용/타이틀…" />
+                    <td class=${`${td} p-0`}>${p ? html`${Cell(det.note, (val) => store.updatePlacementContent(p.id, { detail: { note: val } }), { ph: '내용/타이틀…' })}
                       ${det.issue ? html`<div class="px-2 pb-1 text-[11px] text-rose-500">${det.issue}</div>` : ''}` : ''}</td>
-                    <td class=${`${td} p-0`}>${p ? html`<${EditCell} value=${det.comp}
-                      onCommit=${(val) => store.updatePlacementContent(p.id, { detail: { comp: val } })} placeholder="구성…" />` : ''}</td>
-                    <td class=${`${td} p-0`}>${p ? html`<${EditCell} value=${det.prep} color="tabular-nums"
-                      onCommit=${(val) => store.updatePlacementContent(p.id, { detail: { prep: val } })} placeholder="00억…" />` : ''}</td>
-                    <td class=${`${td} p-0`}>${p ? html`<${EditCell} value=${det.price} color="tabular-nums"
-                      onCommit=${(val) => store.updatePlacementContent(p.id, { detail: { price: val } })} placeholder="가격…" />` : ''}</td>
-                    <td class=${`${td} p-0`}>${p ? html`<${EditCell} value=${det.margin} color="tabular-nums"
-                      onCommit=${(val) => store.updatePlacementContent(p.id, { detail: { margin: val } })} placeholder="마진…" />` : ''}</td>
-                    <td class=${`${td} p-0`}>${p ? html`<${EditCell} value=${p.memo} color="text-violet-700"
-                      onCommit=${(val) => store.updatePlacementContent(p.id, { memo: val })} placeholder="PD 코멘트…" />` : ''}</td>
+                    <td class=${`${td} p-0`}>${p ? Cell(det.comp, (val) => store.updatePlacementContent(p.id, { detail: { comp: val } }), { ph: '구성…' }) : ''}</td>
+                    <td class=${`${td} p-0`}>${p ? Cell(det.prep, (val) => store.updatePlacementContent(p.id, { detail: { prep: val } }), { ph: '00억…', color: 'tabular-nums' }) : ''}</td>
+                    <td class=${`${td} p-0`}>${p ? Cell(det.price, (val) => store.updatePlacementContent(p.id, { detail: { price: val } }), { ph: '가격…', color: 'tabular-nums' }) : ''}</td>
+                    <td class=${`${td} p-0`}>${p ? Cell(det.margin, (val) => store.updatePlacementContent(p.id, { detail: { margin: val } }), { ph: '마진…', color: 'tabular-nums' }) : ''}</td>
+                    <td class=${`${td} p-0`}>${p ? Cell(det.recent, (val) => store.updatePlacementContent(p.id, { detail: { recent: val } }), { ph: '예: 92/88/95%', color: 'tabular-nums' }) : ''}</td>
+                    <td class=${`${td} p-0`}>${p ? castCell(p, 'pd') : ''}</td>
+                    <td class=${`${td} p-0`}>${p ? castCell(p, 'host') : ''}</td>
+                    <td class=${`${td} p-0`}>${p ? castCell(p, 'studio') : ''}</td>
+                    <td class=${`${td} p-0`}>${p ? Cell(p.memo, (val) => store.updatePlacementContent(p.id, { memo: val }), { ph: 'PD 코멘트…', color: 'text-violet-700' }) : ''}</td>
                   </tr>`;
               })}
             </tbody>
@@ -791,29 +859,29 @@
     const [host, setHost] = useState(p.host || '');
     const [studio, setStudio] = useState(p.studio || '');
     const [dur, setDur] = useState(p.durationMin || '');
+    const castOpts = (window.AUTH.casting && window.AUTH.casting[p.programId]) || null;
     function save() {
       store.updatePlacementMeta(p.id, {
         pd, host, studio, durationMin: dur ? parseInt(dur, 10) : null,
       });
       onClose();
     }
+    // 옵션 있으면 드롭다운(+직접입력 허용), 없으면 자유입력
+    const pick = (val, setVal, opts, ph) => opts
+      ? html`<select value=${opts.includes(val) || !val ? val : '__custom'} onChange=${(e) => setVal(e.target.value === '__custom' ? (val || ' ') : e.target.value)} class=${inputCls}>
+          <option value="">- 선택 -</option>
+          ${opts.map((o) => html`<option key=${o} value=${o}>${o}</option>`)}
+          ${val && !opts.includes(val) ? html`<option value=${val}>${val}</option>` : ''}
+        </select>`
+      : html`<input value=${val} onInput=${(e) => setVal(e.target.value)} class=${inputCls} placeholder=${ph} />`;
     return html`
       <${Modal} title=${`배정 편집 · ${p.productName}`} onClose=${onClose} onSave=${save}>
-        <${Field} label="담당 PD">
-          <input list="pd-list" value=${pd} onInput=${(e) => setPd(e.target.value)} class=${inputCls} placeholder="예: 김PD" />
-        <//>
-        <${Field} label="쇼호스트">
-          <input list="host-list" value=${host} onInput=${(e) => setHost(e.target.value)} class=${inputCls} placeholder="예: 최유라" />
-        <//>
-        <${Field} label="스튜디오">
-          <input list="studio-list" value=${studio} onInput=${(e) => setStudio(e.target.value)} class=${inputCls} placeholder="예: A스튜디오" />
-        <//>
+        <${Field} label="담당 PD">${pick(pd, setPd, castOpts && castOpts.pd, '예: 강성현')}<//>
+        <${Field} label="쇼호스트">${pick(host, setHost, castOpts && castOpts.host, '예: 홍성보')}<//>
+        <${Field} label="스튜디오">${pick(studio, setStudio, castOpts && castOpts.studio, '예: 250')}<//>
         <${Field} label="방송 분량(분)">
           <input type="number" value=${dur} onInput=${(e) => setDur(e.target.value)} class=${inputCls} placeholder="예: 30" />
         <//>
-        <datalist id="pd-list"><option value="김PD"/><option value="이PD"/><option value="박PD"/></datalist>
-        <datalist id="host-list"><option value="최유라"/><option value="게스트MC"/></datalist>
-        <datalist id="studio-list"><option value="A스튜디오"/><option value="B스튜디오"/><option value="야외"/></datalist>
       <//>`;
   }
 
@@ -823,6 +891,7 @@
   function BidBoard({ state }) {
     const teams = programTeams(state);
     const schema = programSchema(state);
+    const fashion = schema === 'fashion';
     const isMain = state.activeProgram === U.MAIN_PROGRAM;
     const [teamSel, setTeamSel] = useState(null);
     const team = (teamSel && teams.some((t) => t.id === teamSel)) ? teamSel : (teams[0] && teams[0].id);
@@ -860,12 +929,25 @@
               <div class="flex items-center justify-between px-3 py-1.5 bg-slate-100">
                 <span class="font-semibold text-[13px] text-ink">${fmtDay(day)}</span>
                 <div class="flex items-center gap-2 text-[11px] text-ink-soft">
-                  <button onClick=${() => setSlotModalDay(day.id)} class="hover:text-brand">+ 시간대</button>
-                  <button onClick=${() => store.addSlot(day.id, { order: true })} class="hover:text-brand">+ 순번</button>
+                  ${!fashion && html`<button onClick=${() => setSlotModalDay(day.id)} class="hover:text-brand">+ 시간대</button>`}
+                  ${!fashion && html`<button onClick=${() => store.addSlot(day.id, { order: true })} class="hover:text-brand">+ 순번</button>`}
                   <button onClick=${() => confirm(`${fmtDay(day)} 편성일을 삭제할까요? (입찰·편성 포함)`) && store.removeDay(day.id)}
                     class="hover:text-brand">편성일 삭제</button>
                 </div>
               </div>
+              ${fashion ? html`
+                <div class="px-3 py-2.5">
+                  <div class="text-[11px] text-ink-soft mb-1.5">날짜 단위 입찰 (1·2부 배정은 PD)</div>
+                  <div class="flex flex-wrap gap-1.5 items-start">
+                    ${teamBids.filter((b) => b.dayId === day.id).map((b) => html`<${BidChip} key=${b.id} state=${state} b=${b}
+                        onEdit=${() => setModal({ dayId: day.id, bid: b })} />`)}
+                    <button onClick=${() => setModal({ dayId: day.id })}
+                      class="text-[12px] px-2 py-1 rounded border border-dashed border-slate-300 text-ink-soft hover:border-brand hover:text-brand self-start">
+                      + 입찰
+                    </button>
+                  </div>
+                </div>`
+              : html`
               <div class="divide-y divide-slate-100">
                 ${shownSlots.length === 0 && html`<div class="text-[12px] text-slate-400 text-center py-3">시간대가 없습니다. “+ 시간대” 또는 “+ 순번”으로 추가하세요.</div>`}
                 ${shownSlots.map((slot) => {
@@ -890,7 +972,7 @@
                       </div>
                     </div>`;
                 })}
-              </div>
+              </div>`}
             </div>`;
           })}
         </div>
@@ -942,7 +1024,7 @@
       name: init.name || '', note: init.note || '', issue: init.issue || '',
       comp: init.comp || '', prep: init.prep || '', price: init.price || '', margin: init.margin || '',
       durationMin: init.durationMin || '', sme: !!init.sme, special: !!init.special, isNew: !!init.isNew,
-      groupCode: init.groupCode || '',
+      groupCode: init.groupCode || '', recent: init.recent || '',
       items: (init.items || []).join('\n'), // 동시 묶음 상품 목록
     });
     const itemLines = f.items.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -968,12 +1050,16 @@
       const product = {
         name, note: f.note, issue: f.issue, comp: f.comp, prep: f.prep,
         price: f.price, margin: f.margin, sme: f.sme, special: f.special, isNew: f.isNew,
-        groupCode: f.groupCode,
-        durationMin: orderMode ? (f.durationMin ? parseInt(f.durationMin, 10) : null) : durMin,
+        groupCode: f.groupCode, recent: f.recent,
+        durationMin: (fashion || orderMode) ? (f.durationMin ? parseInt(f.durationMin, 10) : null) : durMin,
         items: items.length ? items : undefined,
         dongsi: items.length > 1,
       };
-      if (orderMode) {
+      if (fashion) {
+        // 패션팀: 1·2부 구분 없이 날짜에만 입찰 (부 배정은 PD)
+        if (b) store.updateBid(b.id, { product });
+        else store.addBid({ teamId: team, dayId, product, bucket: true });
+      } else if (orderMode) {
         if (b) store.updateBid(b.id, { product, slotId });
         else store.addBid({ teamId: team, dayId, slotId, product });
       } else {
@@ -1010,7 +1096,10 @@
               ${monthDays.map((d) => html`<option key=${d.id} value=${d.id}>${fmtDay(d)}</option>`)}
             </select>
           <//>
-          ${orderMode
+          ${fashion
+            ? html`<${Field} label="시간/순번">
+                <div class="text-[12px] text-ink-soft px-2 py-1.5 rounded bg-slate-50 border border-slate-200">날짜에만 입찰합니다. <b>1·2부 배정은 PD</b>가 진행해요.</div><//>`
+            : orderMode
             ? html`<${Field} label="희망 슬롯(순번)">
                 <select value=${slotId} onChange=${(e) => setSlotId(e.target.value)} class=${inputCls}>
                   ${day.slots.map((s) => html`<option key=${s.id} value=${s.id}>${slotName(s)}</option>`)}
@@ -1022,7 +1111,7 @@
                   <${TimeInput} value=${end} onChange=${setEnd} />
                 </div><//>`}
         </div>
-        ${!orderMode && bands.length > 0 && html`
+        ${!fashion && !orderMode && bands.length > 0 && html`
           <div class="-mt-1 flex flex-wrap items-center gap-1">
             <span class="text-[11px] text-ink-soft">큰 띠:</span>
             ${bands.map((s) => html`<button type="button" key=${s.id}
@@ -1037,7 +1126,8 @@
           <${Field} label="준비물량"><input value=${f.prep} onInput=${set('prep')} class=${inputCls} placeholder="예: 5억 / 3,000세트" /><//>
           <${Field} label="가격"><input value=${f.price} onInput=${set('price')} class=${inputCls} placeholder="예: 179,000원" /><//>
           <${Field} label="마진"><input value=${f.margin} onInput=${set('margin')} class=${inputCls} placeholder="예: 50T / 46%" /><//>
-          ${orderMode && html`<${Field} label="방송 분량(분)"><input type="number" value=${f.durationMin} onInput=${set('durationMin')} class=${inputCls} placeholder="예: 30" /><//>`}
+          <${Field} label="최근 3회 실적 (달성률)"><input value=${f.recent} onInput=${set('recent')} class=${inputCls} placeholder="예: 92% / 88% / 95%" /><//>
+          ${(fashion || orderMode) && html`<${Field} label="방송 분량(분)"><input type="number" value=${f.durationMin} onInput=${set('durationMin')} class=${inputCls} placeholder="예: 30" /><//>`}
         </div>
         <div class="flex items-center gap-5 pt-1">
           <label class="flex items-center gap-1.5 text-[13px] cursor-pointer">
@@ -1325,18 +1415,24 @@
     } catch (e) {}
     return null;
   }
-  function LoginGate({ onLogin }) {
+  function LoginGate({ onLogin, teams }) {
     const roles = window.AUTH.roles;
     const [role, setRole] = useState('pd');
+    const [team, setTeam] = useState('');
     const [name, setName] = useState('');
     const [pw, setPw] = useState('');
     const [err, setErr] = useState('');
     const r = roles[role];
+    // 팀 목록: MD = 앱 전체 팀, PD = 지정 PD 구분
+    const teamList = role === 'md'
+      ? Array.from(new Set((teams || []).map((t) => t.name)))
+      : (window.AUTH.pdTeams || []);
     function submit(e) {
       e && e.preventDefault();
-      if (!name.trim()) { setErr('이름을 입력하세요. (변경 이력에 기록됩니다)'); return; }
+      if (!team) { setErr('팀(소속)을 선택하세요.'); return; }
+      if (!name.trim()) { setErr('이름을 입력하세요.'); return; }
       if (pw !== r.password) { setErr('비밀번호가 올바르지 않습니다.'); return; }
-      onLogin({ role, name: name.trim() });
+      onLogin({ role, team, name: name.trim() });
     }
     return html`
       <div class="min-h-screen grid place-items-center bg-slate-100 p-4">
@@ -1351,7 +1447,7 @@
           <div class="text-[12px] font-medium text-ink-soft mt-4 mb-1.5">역할 선택</div>
           <div class="grid grid-cols-2 gap-2">
             ${Object.entries(roles).map(([key, cfg]) => html`
-              <button type="button" key=${key} onClick=${() => { setRole(key); setErr(''); }}
+              <button type="button" key=${key} onClick=${() => { setRole(key); setTeam(''); setErr(''); }}
                 class=${`rounded-lg border px-3 py-2 text-left transition ${role === key ? 'border-transparent text-white shadow' : 'border-slate-300 bg-white text-ink hover:border-slate-400'}`}
                 style=${role === key ? { background: cfg.color } : {}}>
                 <div class="font-bold text-sm">${cfg.label}</div>
@@ -1360,19 +1456,26 @@
           </div>
           <div class="mt-4 space-y-2.5">
             <label class="block">
-              <div class="text-[12px] font-medium text-ink-soft mb-1">이름 <span class="font-normal text-slate-400">(팀+이름 권장)</span></div>
-              <input value=${name} onInput=${(e) => setName(e.target.value)} class=${inputCls}
-                placeholder=${role === 'md' ? '예: 리빙팀 홍길동' : '예: 김피디'} autofocus />
+              <div class="text-[12px] font-medium text-ink-soft mb-1">팀 / 소속 <span class="text-brand">*</span></div>
+              <select value=${team} onChange=${(e) => setTeam(e.target.value)} class=${inputCls}>
+                <option value="">${role === 'md' ? '입찰 팀 선택' : 'PD 구분 선택'}</option>
+                ${teamList.map((t) => html`<option key=${t} value=${t}>${t}</option>`)}
+              </select>
             </label>
             <label class="block">
-              <div class="text-[12px] font-medium text-ink-soft mb-1">${r.label} 공용 비밀번호</div>
+              <div class="text-[12px] font-medium text-ink-soft mb-1">이름 <span class="text-brand">*</span></div>
+              <input value=${name} onInput=${(e) => setName(e.target.value)} class=${inputCls}
+                placeholder="예: 홍길동" />
+            </label>
+            <label class="block">
+              <div class="text-[12px] font-medium text-ink-soft mb-1">${r.label} 공용 비밀번호 <span class="text-brand">*</span></div>
               <input type="password" value=${pw} onInput=${(e) => setPw(e.target.value)} class=${inputCls} placeholder="비밀번호" />
             </label>
           </div>
           ${err && html`<div class="mt-2 text-[12px] text-brand">${err}</div>`}
           <button type="submit" class="mt-4 w-full py-2 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark">입장</button>
           <div class="mt-3 text-[11px] text-slate-400 leading-relaxed">
-            역할별 공용 비밀번호로 입장합니다. 입력하신 이름은 모든 수정 내역(변경 이력 · 카드 “마지막 수정”)에 자동 기록됩니다.
+            팀·이름은 필수이며, 모든 수정 내역(변경 이력 · 카드 “마지막 수정”)에 자동 기록됩니다. 비밀번호 입력 후 Enter로도 입장됩니다.
           </div>
         </form>
       </div>`;
@@ -1394,7 +1497,8 @@
       return () => { window.__SB_STATUS = null; };
     }, []);
     // 로그인 식별을 데이터 계층에 반영 → 이후 모든 변경이 이 이름으로 기록됨
-    useEffect(() => { if (auth) store.setUser(auth.name); }, [auth]);
+    const displayName = (a) => `${a && a.team ? a.team + ' ' : ''}${(a && a.name) || ''}`.trim();
+    useEffect(() => { if (auth) store.setUser(displayName(auth)); }, [auth]);
 
     // Ctrl/Cmd+Z 되돌리기, Ctrl/Cmd+Shift+Z 또는 Ctrl+Y 다시
     useEffect(() => {
@@ -1416,7 +1520,7 @@
 
     function doLogin(a) {
       try { localStorage.setItem(window.AUTH.storageKey, JSON.stringify({ ...a, ts: Date.now() })); } catch (e) {}
-      store.setUser(a.name);
+      store.setUser(displayName(a));
       setTab(window.AUTH.roles[a.role].tabs[0]);
       setAuth(a);
     }
@@ -1428,7 +1532,7 @@
     }
 
     // 미로그인 → 로그인 화면 (이 아래의 훅 없음: 훅 순서 유지)
-    if (!auth) return html`<${LoginGate} onLogin=${doLogin} />`;
+    if (!auth) return html`<${LoginGate} onLogin=${doLogin} teams=${state.teams} />`;
 
     const roleCfg = window.AUTH.roles[auth.role] || { tabs: ['schedule'], canManage: true, label: '', color: '#64748b' };
     const allowed = roleCfg.tabs;
@@ -1463,12 +1567,14 @@
                 class=${tabCls(curTab === 'schedule')}>PD 편성표</button>`}
               ${allowed.includes('final') && html`<button onClick=${() => setTab('final')}
                 class=${tabCls(curTab === 'final')}>최종편성안</button>`}
+              ${allowed.includes('finalview') && html`<button onClick=${() => setTab('finalview')}
+                class=${tabCls(curTab === 'finalview')}>최종편성안 조회</button>`}
             </nav>
             <div class="ml-auto flex items-center gap-2 flex-wrap justify-end">
               <span class="flex items-center gap-1 text-[12px] px-2 py-1 rounded-full whitespace-nowrap shrink-0"
                 style=${{ background: roleCfg.color + '18', color: roleCfg.color }} title="현재 로그인 — 모든 수정이 이 이름으로 기록됩니다">
                 <span class="w-1.5 h-1.5 rounded-full" style=${{ background: roleCfg.color }}></span>
-                <b>${roleCfg.label}</b><span class="opacity-80">· ${auth.name}</span>
+                <b>${roleCfg.label}</b><span class="opacity-80">· ${displayName(auth)}</span>
               </span>
               <div class="flex items-center rounded border border-slate-300 bg-white overflow-hidden shrink-0">
                 <button onClick=${() => store.undo()} disabled=${!store.canUndo()}
@@ -1498,6 +1604,7 @@
         <main class="flex-1 min-h-0 flex flex-col border-t border-slate-300">
           ${curTab === 'schedule' ? html`<${ScheduleView} state=${state} onSaved=${() => setTab('final')} />`
             : curTab === 'final' ? html`<${FinalScheduleView} state=${state} />`
+            : curTab === 'finalview' ? html`<${FinalScheduleView} state=${state} readOnly=${true} />`
             : html`<${BidBoard} state=${state} />`}
         </main>
 
