@@ -538,6 +538,46 @@
         emit();
         return p;
       },
+      // 8월 프로그램별 입찰 일괄 가져오기 (엑셀 추출 데이터) — 해당 프로그램 8월 기존 입찰은 교체
+      importAugBids(list) {
+        if (!list || !list.length) return { added: 0 };
+        const progs = new Set(list.map((x) => x.programId));
+        const prefix = '2026-08';
+        // 1) 대상 프로그램의 8월 기존 입찰 제거 (중복 방지)
+        const augDayIds = new Set(state.days
+          .filter((d) => progs.has(d.programId) && d.date.startsWith(prefix)).map((d) => d.id));
+        state.bids = state.bids.filter((b) => !augDayIds.has(b.dayId));
+        let added = 0, newDays = 0;
+        list.forEach((it) => {
+          let day = state.days.find((d) => d.programId === it.programId && d.date === it.date);
+          if (!day) {
+            const dt = new Date(it.date + 'T00:00:00');
+            day = { id: 'day_' + it.programId + '_' + it.date, programId: it.programId,
+                    date: it.date, weekday: dt.getDay(), slots: [] };
+            state.days.push(day); newDays++;
+          }
+          let slot;
+          if (it.bucket || !it.start) {
+            slot = day.slots.find((s) => s.bucket);
+            if (!slot) { slot = { id: 'slot_' + uid(), start: '', end: '', label: '미정', bucket: true, manual: true }; day.slots.unshift(slot); }
+          } else {
+            slot = day.slots.find((s) => s.start === it.start && s.end === it.end);
+            if (!slot) {
+              slot = { id: 'slot_' + uid(), start: it.start, end: it.end, manual: true };
+              day.slots.push(slot);
+              day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
+            }
+          }
+          const product = { name: it.name };
+          if (it.durationMin) product.durationMin = it.durationMin;
+          state.bids.push(stamp({ id: uid(), teamId: it.teamId, dayId: day.id, slotId: slot.id, product, createdAt: nowISO() }));
+          added++;
+        });
+        state.days.sort((a, b) => a.date.localeCompare(b.date));
+        log({ action: '엑셀가져오기', detail: `8월 입찰 ${added}건 가져오기 (프로그램 ${progs.size}개)` + (newDays ? ` · 편성일 ${newDays}개 생성` : '') });
+        emit();
+        return { added, newDays, programs: progs.size };
+      },
       // 캐스팅 특이사항 메모 (PD/쇼호스트 휴가·불가일 등) — 프로그램별
       setCastingMemo(programId, text) {
         if (!state.castingMemo) state.castingMemo = {};
