@@ -323,11 +323,13 @@
     const isThu = day.weekday === 4, isSat = day.weekday === 6;
     const accent = isThu ? '#da291c' : isSat ? '#2563eb' : '#7c3aed';
     const [addOpen, setAddOpen] = useState(false);
+    const [quickOpen, setQuickOpen] = useState(false);
     return html`
       <div class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div class="flex items-center justify-between px-3 py-2 text-white" style=${{ background: accent }}>
           <div class="font-bold text-sm">${fmtDay(day)}</div>
           <div class="flex items-center gap-2 text-[11px]">
+            <button onClick=${() => setQuickOpen(true)} class="font-semibold bg-white/20 hover:bg-white/30 px-1.5 py-0.5 rounded">+ 상품</button>
             <button onClick=${() => setAddOpen(true)} class="hover:underline">+ 시간대</button>
             <button onClick=${() => store.addSlot(day.id, { order: true })} class="hover:underline">+ 순번</button>
             <button onClick=${() => confirm(`${fmtDay(day)} 편성일을 삭제할까요?`) && store.removeDay(day.id)}
@@ -336,11 +338,43 @@
         </div>
         <div class="p-2 grid gap-2" style=${{ gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))' }}>
           ${day.slots.length === 0
-            ? html`<div class="text-[12px] text-slate-400 py-3 text-center col-span-full">시간대가 없습니다. “+ 시간대”로 추가하세요.</div>`
+            ? html`<div class="text-[12px] text-slate-400 py-3 text-center col-span-full">시간대가 없습니다. “+ 상품” 또는 “+ 시간대”로 추가하세요.</div>`
             : day.slots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} onEdit=${onEdit} />`)}
         </div>
         ${addOpen && html`<${AddSlotModal} day=${day} onClose=${() => setAddOpen(false)} />`}
+        ${quickOpen && html`<${QuickAddModal} state=${state} day=${day} onClose=${() => setQuickOpen(false)} />`}
       </div>`;
+  }
+
+  // 수기 상품 추가 (상품명 / 노출분 / 시간 / 팀명만 — 시간 입력 시 편성표 자동 반영)
+  function QuickAddModal({ state, day, onClose }) {
+    const teams = programTeams(state);
+    const [name, setName] = useState('');
+    const [dur, setDur] = useState('');
+    const [start, setStart] = useState('');
+    const [team, setTeam] = useState(teams[0] ? teams[0].id : 'etc');
+    function save() {
+      if (!name.trim()) { alert('상품명을 입력하세요.'); return; }
+      if (!/^\d{1,2}:\d{2}$/.test(start)) { alert('시간을 24시간 형식(예: 21:00)으로 입력하세요.'); return; }
+      store.addQuickPlacement({ dayId: day.id, start, durationMin: dur ? parseInt(dur, 10) : null, productName: name.trim(), teamId: team });
+      onClose();
+    }
+    return html`
+      <${Modal} title=${`${fmtDay(day)} · 상품 수기 추가`} onClose=${onClose} onSave=${save}>
+        <${Field} label="상품명 *">
+          <input value=${name} onInput=${(e) => setName(e.target.value)} class=${inputCls} autofocus placeholder="예: 롯데호텔김치" />
+        <//>
+        <div class="grid grid-cols-2 gap-3">
+          <${Field} label="시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${setStart} /><//>
+          <${Field} label="노출분"><input type="number" value=${dur} onInput=${(e) => setDur(e.target.value)} class=${inputCls} placeholder="예: 20" /><//>
+        </div>
+        <${Field} label="팀명">
+          <select value=${team} onChange=${(e) => setTeam(e.target.value)} class=${inputCls}>
+            ${teams.map((t) => html`<option key=${t.id} value=${t.id}>${t.name}</option>`)}
+          </select>
+        <//>
+        <div class="text-[12px] text-ink-soft">시간을 입력하면 편성표에 해당 시간대(시작~시작+노출분)로 자동 반영됩니다. 구성·가격 등은 최종편성안에서 보강하세요.</div>
+      <//>`;
   }
 
   function AddSlotModal({ day, onClose }) {

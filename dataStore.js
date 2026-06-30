@@ -518,6 +518,26 @@
         emit();
         return p;
       },
+      // 수기 상품 추가 (PD 편성표): 시간 입력 → 해당 시간대 슬롯 자동 생성 후 편성
+      addQuickPlacement({ dayId, start, end, durationMin, productName, teamId }) {
+        const day = state.days.find((d) => d.id === dayId);
+        if (!day || !start) return;
+        const dur = durationMin ? Number(durationMin) : null;
+        const e = end || (dur ? toHHMM(toMin(start) + dur) : start);
+        const slot = ensureSlotOnDay(day, start, e);
+        slot.manual = true;
+        const p = stamp({
+          id: uid(), slotId: slot.id, programId: day.programId, sourceBidId: null,
+          teamId: teamId || 'etc', productName: productName || '(미정)', note: '', memo: '',
+          detail: {}, durationMin: dur,
+          pd: '', host: '', studio: '', moveCount: 0, createdAt: nowISO(),
+        });
+        state.placements.push(p);
+        log({ action: '편성', productName: p.productName, teamName: teamName(p.teamId),
+              from: '수기추가', to: slotLabel(slot.id) });
+        emit();
+        return p;
+      },
       // 빈 카드(입찰 없이) 직접 편성
       addPlacement(slotId, { productName, teamId, note }) {
         const f = findSlot(slotId);
