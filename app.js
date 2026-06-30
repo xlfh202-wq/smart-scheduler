@@ -517,6 +517,8 @@
     const [editing, setEditing] = useState(null);
     const [snapOpen, setSnapOpen] = useState(false);
     const [addDayOpen, setAddDayOpen] = useState(false);
+    const [memoOpen, setMemoOpen] = useState(false);
+    const hasMemo = !!(state.castingMemo && state.castingMemo[state.activeProgram]);
     const { year, month } = state.view;
     const days = daysInView(state);
     const monthSlotIds = new Set(days.flatMap((d) => d.slots.map((s) => s.id)));
@@ -546,6 +548,9 @@
                 : html`<span class="text-[11px] font-normal text-slate-400 ml-1">· 저장 안 됨</span>`}
             </h2>
             <div class="flex items-center gap-2 flex-wrap justify-end">
+              <button onClick=${() => setMemoOpen(true)}
+                class=${`text-xs px-2.5 py-1 rounded border whitespace-nowrap shrink-0 ${hasMemo ? 'border-amber-400 text-amber-700 bg-amber-50' : 'border-slate-300 bg-white hover:border-brand hover:text-brand'}`}
+                title="PD·쇼호스트 캐스팅 특이사항(휴가·불가일 등)">📌 캐스팅 메모${hasMemo ? ' ●' : ''}</button>
               <button onClick=${fillFromBids}
                 class="text-xs px-2.5 py-1 rounded border border-cyan-300 text-cyan-700 bg-white hover:bg-cyan-50 whitespace-nowrap shrink-0"
                 title="이 달의 입찰을 편성표에 일괄 반영 (기존 편성은 교체)">입찰 일괄 편성</button>
@@ -568,9 +573,10 @@
               </div>`)}
           </div>
         </div>
-        ${editing && html`<${MetaEditor} p=${editing} onClose=${() => setEditing(null)} />`}
+        ${editing && html`<${MetaEditor} p=${editing} state=${state} onClose=${() => setEditing(null)} />`}
         ${snapOpen && html`<${SnapshotsModal} state=${state} onClose=${() => setSnapOpen(false)} />`}
         ${addDayOpen && html`<${AddDayModal} state=${state} onClose=${() => setAddDayOpen(false)} />`}
+        ${memoOpen && html`<${CastingMemoModal} state=${state} onClose=${() => setMemoOpen(false)} />`}
         ${saveOpen && html`<${SaveSnapshotModal} year=${year} month=${month} count=${placedCount} onSave=${doSave} onClose=${() => setSaveOpen(false)} />`}
       </div>`;
   }
@@ -587,10 +593,10 @@
   }
 
   // 인라인 편집 셀 (blur 시 커밋)
-  function EditCell({ value, onCommit, placeholder, color }) {
+  function EditCell({ value, onCommit, placeholder, color, list }) {
     const [v, setV] = useState(value || '');
     useEffect(() => { setV(value || ''); }, [value]);
-    return html`<input value=${v}
+    return html`<input value=${v} list=${list || undefined}
       onInput=${(e) => setV(e.target.value)}
       onBlur=${() => { if (v !== (value || '')) onCommit(v); }}
       onKeyDown=${(e) => { if (e.key === 'Enter') e.target.blur(); }}
@@ -733,10 +739,14 @@
         ? html`<div class=${`px-2 py-1.5 text-[12px] whitespace-pre-wrap ${o.color || ''}`}>${value || ''}</div>`
         : html`<${EditCell} value=${value} onCommit=${onCommit} placeholder=${o.ph || ''} color=${o.color || ''} />`;
     };
-    // 캐스팅(PD/쇼호스트/스튜디오): 최유라쇼 등은 드롭다운, 아니면 자유입력
+    // 캐스팅: PD/스튜디오는 드롭다운, 쇼호스트는 추천목록+자유입력, 그 외 자유입력
     const castCell = (p, field) => {
       const v = p[field] || '';
       if (readOnly) return html`<div class="px-2 py-1.5 text-[12px]">${v}</div>`;
+      if (field === 'host') {
+        return html`<${EditCell} value=${v} list="cast-host-dl" placeholder="쇼호스트"
+          onCommit=${(val) => store.updatePlacementMeta(p.id, { host: val })} />`;
+      }
       if (castOpts && castOpts[field]) {
         const opts = castOpts[field];
         return html`<select value=${v} onChange=${(e) => store.updatePlacementMeta(p.id, { [field]: e.target.value })}
@@ -751,6 +761,7 @@
 
     return html`
       <div class="flex-1 overflow-auto p-4 bg-slate-100">
+        <datalist id="cast-host-dl">${((castOpts && castOpts.host) || []).map((o) => html`<option key=${o} value=${o}></option>`)}</datalist>
         <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
           <h2 class="text-base font-bold text-ink">${prog.name} · ${year}년 ${month}월 최종편성안
             <span class="text-[12px] font-normal text-ink-soft">총 ${total}편성${readOnly ? ' · 조회 전용' : ' · 셀을 클릭해 직접 수정'}</span></h2>
@@ -920,19 +931,20 @@
   /* =====================================================================
    *  배정 편집 모달 (PD / 쇼호스트 / 스튜디오)
    * ===================================================================== */
-  function MetaEditor({ p, onClose }) {
+  function MetaEditor({ p, onClose, state }) {
     const [pd, setPd] = useState(p.pd || '');
     const [host, setHost] = useState(p.host || '');
     const [studio, setStudio] = useState(p.studio || '');
     const [dur, setDur] = useState(p.durationMin || '');
     const castOpts = (window.AUTH.casting && window.AUTH.casting[p.programId]) || null;
+    const memo = (state && state.castingMemo && state.castingMemo[p.programId]) || '';
     function save() {
       store.updatePlacementMeta(p.id, {
         pd, host, studio, durationMin: dur ? parseInt(dur, 10) : null,
       });
       onClose();
     }
-    // 옵션 있으면 드롭다운(+직접입력 허용), 없으면 자유입력
+    // PD/스튜디오: 드롭다운(+직접입력), 쇼호스트: 추천목록 + 자유입력
     const pick = (val, setVal, opts, ph) => opts
       ? html`<select value=${opts.includes(val) || !val ? val : '__custom'} onChange=${(e) => setVal(e.target.value === '__custom' ? (val || ' ') : e.target.value)} class=${inputCls}>
           <option value="">- 선택 -</option>
@@ -942,12 +954,30 @@
       : html`<input value=${val} onInput=${(e) => setVal(e.target.value)} class=${inputCls} placeholder=${ph} />`;
     return html`
       <${Modal} title=${`배정 편집 · ${p.productName}`} onClose=${onClose} onSave=${save}>
+        ${memo && html`<div class="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-[12px] text-amber-800 whitespace-pre-line">
+          <div class="font-semibold mb-0.5">📌 캐스팅 특이사항</div>${memo}</div>`}
         <${Field} label="담당 PD">${pick(pd, setPd, castOpts && castOpts.pd, '예: 강성현')}<//>
-        <${Field} label="쇼호스트">${pick(host, setHost, castOpts && castOpts.host, '예: 홍성보')}<//>
+        <${Field} label="쇼호스트 (직접 입력 가능)">
+          <input value=${host} onInput=${(e) => setHost(e.target.value)} list="meta-host-dl" class=${inputCls} placeholder="예: 홍성보 / 원하는 인물 입력" />
+          <datalist id="meta-host-dl">${((castOpts && castOpts.host) || []).map((o) => html`<option key=${o} value=${o}></option>`)}</datalist>
+        <//>
         <${Field} label="스튜디오">${pick(studio, setStudio, castOpts && castOpts.studio, '예: 250')}<//>
         <${Field} label="방송 분량(분)">
           <input type="number" value=${dur} onInput=${(e) => setDur(e.target.value)} class=${inputCls} placeholder="예: 30" />
         <//>
+      <//>`;
+  }
+
+  // 캐스팅 특이사항 메모 (PD/관리자 전용 — 휴가·특정일 불가 등)
+  function CastingMemoModal({ state, onClose }) {
+    const pid = state.activeProgram;
+    const [text, setText] = useState((state.castingMemo && state.castingMemo[pid]) || '');
+    function save() { store.setCastingMemo(pid, text); onClose(); }
+    return html`
+      <${Modal} title=${`${activeProgramObj(state).name} · 캐스팅 특이사항`} onClose=${onClose} onSave=${save}>
+        <div class="text-[12px] text-ink-soft">PD·쇼호스트 배정 시 참고할 메모입니다. (예: “강성현 7/15 휴가”, “홍성보 7/20~25 불가”) PD·관리자만 보고 수정합니다.</div>
+        <textarea value=${text} onInput=${(e) => setText(e.target.value)} rows="8" class=${`${inputCls} leading-relaxed`}
+          placeholder=${'예)\n· 강성현 PD: 7/15(목) 휴가\n· 홍성보: 7/20~7/25 불가\n· 250스튜디오: 7/10 점검'}></textarea>
       <//>`;
   }
 
@@ -1431,11 +1461,11 @@
       return () => window.removeEventListener('keydown', h);
     }, []);
     return html`
-      <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick=${onClose}>
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[88vh] flex flex-col" onClick=${(e) => e.stopPropagation()}>
+      <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[88vh] flex flex-col">
           <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200">
             <h3 class="font-bold text-ink text-sm">${title}</h3>
-            <button onClick=${onClose} class="text-ink-soft hover:text-brand text-lg leading-none">✕</button>
+            <button onClick=${onClose} class="text-ink-soft hover:text-brand text-lg leading-none" title="닫기">✕</button>
           </div>
           <div class="flex-1 overflow-y-auto px-4 py-3 space-y-3">${children}</div>
           <div class="flex items-center gap-2 px-4 py-3 border-t border-slate-200">

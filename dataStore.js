@@ -538,6 +538,13 @@
         emit();
         return p;
       },
+      // 캐스팅 특이사항 메모 (PD/쇼호스트 휴가·불가일 등) — 프로그램별
+      setCastingMemo(programId, text) {
+        if (!state.castingMemo) state.castingMemo = {};
+        state.castingMemo[programId] = text;
+        log({ action: '캐스팅메모', detail: '캐스팅 특이사항 수정' });
+        emit();
+      },
       // 빈 카드(입찰 없이) 직접 편성
       addPlacement(slotId, { productName, teamId, note }) {
         const f = findSlot(slotId);
