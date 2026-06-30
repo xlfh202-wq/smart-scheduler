@@ -578,8 +578,18 @@
         if (!p) return;
         Object.assign(p, patch);
         stamp(p);
+        // 노출분 변경 → 단독 편성된 시간대 띠를 그 길이에 맞춰 자동 조정
+        let timeMsg = '';
+        if (patch.durationMin) {
+          const f = findSlot(p.slotId);
+          const inSlot = state.placements.filter((x) => x.slotId === p.slotId);
+          if (f && f.slot.start && inSlot.length === 1) {
+            f.slot.end = toHHMM(toMin(f.slot.start) + Number(patch.durationMin));
+            timeMsg = ` · 시간대 ${f.slot.start}~${f.slot.end}(${patch.durationMin}분)로 조정`;
+          }
+        }
         log({ action: '배정변경', productName: p.productName, teamName: teamName(p.teamId),
-              detail: `PD:${p.pd||'-'} / 쇼호스트:${p.host||'-'} / 스튜디오:${p.studio||'-'}` });
+              detail: `PD:${p.pd||'-'} / 쇼호스트:${p.host||'-'} / 스튜디오:${p.studio||'-'}${timeMsg}` });
         emit();
       },
       // 최종편성안 직접 수정: { productName?, items?, detail:{note,comp,prep,price,margin,...} }
