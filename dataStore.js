@@ -61,6 +61,17 @@
 
   /* ---------- 프로그램(테마PGM) ---------- */
   const MAIN_PROGRAM = 'pgm_최유라쇼';
+  // 프로그램별 고정 편성 시간대 (요일 wd: 0=일..6=토, slots=[start,end]) — 매월 자동 생성
+  const PROGRAM_SCHEDULE = {
+    'pgm_최유라쇼':  [{ wd: 4, slots: [['20:45', '21:45'], ['21:45', '22:50']] }, { wd: 6, slots: [['08:20', '09:20'], ['09:20', '10:20'], ['10:20', '10:35']] }],
+    'pgm_유난희':    [{ wd: 2, slots: [['08:15', '10:25']] }],
+    'pgm_엘쇼':      [{ wd: 6, slots: [['22:30', '01:00']] }],
+    'pgm_룩앳미':    [{ wd: 4, slots: [['07:15', '09:25']] }],
+    'pgm_최희히트템': [{ wd: 4, slots: [['18:30', '19:35']] }, { wd: 6, slots: [['17:30', '18:35']] }],
+    'pgm_유리네':    [{ wd: 3, slots: [['19:35', '20:45']] }, { wd: 0, slots: [['08:50', '10:00']] }],
+    'pgm_영스타일':  [{ wd: 3, slots: [['21:45', '22:55']] }, { wd: 5, slots: [['08:15', '10:25']] }],
+    'pgm_쇼핑리스트': [{ wd: 0, slots: [['15:00', '16:10']] }],
+  };
   const PROGRAM_COLORS = ['#da291c', '#2563eb', '#0891b2', '#db2777', '#16a34a', '#ea580c',
     '#7c3aed', '#d97706', '#0d9488', '#e11d48', '#4f46e5', '#65a30d', '#9333ea', '#475569'];
   // 영스타일 수/금 → 하나로 병합, 리빙통합/패션통합 탭 제외
@@ -388,17 +399,33 @@
       },
 
       /* ---------- 월/연 이동 ---------- */
-      // 활성 프로그램에 해당 월의 날(목/토)이 없으면 생성 (최유라쇼만 표준 자동생성)
+      // 프로그램별 고정 편성 스케줄로 해당 월의 방송일 + 시간대를 미리 생성 (중복 없이)
       ensureMonth(year, month, programId) {
         const pid = programId || state.activeProgram || MAIN_PROGRAM;
-        if (pid !== MAIN_PROGRAM) return; // 그 외 프로그램은 엑셀 편성일만 사용
-        const prefix = `${year}-${String(month).padStart(2, '0')}`;
-        if (state.days.some((d) => d.programId === pid && d.date.startsWith(prefix))) return;
-        state.days = state.days.concat(buildYearDays(year, pid).filter((d) => d.date.startsWith(prefix)))
-          .sort((a, b) => a.date.localeCompare(b.date));
+        const sched = PROGRAM_SCHEDULE[pid];
+        if (!sched) return; // 스케줄 미정의 프로그램은 엑셀 편성일만 사용
+        const mm = String(month).padStart(2, '0');
+        const last = new Date(year, month, 0).getDate();
+        for (let dnum = 1; dnum <= last; dnum++) {
+          const wd = new Date(year, month - 1, dnum).getDay();
+          const entry = sched.find((s) => s.wd === wd);
+          if (!entry) continue;
+          const dateStr = `${year}-${mm}-${String(dnum).padStart(2, '0')}`;
+          let day = state.days.find((d) => d.programId === pid && d.date === dateStr);
+          if (!day) { day = { id: 'day_' + pid + '_' + dateStr, programId: pid, date: dateStr, weekday: wd, slots: [] }; state.days.push(day); }
+          entry.slots.forEach(([s, e]) => {
+            if (!day.slots.some((x) => x.start === s && x.end === e)) day.slots.push({ id: 'slot_' + uid(), start: s, end: e, std: true });
+          });
+          day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
+        }
+        state.days.sort((a, b) => a.date.localeCompare(b.date));
+      },
+      // 모든 스케줄 프로그램에 대해 해당 월의 고정 시간대를 미리 생성
+      ensureScheduleAll(year, month) {
+        Object.keys(PROGRAM_SCHEDULE).forEach((pid) => this.ensureMonth(year, month, pid));
       },
       setView(year, month) {
-        this.ensureMonth(year, month);
+        this.ensureScheduleAll(year, month);
         state.view = { year, month };
         emit();
       },

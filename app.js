@@ -739,29 +739,17 @@
         ? html`<div class=${`px-2 py-1.5 text-[12px] whitespace-pre-wrap ${o.color || ''}`}>${value || ''}</div>`
         : html`<${EditCell} value=${value} onCommit=${onCommit} placeholder=${o.ph || ''} color=${o.color || ''} />`;
     };
-    // 캐스팅: PD/스튜디오는 드롭다운, 쇼호스트는 추천목록+자유입력, 그 외 자유입력
+    // 캐스팅(PD/쇼호스트/스튜디오): 추천목록(datalist) + 자유입력 통일
     const castCell = (p, field) => {
       const v = p[field] || '';
       if (readOnly) return html`<div class="px-2 py-1.5 text-[12px]">${v}</div>`;
-      if (field === 'host') {
-        return html`<${EditCell} value=${v} list="cast-host-dl" placeholder="쇼호스트"
-          onCommit=${(val) => store.updatePlacementMeta(p.id, { host: val })} />`;
-      }
-      if (castOpts && castOpts[field]) {
-        const opts = castOpts[field];
-        return html`<select value=${v} onChange=${(e) => store.updatePlacementMeta(p.id, { [field]: e.target.value })}
-          class="w-full px-1.5 py-1.5 text-[12px] bg-transparent outline-none focus:bg-amber-50 cursor-pointer">
-          <option value="">-</option>
-          ${opts.map((o) => html`<option key=${o} value=${o}>${o}</option>`)}
-          ${v && !opts.includes(v) ? html`<option value=${v}>${v}</option>` : ''}
-        </select>`;
-      }
-      return html`<${EditCell} value=${v} onCommit=${(val) => store.updatePlacementMeta(p.id, { [field]: val })} />`;
+      return html`<${EditCell} value=${v} list=${castOpts && castOpts[field] ? 'cast-' + field + '-dl' : undefined}
+        onCommit=${(val) => store.updatePlacementMeta(p.id, { [field]: val })} />`;
     };
 
     return html`
       <div class="flex-1 overflow-auto p-4 bg-slate-100">
-        <datalist id="cast-host-dl">${((castOpts && castOpts.host) || []).map((o) => html`<option key=${o} value=${o}></option>`)}</datalist>
+        ${['pd', 'host', 'studio'].map((fld) => html`<datalist key=${fld} id=${'cast-' + fld + '-dl'}>${((castOpts && castOpts[fld]) || []).map((o) => html`<option key=${o} value=${o}></option>`)}</datalist>`)}
         <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
           <h2 class="text-base font-bold text-ink">${prog.name} · ${year}년 ${month}월 최종편성안
             <span class="text-[12px] font-normal text-ink-soft">총 ${total}편성${readOnly ? ' · 조회 전용' : ' · 셀을 클릭해 직접 수정'}</span></h2>
@@ -944,24 +932,17 @@
       });
       onClose();
     }
-    // PD/스튜디오: 드롭다운(+직접입력), 쇼호스트: 추천목록 + 자유입력
-    const pick = (val, setVal, opts, ph) => opts
-      ? html`<select value=${opts.includes(val) || !val ? val : '__custom'} onChange=${(e) => setVal(e.target.value === '__custom' ? (val || ' ') : e.target.value)} class=${inputCls}>
-          <option value="">- 선택 -</option>
-          ${opts.map((o) => html`<option key=${o} value=${o}>${o}</option>`)}
-          ${val && !opts.includes(val) ? html`<option value=${val}>${val}</option>` : ''}
-        </select>`
-      : html`<input value=${val} onInput=${(e) => setVal(e.target.value)} class=${inputCls} placeholder=${ph} />`;
+    // 캐스팅: 목록에서 선택 또는 직접 입력 (드롭다운 + 수기입력 통일)
+    const castField = (field, val, setVal, ph) => html`
+      <input value=${val} onInput=${(e) => setVal(e.target.value)} list=${castOpts && castOpts[field] ? 'meta-' + field + '-dl' : undefined} class=${inputCls} placeholder=${ph} />
+      ${castOpts && castOpts[field] ? html`<datalist id=${'meta-' + field + '-dl'}>${castOpts[field].map((o) => html`<option key=${o} value=${o}></option>`)}</datalist>` : ''}`;
     return html`
       <${Modal} title=${`배정 편집 · ${p.productName}`} onClose=${onClose} onSave=${save}>
         ${memo && html`<div class="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-[12px] text-amber-800 whitespace-pre-line">
           <div class="font-semibold mb-0.5">📌 캐스팅 특이사항</div>${memo}</div>`}
-        <${Field} label="담당 PD">${pick(pd, setPd, castOpts && castOpts.pd, '예: 강성현')}<//>
-        <${Field} label="쇼호스트 (직접 입력 가능)">
-          <input value=${host} onInput=${(e) => setHost(e.target.value)} list="meta-host-dl" class=${inputCls} placeholder="예: 홍성보 / 원하는 인물 입력" />
-          <datalist id="meta-host-dl">${((castOpts && castOpts.host) || []).map((o) => html`<option key=${o} value=${o}></option>`)}</datalist>
-        <//>
-        <${Field} label="스튜디오">${pick(studio, setStudio, castOpts && castOpts.studio, '예: 250')}<//>
+        <${Field} label="담당 PD (선택/직접입력)">${castField('pd', pd, setPd, '예: 강성현')}<//>
+        <${Field} label="쇼호스트 (선택/직접입력)">${castField('host', host, setHost, '예: 홍성보')}<//>
+        <${Field} label="스튜디오 (선택/직접입력)">${castField('studio', studio, setStudio, '예: 250')}<//>
         <${Field} label="방송 분량(분)">
           <input type="number" value=${dur} onInput=${(e) => setDur(e.target.value)} class=${inputCls} placeholder="예: 30" />
         <//>
@@ -1633,6 +1614,11 @@
     // 로그인 식별을 데이터 계층에 반영 → 이후 모든 변경이 이 이름으로 기록됨
     const displayName = (a) => `${a && a.team ? a.team + ' ' : ''}${(a && a.name) || ''}`.trim();
     useEffect(() => { if (auth) store.setUser(displayName(auth)); }, [auth]);
+    // 로그인 후 1회: 현재 월의 프로그램별 고정 편성시간대 생성
+    const schedInit = useRef(false);
+    useEffect(() => {
+      if (auth && !schedInit.current) { schedInit.current = true; store.setView(state.view.year, state.view.month); }
+    }, [auth]);
 
     // Ctrl/Cmd+Z 되돌리기, Ctrl/Cmd+Shift+Z 또는 Ctrl+Y 다시
     useEffect(() => {
