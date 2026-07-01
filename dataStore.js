@@ -58,6 +58,13 @@
     if (d < 0) d += 24 * 60;
     return d;
   }
+  // 두 시간대 슬롯이 겹치는지 (자정 넘김 고려)
+  function slotOverlap(a, b) {
+    if (!a.start || !a.end || !b.start || !b.end) return false;
+    let as = toMin(a.start), ae = toMin(a.end); if (ae <= as) ae += 1440;
+    let bs = toMin(b.start), be = toMin(b.end); if (be <= bs) be += 1440;
+    return as < be && bs < ae;
+  }
 
   /* ---------- 프로그램(테마PGM) ---------- */
   const MAIN_PROGRAM = 'pgm_최유라쇼';
@@ -446,16 +453,16 @@
           if (!entry) continue;
           const dateStr = `${year}-${mm}-${String(dnum).padStart(2, '0')}`;
           let day = state.days.find((d) => d.programId === pid && d.date === dateStr);
-          if (!day) { day = { id: 'day_' + pid + '_' + dateStr, programId: pid, date: dateStr, weekday: wd, slots: [] }; state.days.push(day); }
+          // 기존 날짜는 절대 건드리지 않음 (편집된 슬롯 위에 고정슬롯 재생성 → 더블링 방지)
+          if (day) continue;
+          day = { id: 'day_' + pid + '_' + dateStr, programId: pid, date: dateStr, weekday: wd, slots: [] };
+          state.days.push(day);
           if (FASHION_PROGRAMS.has(pid)) {
             // 패션: 방송시간은 날짜 옆(airTime)에 표기, 슬롯은 '1부' 순번 (부는 PD가 나눔)
-            if (!day.airTime) day.airTime = entry.slots[0][0] + '~' + entry.slots[0][1];
-            if (!day.slots.some((x) => x.label && !x.start)) day.slots.push({ id: 'slot_' + uid(), start: '', end: '', label: '1부' });
+            day.airTime = entry.slots[0][0] + '~' + entry.slots[0][1];
+            day.slots.push({ id: 'slot_' + uid(), start: '', end: '', label: '1부' });
           } else {
-            entry.slots.forEach(([s, e]) => {
-              if (!day.slots.some((x) => x.start === s && x.end === e)) day.slots.push({ id: 'slot_' + uid(), start: s, end: e, std: true });
-            });
-            day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
+            entry.slots.forEach(([s, e]) => day.slots.push({ id: 'slot_' + uid(), start: s, end: e, std: true }));
           }
         }
         state.days.sort((a, b) => a.date.localeCompare(b.date));
@@ -679,12 +686,12 @@
             day.slots = [first];
             return;
           }
-          // 라이프스타일
+          // 라이프스타일 (스케줄 슬롯을 재생성하지 않음 — 재생성이 더블링 원인)
           const validKeys = entry ? entry.slots.map(([s, e]) => s + '~' + e) : [];
-          if (entry) entry.slots.forEach(([s, e]) => {
-            if (!day.slots.some((x) => x.start === s && x.end === e)) day.slots.push({ id: 'slot_' + uid(), start: s, end: e, std: true });
-          });
-          const target = entry ? day.slots.find((x) => x.start === entry.slots[0][0] && x.end === entry.slots[0][1]) : null;
+          const hasContent = (sl) => state.bids.some((b) => b.slotId === sl.id) || state.placements.some((p) => p.slotId === sl.id);
+          // 미정 버킷 → 그 날의 시간슬롯(없으면 스케줄 첫 슬롯 생성)에 병합
+          let target = day.slots.find((x) => x.start && x.end && !x.bucket);
+          if (!target && entry) { target = { id: 'slot_' + uid(), start: entry.slots[0][0], end: entry.slots[0][1], std: true }; day.slots.push(target); }
           if (target) {
             day.slots.filter((x) => x.bucket).forEach((b) => {
               state.bids.forEach((bd) => { if (bd.slotId === b.id) bd.slotId = target.id; });
@@ -693,11 +700,14 @@
             });
             day.slots = day.slots.filter((x) => !x.bucket);
           }
+          // 빈 고정(std) 슬롯 제거: 스케줄에 없거나, 다른 '내용 있는' 슬롯과 시간이 겹치면
+          const snapshot = day.slots.slice();
           day.slots = day.slots.filter((x) => {
+            if (!x.std || hasContent(x)) return true;
             const key = (x.start || '') + '~' + (x.end || '');
-            const wrongFixed = x.std && !validKeys.includes(key);
-            const empty = !state.bids.some((b) => b.slotId === x.id) && !state.placements.some((p) => p.slotId === x.id);
-            if (wrongFixed && empty) { removedSlots++; return false; }
+            const notInSched = !validKeys.includes(key);
+            const overlapsFilled = snapshot.some((o) => o.id !== x.id && hasContent(o) && slotOverlap(x, o));
+            if (notInSched || overlapsFilled) { removedSlots++; return false; }
             return true;
           });
           day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
