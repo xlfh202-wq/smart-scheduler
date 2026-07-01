@@ -319,15 +319,34 @@
   /* =====================================================================
    *  요일 블록
    * ===================================================================== */
+  // 방송 시간(패션: 날짜 옆 표기·수정) — 자유 입력
+  function AirTimeButton({ day, dark }) {
+    const [open, setOpen] = useState(false);
+    const [v, setV] = useState(day.airTime || '');
+    useEffect(() => setV(day.airTime || ''), [day.airTime]);
+    function save() { store.setDayAirTime(day.id, v); setOpen(false); }
+    return html`
+      <button onClick=${() => setOpen(true)}
+        class=${`text-[12px] font-bold tabular-nums px-1.5 py-0.5 rounded ${dark ? 'bg-white/25 hover:bg-white/40 text-white' : 'bg-slate-200 hover:bg-slate-300 text-ink'}`}
+        title="방송 시간 (클릭해 수정)">${day.airTime || '+ 방송시간'}</button>
+      ${open && html`<${Modal} title=${`${fmtDay(day)} · 방송 시간`} onClose=${() => setOpen(false)} onSave=${save}>
+        <${Field} label="방송 시간 (자유 입력)"><input value=${v} onInput=${(e) => setV(e.target.value)} class=${inputCls} placeholder="예: 22:30~01:00" autofocus /><//>
+      <//>`}`;
+  }
+
   function DayBlock({ state, day, onEdit }) {
     const isThu = day.weekday === 4, isSat = day.weekday === 6;
     const accent = isThu ? '#da291c' : isSat ? '#2563eb' : '#7c3aed';
+    const fashion = programSchema(state) === 'fashion';
     const [addOpen, setAddOpen] = useState(false);
     const [quickOpen, setQuickOpen] = useState(false);
     return html`
       <div class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div class="flex items-center justify-between px-3 py-2 text-white" style=${{ background: accent }}>
-          <div class="font-bold text-sm">${fmtDay(day)}</div>
+          <div class="flex items-center gap-2">
+            <div class="font-bold text-sm">${fmtDay(day)}</div>
+            ${fashion && html`<${AirTimeButton} day=${day} dark=${true} />`}
+          </div>
           <div class="flex items-center gap-2 text-[11px]">
             <button onClick=${() => setQuickOpen(true)} class="font-semibold bg-white/20 hover:bg-white/30 px-1.5 py-0.5 rounded">+ 상품</button>
             <button onClick=${() => setAddOpen(true)} class="hover:underline">+ 시간대</button>
@@ -797,7 +816,7 @@
                 return html`
                   <tr key=${i} class=${`${r.firstOfDay ? 'border-t-2 border-t-slate-300' : ''} ${pend ? 'bg-amber-100' : 'hover:bg-amber-50'}`}>
                     ${r.firstOfDay && html`
-                      <td class=${`${tdMerge} font-semibold tabular-nums text-ink`} rowSpan=${dayCount[r.day.date]}>${m}/${dnum}</td>
+                      <td class=${`${tdMerge} font-semibold tabular-nums text-ink`} rowSpan=${dayCount[r.day.date]}>${m}/${dnum}${r.day.airTime ? html`<div class="text-[10px] font-normal text-ink-soft mt-0.5 whitespace-nowrap">${r.day.airTime}</div>` : ''}</td>
                       <td class=${`${tdMerge} font-semibold ${wdColor}`} rowSpan=${dayCount[r.day.date]}>${wd}</td>`}
                     <td class=${`${td} tabular-nums font-medium ${r.compete ? 'text-amber-700' : ''}`}>
                       ${slotName(r.slot)} ${r.compete && html`<span class="text-[10px] text-amber-600">●경쟁</span>`}
@@ -1006,7 +1025,10 @@
             return html`
             <div key=${day.id} class="rounded-xl border border-slate-200 bg-white overflow-hidden">
               <div class="flex items-center justify-between px-3 py-1.5 bg-slate-100">
-                <span class="font-semibold text-[13px] text-ink">${fmtDay(day)}</span>
+                <span class="flex items-center gap-2">
+                  <span class="font-semibold text-[13px] text-ink">${fmtDay(day)}</span>
+                  ${fashion && html`<${AirTimeButton} day=${day} />`}
+                </span>
                 <div class="flex items-center gap-2 text-[11px] text-ink-soft">
                   ${!fashion && html`<button onClick=${() => setSlotModalDay(day.id)} class="hover:text-brand">+ 시간대</button>`}
                   ${!fashion && html`<button onClick=${() => store.addSlot(day.id, { order: true })} class="hover:text-brand">+ 순번</button>`}

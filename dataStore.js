@@ -325,11 +325,19 @@
                margin: pr.margin, sme: pr.sme, special: pr.special, isNew: pr.isNew, groupCode: pr.groupCode,
                recent: pr.recent };
     }
-    // 날짜 단위 입찰용 슬롯: 해당 요일의 고정 편성 시간대가 있으면 그 슬롯(첫 번째)을 사용,
-    // 없으면 '미정' 버킷 (더블링 방지: 패션도 고정시간대 슬롯에 상품이 담김)
+    // 날짜 단위 입찰용 슬롯:
+    //  · 패션 프로그램 → '1부' 순번 슬롯 (방송시간은 day.airTime 에 별도 표기, 부는 PD가 나눔)
+    //  · 라이프스타일(스케줄 有) → 고정 시간대 슬롯
+    //  · 그 외 → '미정' 버킷
     function ensureBucketSlotOnDay(day) {
       const sched = PROGRAM_SCHEDULE[day.programId];
       const entry = sched && sched.find((s) => s.wd === day.weekday);
+      if (FASHION_PROGRAMS.has(day.programId)) {
+        if (entry && !day.airTime) day.airTime = entry.slots[0][0] + '~' + entry.slots[0][1];
+        let slot = day.slots.find((x) => x.label && !x.start);
+        if (!slot) { slot = { id: 'slot_' + uid(), start: '', end: '', label: '1부' }; day.slots.push(slot); }
+        return slot;
+      }
       if (entry && entry.slots.length) {
         const [s, e] = entry.slots[0];
         let slot = day.slots.find((x) => x.start === s && x.end === e);
@@ -439,10 +447,16 @@
           const dateStr = `${year}-${mm}-${String(dnum).padStart(2, '0')}`;
           let day = state.days.find((d) => d.programId === pid && d.date === dateStr);
           if (!day) { day = { id: 'day_' + pid + '_' + dateStr, programId: pid, date: dateStr, weekday: wd, slots: [] }; state.days.push(day); }
-          entry.slots.forEach(([s, e]) => {
-            if (!day.slots.some((x) => x.start === s && x.end === e)) day.slots.push({ id: 'slot_' + uid(), start: s, end: e, std: true });
-          });
-          day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
+          if (FASHION_PROGRAMS.has(pid)) {
+            // 패션: 방송시간은 날짜 옆(airTime)에 표기, 슬롯은 '1부' 순번 (부는 PD가 나눔)
+            if (!day.airTime) day.airTime = entry.slots[0][0] + '~' + entry.slots[0][1];
+            if (!day.slots.some((x) => x.label && !x.start)) day.slots.push({ id: 'slot_' + uid(), start: '', end: '', label: '1부' });
+          } else {
+            entry.slots.forEach(([s, e]) => {
+              if (!day.slots.some((x) => x.start === s && x.end === e)) day.slots.push({ id: 'slot_' + uid(), start: s, end: e, std: true });
+            });
+            day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
+          }
         }
         state.days.sort((a, b) => a.date.localeCompare(b.date));
       },
@@ -631,19 +645,45 @@
         emit();
         return { added, newDays, programs: progs.size };
       },
-      // 편성시간 중복 정리: 미정 버킷 → 고정 시간대 슬롯으로 병합, 잘못된 빈 슬롯/빈 날짜 제거
+      // 날짜별 방송시간(패션: 날짜 옆 표기) 수정
+      setDayAirTime(dayId, text) {
+        const day = state.days.find((d) => d.id === dayId);
+        if (!day) return;
+        day.airTime = (text || '').trim();
+        log({ action: '방송시간수정', detail: `${day.date} 방송시간 ${day.airTime}` });
+        emit();
+      },
+      // 편성시간 정리: 패션=1부 순번+airTime으로 통합 / 라이프스타일=미정버킷→고정슬롯, 잘못된 빈슬롯·빈날짜 제거
       fixScheduleSlots() {
         let merged = 0, removedSlots = 0, removedDays = 0;
         state.days.forEach((day) => {
           const sched = PROGRAM_SCHEDULE[day.programId];
           if (!sched) return;
           const entry = sched.find((s) => s.wd === day.weekday);
+          if (FASHION_PROGRAMS.has(day.programId)) {
+            // 방송시간: 기존 시간슬롯 or 스케줄 창 → day.airTime
+            if (!day.airTime) {
+              const ts = day.slots.find((x) => x.start && x.end);
+              day.airTime = ts ? `${ts.start}~${ts.end}` : (entry ? `${entry.slots[0][0]}~${entry.slots[0][1]}` : '');
+            }
+            // '1부' 순번 슬롯 확보 후 모든 입찰/편성을 1부로 이동, 나머지 슬롯 제거
+            let first = day.slots.find((x) => x.label === '1부');
+            if (!first) { first = { id: 'slot_' + uid(), start: '', end: '', label: '1부' }; day.slots.push(first); }
+            day.slots.forEach((s) => {
+              if (s.id !== first.id) {
+                state.bids.forEach((b) => { if (b.slotId === s.id) b.slotId = first.id; });
+                state.placements.forEach((p) => { if (p.slotId === s.id) p.slotId = first.id; });
+                merged++;
+              }
+            });
+            day.slots = [first];
+            return;
+          }
+          // 라이프스타일
           const validKeys = entry ? entry.slots.map(([s, e]) => s + '~' + e) : [];
-          // 1) 스케줄 슬롯 보장
           if (entry) entry.slots.forEach(([s, e]) => {
             if (!day.slots.some((x) => x.start === s && x.end === e)) day.slots.push({ id: 'slot_' + uid(), start: s, end: e, std: true });
           });
-          // 2) 미정 버킷 내용을 첫 고정 슬롯으로 이동
           const target = entry ? day.slots.find((x) => x.start === entry.slots[0][0] && x.end === entry.slots[0][1]) : null;
           if (target) {
             day.slots.filter((x) => x.bucket).forEach((b) => {
@@ -653,7 +693,6 @@
             });
             day.slots = day.slots.filter((x) => !x.bucket);
           }
-          // 3) 스케줄에 없는 빈 std 슬롯(옛 잘못된 고정슬롯) 제거
           day.slots = day.slots.filter((x) => {
             const key = (x.start || '') + '~' + (x.end || '');
             const wrongFixed = x.std && !validKeys.includes(key);
@@ -663,12 +702,11 @@
           });
           day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
         });
-        // 4) 스케줄 프로그램의 빈 날짜 제거
         state.days = state.days.filter((d) => {
           if (!PROGRAM_SCHEDULE[d.programId] || d.slots.length > 0) return true;
           removedDays++; return false;
         });
-        log({ action: '편성정리', detail: `미정→고정 ${merged}건 병합 · 빈슬롯 ${removedSlots}개 · 빈날짜 ${removedDays}개 정리` });
+        log({ action: '편성정리', detail: `1부/고정 통합 ${merged}건 · 빈슬롯 ${removedSlots}개 · 빈날짜 ${removedDays}개 정리` });
         emit();
         return { merged, removedSlots, removedDays };
       },
