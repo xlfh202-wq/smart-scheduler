@@ -1903,20 +1903,6 @@
               ${roleCfg.canManage && html`<button onClick=${() => setBackup(true)}
                 class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0"
                 title="자동 백업 목록 / 특정 시점으로 복원">백업/복원</button>`}
-              ${roleCfg.isAdmin && window.BID_IMPORT_AUG && html`<button onClick=${() => {
-                  if (!confirm(`엑셀에서 추출한 8월 프로그램별 입찰 ${window.BID_IMPORT_AUG.length}건을 입찰보드에 등록합니다.\n(각 프로그램 8월 기존 입찰은 교체) 계속할까요?`)) return;
-                  const r = store.importAugBids(window.BID_IMPORT_AUG);
-                  alert(`완료: 입찰 ${r.added}건 등록 (프로그램 ${r.programs}개)` + (r.newDays ? ` · 편성일 ${r.newDays}개 생성` : ''));
-                }}
-                class="text-[13px] px-3 py-1.5 rounded border border-violet-300 text-violet-700 bg-white hover:bg-violet-50 whitespace-nowrap shrink-0"
-                title="엑셀 추출 8월 입찰 일괄 등록 (관리자)">📥 8월 입찰</button>`}
-              ${roleCfg.isAdmin && html`<button onClick=${() => {
-                  if (!confirm('편성시간 중복(미정 버킷/잘못된 고정슬롯)을 정리합니다.\n미정에 있던 상품은 고정 시간대로 이동합니다. 계속할까요?')) return;
-                  const r = store.fixScheduleSlots();
-                  alert(`정리 완료: 미정→고정 ${r.merged}건 병합 · 빈슬롯 ${r.removedSlots}개 · 빈날짜 ${r.removedDays}개 제거`);
-                }}
-                class="text-[13px] px-3 py-1.5 rounded border border-amber-300 text-amber-700 bg-white hover:bg-amber-50 whitespace-nowrap shrink-0"
-                title="편성시간 중복 정리 (관리자)">🔧 편성정리</button>`}
               <button onClick=${logout}
                 class="text-[12px] px-2 py-1.5 rounded border border-slate-300 text-ink-soft hover:border-brand hover:text-brand whitespace-nowrap shrink-0" title="로그아웃">로그아웃</button>
             </div>
