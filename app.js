@@ -600,11 +600,6 @@
       setSaveOpen(false);
       onSaved && onSaved(); // 최종편성안 탭으로 이동
     }
-    function fillFromBids() {
-      if (!confirm(`${year}년 ${month}월 — 기존 편성을 지우고, 입찰보드의 입찰을 편성표에 일괄 반영합니다.\n계속할까요?`)) return;
-      const r = store.fillScheduleFromBids(year, month);
-      alert(`완료: 기존 ${r.removed}건 삭제 · 입찰 ${r.placed}건을 편성표에 반영했습니다.`);
-    }
     return html`
       <div class="flex flex-1 min-h-0">
         <${BidPool} state=${state} />
@@ -620,9 +615,6 @@
               <button onClick=${() => setMemoOpen(true)}
                 class=${`text-xs px-2.5 py-1 rounded border whitespace-nowrap shrink-0 ${hasMemo ? 'border-amber-400 text-amber-700 bg-amber-50' : 'border-slate-300 bg-white hover:border-brand hover:text-brand'}`}
                 title="PD·쇼호스트 캐스팅 특이사항(휴가·불가일 등)">📌 캐스팅 메모${hasMemo ? ' ●' : ''}</button>
-              <button onClick=${fillFromBids}
-                class="text-xs px-2.5 py-1 rounded border border-cyan-300 text-cyan-700 bg-white hover:bg-cyan-50 whitespace-nowrap shrink-0"
-                title="이 달의 입찰을 편성표에 일괄 반영 (기존 편성은 교체)">입찰 일괄 편성</button>
               <button onClick=${() => setAddDayOpen(true)}
                 class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0">+ 편성일 추가</button>
               <button onClick=${() => setSnapOpen(true)}
@@ -1542,19 +1534,22 @@
    *  프로그램 탭 (엑셀/크롬 탭처럼)
    * ===================================================================== */
   function ProgramTabs({ state }) {
+    // 배지 = 현재 보는 월의 프로그램별 편성(상품 배치) 건수
+    const ym = `${state.view.year}-${String(state.view.month).padStart(2, '0')}`;
     const counts = useMemo(() => {
+      const slotMonth = {};
+      state.days.forEach((d) => d.slots.forEach((s) => { slotMonth[s.id] = d.date.slice(0, 7); }));
       const byProg = {};
-      const dayProg = {};
-      state.days.forEach((d) => { dayProg[d.id] = d.programId; d.slots.forEach((s) => { dayProg['s_' + s.id] = d.programId; }); });
-      state.placements.forEach((p) => { const pid = p.programId; if (pid) byProg[pid] = (byProg[pid] || 0) + 1; });
+      state.placements.forEach((p) => { if (p.programId && slotMonth[p.slotId] === ym) byProg[p.programId] = (byProg[p.programId] || 0) + 1; });
       return byProg;
-    }, [state.placements, state.days]);
+    }, [state.placements, state.days, ym]);
     return html`
       <div class="flex items-stretch gap-0.5 px-2 pt-1.5 bg-slate-200/70 overflow-x-auto">
         ${(state.programs || []).map((p) => {
           const active = p.id === state.activeProgram;
           return html`
             <button key=${p.id} onClick=${() => store.setActiveProgram(p.id)}
+              title=${`${p.name} · ${state.view.month}월 편성 ${counts[p.id] || 0}건`}
               class=${`group flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 rounded-t-lg text-[12.5px] border-t border-x transition
                 ${active ? 'bg-white border-slate-300 font-bold text-ink -mb-px' : 'bg-slate-100 border-transparent text-ink-soft hover:bg-slate-50'}`}>
               <span class="inline-block w-2 h-2 rounded-full" style=${{ background: p.color }}></span>
