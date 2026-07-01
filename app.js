@@ -1056,8 +1056,9 @@
    * ===================================================================== */
   function SnapshotsModal({ state, onClose }) {
     const snaps = state.snapshots || [];
+    const progName = (id) => (((state.programs || []).find((p) => p.id === id)) || {}).name || '(삭제된 프로그램)';
     function restore(s) {
-      if (!confirm(`${s.year}년 ${s.month}월 — ${fmtTs(s.ts)} 저장본으로 되돌립니다.\n현재 ${s.month}월 편성은 이 저장본 내용으로 교체됩니다. 계속할까요?`)) return;
+      if (!confirm(`[${progName(s.programId)}] ${s.year}년 ${s.month}월 — ${fmtTs(s.ts)} 저장본으로 되돌립니다.\n${progName(s.programId)}의 ${s.month}월 편성만 이 저장본 내용으로 교체됩니다. (다른 프로그램/월은 그대로) 계속할까요?`)) return;
       const r = store.restoreSnapshot(s.id);
       store.setView(s.year, s.month);
       alert(`복원 완료: ${r.restored}건${r.missing ? ` (시간대 변경으로 ${r.missing}건 누락)` : ''}`);
@@ -1077,6 +1078,7 @@
                   <thead class="sticky top-0 bg-slate-50 text-ink-soft text-left">
                     <tr>
                       <th class="px-4 py-2 font-medium">저장 시각</th>
+                      <th class="px-3 py-2 font-medium">프로그램</th>
                       <th class="px-3 py-2 font-medium">대상 월</th>
                       <th class="px-3 py-2 font-medium">편성</th>
                       <th class="px-3 py-2 font-medium">메모 / 저장자</th>
@@ -1087,6 +1089,7 @@
                     ${snaps.map((s) => html`
                       <tr key=${s.id} class="border-t border-slate-100 hover:bg-slate-50">
                         <td class="px-4 py-2 tabular-nums whitespace-nowrap">${fmtTs(s.ts)}</td>
+                        <td class="px-3 py-2 whitespace-nowrap font-medium text-ink">${progName(s.programId)}</td>
                         <td class="px-3 py-2 whitespace-nowrap">${s.year}.${s.month}월</td>
                         <td class="px-3 py-2"><${Badge} color="#16a34a">${s.count}건<//></td>
                         <td class="px-3 py-2 text-ink-soft">${s.label || '—'} <span class="text-[11px]">· ${s.user}</span></td>
