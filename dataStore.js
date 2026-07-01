@@ -568,8 +568,8 @@
               day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
             }
           }
-          const product = { name: it.name };
-          if (it.durationMin) product.durationMin = it.durationMin;
+          const product = it.product || { name: it.name };
+          if (it.durationMin && !product.durationMin) product.durationMin = it.durationMin;
           state.bids.push(stamp({ id: uid(), teamId: it.teamId, dayId: day.id, slotId: slot.id, product, createdAt: nowISO() }));
           added++;
         });
