@@ -609,13 +609,21 @@
         return p;
       },
       // 수기 상품 추가 (PD 편성표): 시간 입력 → 해당 시간대 슬롯 자동 생성 후 편성
-      addQuickPlacement({ dayId, start, end, durationMin, productName, teamId }) {
+      addQuickPlacement({ dayId, start, end, durationMin, productName, teamId, part }) {
         const day = state.days.find((d) => d.id === dayId);
-        if (!day || !start) return;
+        if (!day) return;
         const dur = durationMin ? Number(durationMin) : null;
-        const e = end || (dur ? toHHMM(toMin(start) + dur) : start);
-        const slot = ensureSlotOnDay(day, start, e);
-        slot.manual = true;
+        let slot;
+        if (part) {
+          // 순번(1부/2부/3부) 슬롯: 있으면 재사용, 없으면 생성
+          slot = day.slots.find((s) => s.label === part && !s.start);
+          if (!slot) { slot = { id: 'slot_' + uid(), start: '', end: '', label: part, manual: true }; day.slots.push(slot); }
+        } else {
+          if (!start) return;
+          const e = end || (dur ? toHHMM(toMin(start) + dur) : start);
+          slot = ensureSlotOnDay(day, start, e);
+          slot.manual = true;
+        }
         const p = stamp({
           id: uid(), slotId: slot.id, programId: day.programId, sourceBidId: null,
           teamId: teamId || 'etc', productName: productName || '(미정)', note: '', memo: '',
@@ -743,13 +751,14 @@
         log({ action: '캐스팅메모', detail: `${ym} 캐스팅 특이사항 수정` });
         emit();
       },
-      // 빈 카드(입찰 없이) 직접 편성
-      addPlacement(slotId, { productName, teamId, note }) {
+      // 빈 카드(입찰 없이) 직접 편성 (슬롯 더블클릭 등)
+      addPlacement(slotId, { productName, teamId, note, durationMin }) {
         const f = findSlot(slotId);
         const p = {
           id: uid(), slotId, programId: f ? f.day.programId : state.activeProgram,
           sourceBidId: null, teamId: teamId || 'etc',
-          productName: productName || '(미정)', note: note || '', memo: '', detail: {}, durationMin: null,
+          productName: productName || '(미정)', note: note || '', memo: '', detail: {},
+          durationMin: durationMin ? Number(durationMin) : null,
           pd: '', host: '', studio: '', moveCount: 0, createdAt: nowISO(),
         };
         stamp(p);
@@ -770,12 +779,42 @@
               from: fromLabel, to: slotLabel(toSlotId), detail: `${p.moveCount}회차 이동` });
         emit();
       },
+      // 다른 날짜로 이동: 원래 슬롯의 시간/순번을 대상 날짜에 자동 생성 후 편성
+      movePlacementToDay(placementId, dayId) {
+        const p = state.placements.find((x) => x.id === placementId);
+        const day = state.days.find((d) => d.id === dayId);
+        if (!p || !day) return;
+        const cur = findSlot(p.slotId);
+        if (cur && cur.day.id === dayId) return; // 같은 날이면 무시
+        let slot;
+        if (cur && cur.slot.start && cur.slot.end) {
+          slot = ensureSlotOnDay(day, cur.slot.start, cur.slot.end); slot.manual = true;
+        } else if (cur && cur.slot.label) {
+          slot = day.slots.find((s) => s.label === cur.slot.label && !s.start);
+          if (!slot) { slot = { id: 'slot_' + uid(), start: '', end: '', label: cur.slot.label, manual: true }; day.slots.push(slot); }
+        } else {
+          slot = ensureBucketSlotOnDay(day);
+        }
+        const fromLabel = slotLabel(p.slotId);
+        p.slotId = slot.id;
+        p.moveCount = (p.moveCount || 0) + 1;
+        stamp(p);
+        log({ action: '이동', productName: p.productName, teamName: teamName(p.teamId),
+              from: fromLabel, to: slotLabel(slot.id), detail: '다른 날짜로 이동(시간대 자동생성)' });
+        emit();
+      },
       removePlacement(placementId) {
         const p = state.placements.find((x) => x.id === placementId);
         if (!p) return;
+        // 입찰 없이 직접 편성(수기추가 등)한 상품은 삭제 대신 입찰풀로 되돌림
+        if (!p.sourceBidId) {
+          const f = findSlot(p.slotId);
+          const product = { name: p.productName, ...(p.detail || {}), durationMin: p.durationMin, items: p.items };
+          state.bids.push(stamp({ id: uid(), teamId: p.teamId, dayId: f ? f.day.id : null, slotId: p.slotId, product, createdAt: nowISO() }));
+        }
         state.placements = state.placements.filter((x) => x.id !== placementId);
         log({ action: '편성제외', productName: p.productName, teamName: teamName(p.teamId),
-              from: slotLabel(p.slotId) });
+              from: slotLabel(p.slotId), detail: p.sourceBidId ? '입찰풀로 복귀' : '입찰풀로 복귀(수기추가)' });
         emit();
       },
       updatePlacementMeta(placementId, patch) {

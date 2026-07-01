@@ -254,6 +254,7 @@
   function SlotCell({ state, day, slot, onEdit }) {
     const [over, setOver] = useState(false);
     const [splitOpen, setSplitOpen] = useState(false);
+    const [addOpen, setAddOpen] = useState(false);
     const dur = U.slotDuration(slot);
     const placements = state.placements.filter((p) => p.slotId === slot.id);
     const teamsIn = new Set(placements.map((p) => p.teamId));
@@ -262,7 +263,7 @@
     const compColor = compete >= 3 ? '#dc2626' : compete === 2 ? '#f59e0b' : null;
 
     function onDrop(e) {
-      e.preventDefault(); setOver(false);
+      e.preventDefault(); e.stopPropagation(); setOver(false); // 슬롯에 놓으면 여기서 처리(날짜 드롭존과 분리)
       const pl = drag.read(e);
       if (!pl) return;
       if (pl.kind === 'bid') store.assignBid(pl.id, slot.id);
@@ -288,13 +289,41 @@
               class="hover:text-brand text-xs px-1">✕</button>
           </div>
         </div>
-        <div class="flex flex-col gap-1.5 p-1.5 min-h-[52px]">
+        <div class=${`flex flex-col gap-1.5 p-1.5 min-h-[52px] ${placements.length === 0 ? 'cursor-copy' : ''}`}
+          onDoubleClick=${placements.length === 0 ? (() => setAddOpen(true)) : undefined} title=${placements.length === 0 ? '더블클릭하면 상품 추가' : ''}>
           ${placements.length === 0
-            ? html`<div class="text-[11px] text-slate-400 text-center py-2 select-none">입찰 카드를 끌어다 놓으세요</div>`
+            ? html`<div class="text-[11px] text-slate-400 text-center py-2 select-none hover:text-brand">입찰 카드를 끌어다 놓거나 더블클릭해 추가</div>`
             : placements.map((p) => html`<${PlacementCard} key=${p.id} state=${state} p=${p} onEdit=${onEdit} />`)}
         </div>
         ${splitOpen && html`<${SplitModal} slot=${slot} dur=${dur} onClose=${() => setSplitOpen(false)} />`}
+        ${addOpen && html`<${SlotAddModal} state=${state} slot=${slot} onClose=${() => setAddOpen(false)} />`}
       </div>`;
+  }
+
+  // 슬롯에 상품 직접 추가 (빈 슬롯 더블클릭) — 상품명/팀명/노출분만
+  function SlotAddModal({ state, slot, onClose }) {
+    const teams = programTeams(state);
+    const [name, setName] = useState('');
+    const [dur, setDur] = useState('');
+    const [team, setTeam] = useState(teams[0] ? teams[0].id : 'etc');
+    function save() {
+      if (!name.trim()) { alert('상품명을 입력하세요.'); return; }
+      store.addPlacement(slot.id, { productName: name.trim(), teamId: team, durationMin: dur ? parseInt(dur, 10) : null });
+      onClose();
+    }
+    return html`
+      <${Modal} title=${`${slotName(slot)} · 상품 추가`} onClose=${onClose} onSave=${save}>
+        <${Field} label="상품명 *"><input value=${name} onInput=${(e) => setName(e.target.value)} class=${inputCls} autofocus placeholder="예: 롯데호텔김치" /><//>
+        <div class="grid grid-cols-2 gap-3">
+          <${Field} label="팀명">
+            <select value=${team} onChange=${(e) => setTeam(e.target.value)} class=${inputCls}>
+              ${teams.map((t) => html`<option key=${t.id} value=${t.id}>${t.name}</option>`)}
+            </select>
+          <//>
+          <${Field} label="노출분"><input type="number" value=${dur} onInput=${(e) => setDur(e.target.value)} class=${inputCls} placeholder="예: 20" /><//>
+        </div>
+        <div class="text-[12px] text-ink-soft">이 시간대(${slotName(slot)})에 바로 편성됩니다. 구성·가격 등은 최종편성안에서 보강하세요.</div>
+      <//>`;
   }
 
   function SplitModal({ slot, dur, onClose }) {
@@ -340,8 +369,18 @@
     const fashion = programSchema(state) === 'fashion';
     const [addOpen, setAddOpen] = useState(false);
     const [quickOpen, setQuickOpen] = useState(false);
+    const [dayOver, setDayOver] = useState(false);
+    // 슬롯이 아닌 날짜 영역에 편성카드를 놓으면 → 그 날짜에 시간대 자동생성 후 이동
+    function onDayDrop(e) {
+      e.preventDefault(); setDayOver(false);
+      const pl = drag.read(e);
+      if (pl && pl.kind === 'placement') store.movePlacementToDay(pl.id, day.id);
+    }
     return html`
-      <div class="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div class=${`rounded-xl border bg-white shadow-sm overflow-hidden ${dayOver ? 'ring-2 ring-brand' : 'border-slate-200'}`}
+        onDragOver=${(e) => { e.preventDefault(); setDayOver(true); }}
+        onDragLeave=${(e) => { if (e.currentTarget === e.target) setDayOver(false); }}
+        onDrop=${onDayDrop}>
         <div class="flex items-center justify-between px-3 py-2 text-white" style=${{ background: accent }}>
           <div class="flex items-center gap-2">
             <div class="font-bold text-sm">${fmtDay(day)}</div>
@@ -365,17 +404,25 @@
       </div>`;
   }
 
-  // 수기 상품 추가 (상품명 / 노출분 / 시간 / 팀명만 — 시간 입력 시 편성표 자동 반영)
+  // 수기 상품 추가 — 날짜가 시간대형이면 시간 입력, 순번(1·2·3부)형이면 부 입력
   function QuickAddModal({ state, day, onClose }) {
     const teams = programTeams(state);
+    // 순번형: 패션 프로그램이거나, 이 날짜에 순번 슬롯(1부 등)이 있으면
+    const orderMode = programSchema(state) === 'fashion' || day.slots.some((s) => s.label && !s.start);
     const [name, setName] = useState('');
     const [dur, setDur] = useState('');
     const [start, setStart] = useState('');
+    const [part, setPart] = useState('1부');
     const [team, setTeam] = useState(teams[0] ? teams[0].id : 'etc');
     function save() {
       if (!name.trim()) { alert('상품명을 입력하세요.'); return; }
-      if (!/^\d{1,2}:\d{2}$/.test(start)) { alert('시간을 24시간 형식(예: 21:00)으로 입력하세요.'); return; }
-      store.addQuickPlacement({ dayId: day.id, start, durationMin: dur ? parseInt(dur, 10) : null, productName: name.trim(), teamId: team });
+      if (orderMode) {
+        if (!part.trim()) { alert('부(순번)를 입력하세요. 예: 1부'); return; }
+        store.addQuickPlacement({ dayId: day.id, part: part.trim(), durationMin: dur ? parseInt(dur, 10) : null, productName: name.trim(), teamId: team });
+      } else {
+        if (!/^\d{1,2}:\d{2}$/.test(start)) { alert('시간을 24시간 형식(예: 21:00)으로 입력하세요.'); return; }
+        store.addQuickPlacement({ dayId: day.id, start, durationMin: dur ? parseInt(dur, 10) : null, productName: name.trim(), teamId: team });
+      }
       onClose();
     }
     return html`
@@ -384,7 +431,10 @@
           <input value=${name} onInput=${(e) => setName(e.target.value)} class=${inputCls} autofocus placeholder="예: 롯데호텔김치" />
         <//>
         <div class="grid grid-cols-2 gap-3">
-          <${Field} label="시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${setStart} /><//>
+          ${orderMode
+            ? html`<${Field} label="부(순번) *"><input value=${part} onInput=${(e) => setPart(e.target.value)} class=${inputCls} placeholder="예: 1부 / 2부 / 3부" list="part-list" />
+                <datalist id="part-list"><option value="1부"/><option value="2부"/><option value="3부"/></datalist><//>`
+            : html`<${Field} label="시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${setStart} /><//>`}
           <${Field} label="노출분"><input type="number" value=${dur} onInput=${(e) => setDur(e.target.value)} class=${inputCls} placeholder="예: 20" /><//>
         </div>
         <${Field} label="팀명">
@@ -392,7 +442,7 @@
             ${teams.map((t) => html`<option key=${t.id} value=${t.id}>${t.name}</option>`)}
           </select>
         <//>
-        <div class="text-[12px] text-ink-soft">시간을 입력하면 편성표에 해당 시간대(시작~시작+노출분)로 자동 반영됩니다. 구성·가격 등은 최종편성안에서 보강하세요.</div>
+        <div class="text-[12px] text-ink-soft">${orderMode ? '부(1부·2부·3부)에 편성됩니다. 방송시간은 날짜 옆에서 수정하세요.' : '시간을 입력하면 해당 시간대(시작~시작+노출분)로 자동 반영됩니다.'} 구성·가격 등은 최종편성안에서 보강하세요.</div>
       <//>`;
   }
 
