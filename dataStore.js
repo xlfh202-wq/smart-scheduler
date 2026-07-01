@@ -182,6 +182,7 @@
       placements: [],   // PD 편성 (확정): + programId, detail{}, memo(PD 비고)
       snapshots: [],
       changeLog: [],
+      hiddenDays: [], // 사용자가 삭제한 고정 스케줄 날짜 키('programId|YYYY-MM-DD') — ensureMonth 재생성 방지
     };
   }
 
@@ -481,6 +482,8 @@
           const entry = sched.find((s) => s.wd === wd);
           if (!entry) continue;
           const dateStr = `${year}-${mm}-${String(dnum).padStart(2, '0')}`;
+          // 사용자가 삭제한 날짜는 재생성하지 않음
+          if ((state.hiddenDays || []).includes(pid + '|' + dateStr)) continue;
           let day = state.days.find((d) => d.programId === pid && d.date === dateStr);
           // 기존 날짜는 절대 건드리지 않음 (편집된 슬롯 위에 고정슬롯 재생성 → 더블링 방지)
           if (day) continue;
@@ -1017,6 +1020,8 @@
         const day = { id: 'day_' + pid + '_' + dateStr, programId: pid, date: dateStr, weekday: wd, slots: [] };
         state.days.push(day);
         state.days.sort((a, b) => a.date.localeCompare(b.date));
+        // 삭제했던 날짜를 다시 추가하면 숨김 해제(이후 nav 시 재삭제되지 않도록)
+        state.hiddenDays = (state.hiddenDays || []).filter((k) => k !== pid + '|' + dateStr);
         log({ action: '편성일추가', to: `${dateStr}(${WEEKDAY_KO[wd]})` });
         emit();
       },
@@ -1026,6 +1031,10 @@
         const slotIds = new Set(day.slots.map((s) => s.id));
         state.placements = state.placements.filter((p) => !slotIds.has(p.slotId));
         state.days = state.days.filter((d) => d.id !== dayId);
+        // 고정 스케줄 날짜였다면 재생성 방지용으로 숨김 목록에 기록
+        state.hiddenDays = state.hiddenDays || [];
+        const key = day.programId + '|' + day.date;
+        if (!state.hiddenDays.includes(key)) state.hiddenDays.push(key);
         log({ action: '편성일삭제', from: day.date });
         emit();
       },
