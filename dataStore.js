@@ -803,6 +803,29 @@
               from: fromLabel, to: slotLabel(slot.id), detail: '다른 날짜로 이동(시간대 자동생성)' });
         emit();
       },
+      // 같은 날짜 내에서 새 부(순번) 또는 새 시간대로 이동 (드롭 시 자동 분할)
+      movePlacementToSlotSpec(placementId, dayId, { part, start, end, durationMin }) {
+        const p = state.placements.find((x) => x.id === placementId);
+        const day = state.days.find((d) => d.id === dayId);
+        if (!p || !day) return;
+        let slot;
+        if (part) {
+          slot = day.slots.find((s) => s.label === part && !s.start);
+          if (!slot) { slot = { id: 'slot_' + uid(), start: '', end: '', label: part, manual: true }; day.slots.push(slot); }
+        } else if (start) {
+          const dur = durationMin ? Number(durationMin) : (p.durationMin || null);
+          const e = end || (dur ? toHHMM(toMin(start) + dur) : start);
+          slot = ensureSlotOnDay(day, start, e); slot.manual = true;
+        } else return;
+        const fromLabel = slotLabel(p.slotId);
+        if (p.slotId === slot.id) return;
+        p.slotId = slot.id;
+        p.moveCount = (p.moveCount || 0) + 1;
+        stamp(p);
+        log({ action: '이동', productName: p.productName, teamName: teamName(p.teamId),
+              from: fromLabel, to: slotLabel(slot.id), detail: '같은 날짜 내 이동' });
+        emit();
+      },
       removePlacement(placementId) {
         const p = state.placements.find((x) => x.id === placementId);
         if (!p) return;

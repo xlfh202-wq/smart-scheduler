@@ -370,11 +370,24 @@
     const [addOpen, setAddOpen] = useState(false);
     const [quickOpen, setQuickOpen] = useState(false);
     const [dayOver, setDayOver] = useState(false);
-    // 슬롯이 아닌 날짜 영역에 편성카드를 놓으면 → 그 날짜에 시간대 자동생성 후 이동
+    const [moveTimeFor, setMoveTimeFor] = useState(null); // 같은날짜 시간대 이동 팝업(라이프스타일)
+    const nextPart = () => {
+      const nums = day.slots.filter((s) => s.label).map((s) => { const m = (s.label || '').match(/(\d+)\s*부/); return m ? parseInt(m[1], 10) : 0; });
+      return `${Math.max(0, ...nums) + 1}부`;
+    };
+    // 슬롯이 아닌 날짜 영역에 편성카드를 놓으면:
+    //  · 다른 날짜 → 시간대(또는 부) 자동생성 후 이동
+    //  · 같은 날짜 → 패션은 다음 부 자동생성 / 라이프스타일은 시간 설정 팝업
     function onDayDrop(e) {
       e.preventDefault(); setDayOver(false);
       const pl = drag.read(e);
-      if (pl && pl.kind === 'placement') store.movePlacementToDay(pl.id, day.id);
+      if (!pl || pl.kind !== 'placement') return;
+      const p = state.placements.find((x) => x.id === pl.id);
+      const curDay = p && state.days.find((d) => d.slots.some((s) => s.id === p.slotId));
+      const sameDay = curDay && curDay.id === day.id;
+      if (!sameDay) { store.movePlacementToDay(pl.id, day.id); return; }
+      if (fashion) store.movePlacementToSlotSpec(pl.id, day.id, { part: nextPart() });
+      else setMoveTimeFor(pl.id);
     }
     return html`
       <div class=${`rounded-xl border bg-white shadow-sm overflow-hidden ${dayOver ? 'ring-2 ring-brand' : 'border-slate-200'}`}
@@ -401,7 +414,25 @@
         </div>
         ${addOpen && html`<${AddSlotModal} day=${day} onClose=${() => setAddOpen(false)} />`}
         ${quickOpen && html`<${QuickAddModal} state=${state} day=${day} onClose=${() => setQuickOpen(false)} />`}
+        ${moveTimeFor && html`<${MoveTimeModal} state=${state} day=${day} placementId=${moveTimeFor} onClose=${() => setMoveTimeFor(null)} />`}
       </div>`;
+  }
+
+  // 같은 날짜 안에서 다른 시간대로 이동 (라이프스타일) — 시간 설정 팝업
+  function MoveTimeModal({ state, day, placementId, onClose }) {
+    const p = state.placements.find((x) => x.id === placementId);
+    const [start, setStart] = useState('');
+    const dur = p && p.durationMin ? p.durationMin : '';
+    function save() {
+      if (!/^\d{1,2}:\d{2}$/.test(start)) { alert('시작 시간을 24시간 형식(예: 21:00)으로 입력하세요.'); return; }
+      store.movePlacementToSlotSpec(placementId, day.id, { start, durationMin: dur || null });
+      onClose();
+    }
+    return html`
+      <${Modal} title=${`${fmtDay(day)} · 시간대 이동${p ? ' · ' + p.productName : ''}`} onClose=${onClose} onSave=${save}>
+        <${Field} label="이동할 시작 시간 (24시간)"><${TimeInput} value=${start} onChange=${setStart} /><//>
+        <div class="text-[12px] text-ink-soft">${dur ? `노출분 ${dur}분 → 시작~시작+${dur}분 시간대로 생성됩니다.` : '입력한 시각으로 새 시간대가 생성되어 이동합니다.'}</div>
+      <//>`;
   }
 
   // 수기 상품 추가 — 날짜가 시간대형이면 시간 입력, 순번(1·2·3부)형이면 부 입력
