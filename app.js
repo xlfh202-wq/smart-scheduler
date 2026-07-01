@@ -145,6 +145,9 @@
     const t = teamOf(state, p.teamId);
     const det = p.detail || {};
     const items = p.items || [];
+    // 이 팝업은 PD·관리자 전용 편성표(ScheduleView)에서만 뜨므로 수정 허용
+    const [edit, setEdit] = useState(false);
+    if (edit) return html`<${PlacementEditForm} state=${state} p=${p} onClose=${onClose} onBack=${() => setEdit(false)} />`;
     const rows = [
       ['편성 시간', U.slotLabel(p.slotId)],
       ['그룹코드', det.groupCode],
@@ -176,7 +179,11 @@
                 ${det.special && html`<${Badge} color="#da291c">특약<//>`}
               </div>
             </div>
-            <button onClick=${(e) => { e.stopPropagation(); onClose(); }} class="text-ink-soft hover:text-brand text-lg leading-none">✕</button>
+            <div class="flex items-center gap-2 shrink-0">
+              <button onClick=${(e) => { e.stopPropagation(); setEdit(true); }}
+                class="text-[12px] font-semibold px-2.5 py-1 rounded-md bg-brand text-white hover:bg-brand-dark">✎ 수정</button>
+              <button onClick=${(e) => { e.stopPropagation(); onClose(); }} class="text-ink-soft hover:text-brand text-lg leading-none">✕</button>
+            </div>
           </div>
           <div class="px-4 py-3">
             ${items.length > 1 && html`
@@ -197,6 +204,68 @@
           </div>
         </div>
       </div>`;
+  }
+
+  /* =====================================================================
+   *  편성 상세 통합 수정 (PD 편성표 · 상품/구성/배정 직접수정 → 최종편성안·입찰정보 동기화)
+   * ===================================================================== */
+  function PlacementEditForm({ state, p, onClose, onBack }) {
+    const teams = programTeams(state);
+    const det = p.detail || {};
+    const castOpts = (window.AUTH.casting && window.AUTH.casting[p.programId]) || null;
+    const [name, setName] = useState(p.productName || '');
+    const [team, setTeam] = useState(p.teamId || (teams[0] && teams[0].id) || 'etc');
+    const [dur, setDur] = useState(p.durationMin || '');
+    const [note, setNote] = useState(det.note || '');
+    const [issue, setIssue] = useState(det.issue || '');
+    const [comp, setComp] = useState(det.comp || '');
+    const [prep, setPrep] = useState(det.prep || '');
+    const [price, setPrice] = useState(det.price || '');
+    const [margin, setMargin] = useState(det.margin || '');
+    const [pd, setPd] = useState(p.pd || '');
+    const [host, setHost] = useState(p.host || '');
+    const [studio, setStudio] = useState(p.studio || '');
+    const [memo, setMemo] = useState(p.memo || '');
+    function save() {
+      if (!name.trim()) { alert('상품명을 입력하세요.'); return; }
+      store.updatePlacementFull(p.id, {
+        productName: name.trim(), teamId: team,
+        durationMin: dur ? parseInt(dur, 10) : null,
+        pd, host, studio, memo,
+        detail: { note, issue, comp, prep, price, margin },
+      });
+      onClose();
+    }
+    const cast = (field, val, setVal, ph) => html`
+      <input value=${val} onInput=${(e) => setVal(e.target.value)} list=${castOpts && castOpts[field] ? 'pe-' + field + '-dl' : undefined} class=${inputCls} placeholder=${ph} />
+      ${castOpts && castOpts[field] ? html`<datalist id=${'pe-' + field + '-dl'}>${castOpts[field].map((o) => html`<option key=${o} value=${o}></option>`)}</datalist>` : ''}`;
+    return html`
+      <${Modal} title=${`상세 수정 · ${p.productName}`} onClose=${onBack} onSave=${save}>
+        <div class="text-[12px] text-ink-soft -mt-1">여기서 수정하면 <b>최종편성안</b>과 <b>입찰정보</b>에도 함께 반영됩니다.</div>
+        <${Field} label="상품명 *"><input value=${name} onInput=${(e) => setName(e.target.value)} class=${inputCls} autofocus /><//>
+        <div class="grid grid-cols-2 gap-3">
+          <${Field} label="팀명">
+            <select value=${team} onChange=${(e) => setTeam(e.target.value)} class=${inputCls}>
+              ${teams.map((t) => html`<option key=${t.id} value=${t.id}>${t.name}</option>`)}
+            </select>
+          <//>
+          <${Field} label="방송 분량(분)"><input type="number" value=${dur} onInput=${(e) => setDur(e.target.value)} class=${inputCls} placeholder="예: 30" /><//>
+        </div>
+        <${Field} label="내용 / 타이틀"><input value=${note} onInput=${(e) => setNote(e.target.value)} class=${inputCls} /><//>
+        <${Field} label="이슈 / 특이사항"><input value=${issue} onInput=${(e) => setIssue(e.target.value)} class=${inputCls} /><//>
+        <div class="grid grid-cols-2 gap-3">
+          <${Field} label="구성"><input value=${comp} onInput=${(e) => setComp(e.target.value)} class=${inputCls} /><//>
+          <${Field} label="준비물량"><input value=${prep} onInput=${(e) => setPrep(e.target.value)} class=${inputCls} /><//>
+          <${Field} label="가격"><input value=${price} onInput=${(e) => setPrice(e.target.value)} class=${inputCls} /><//>
+          <${Field} label="마진"><input value=${margin} onInput=${(e) => setMargin(e.target.value)} class=${inputCls} /><//>
+        </div>
+        <div class="grid grid-cols-3 gap-3">
+          <${Field} label="담당 PD">${cast('pd', pd, setPd, 'PD')}<//>
+          <${Field} label="쇼호스트">${cast('host', host, setHost, 'MC')}<//>
+          <${Field} label="스튜디오">${cast('studio', studio, setStudio, 'ST')}<//>
+        </div>
+        <${Field} label="비고(PD)"><input value=${memo} onInput=${(e) => setMemo(e.target.value)} class=${inputCls} placeholder="PD 코멘트" /><//>
+      <//>`;
   }
 
   /* =====================================================================
@@ -371,17 +440,25 @@
     const [quickOpen, setQuickOpen] = useState(false);
     const [dayOver, setDayOver] = useState(false);
     const [moveTimeFor, setMoveTimeFor] = useState(null); // 같은날짜 시간대 이동 팝업(라이프스타일)
+    const [bidTimeFor, setBidTimeFor] = useState(null);   // 입찰카드 편성 시간 지정 팝업(라이프스타일)
     const nextPart = () => {
       const nums = day.slots.filter((s) => s.label).map((s) => { const m = (s.label || '').match(/(\d+)\s*부/); return m ? parseInt(m[1], 10) : 0; });
       return `${Math.max(0, ...nums) + 1}부`;
     };
-    // 슬롯이 아닌 날짜 영역에 편성카드를 놓으면:
-    //  · 다른 날짜 → 시간대(또는 부) 자동생성 후 이동
-    //  · 같은 날짜 → 패션은 다음 부 자동생성 / 라이프스타일은 시간 설정 팝업
+    // 슬롯이 아닌 날짜 영역에 카드를 놓으면:
+    //  · 입찰카드(취소 후 풀 복귀 등) → 패션은 부 자동생성 후 편성 / 라이프스타일은 시간 지정 팝업
+    //  · 편성카드 다른 날짜 → 시간대(또는 부) 자동생성 후 이동
+    //  · 편성카드 같은 날짜 → 패션은 다음 부 자동생성 / 라이프스타일은 시간 설정 팝업
     function onDayDrop(e) {
       e.preventDefault(); setDayOver(false);
       const pl = drag.read(e);
-      if (!pl || pl.kind !== 'placement') return;
+      if (!pl) return;
+      if (pl.kind === 'bid') {
+        if (fashion) store.assignBidToDay(pl.id, day.id, { part: nextPart() });
+        else setBidTimeFor(pl.id);
+        return;
+      }
+      if (pl.kind !== 'placement') return;
       const p = state.placements.find((x) => x.id === pl.id);
       const curDay = p && state.days.find((d) => d.slots.some((s) => s.id === p.slotId));
       const sameDay = curDay && curDay.id === day.id;
@@ -415,7 +492,25 @@
         ${addOpen && html`<${AddSlotModal} day=${day} onClose=${() => setAddOpen(false)} />`}
         ${quickOpen && html`<${QuickAddModal} state=${state} day=${day} onClose=${() => setQuickOpen(false)} />`}
         ${moveTimeFor && html`<${MoveTimeModal} state=${state} day=${day} placementId=${moveTimeFor} onClose=${() => setMoveTimeFor(null)} />`}
+        ${bidTimeFor && html`<${BidTimeModal} state=${state} day=${day} bidId=${bidTimeFor} onClose=${() => setBidTimeFor(null)} />`}
       </div>`;
+  }
+
+  // 입찰카드를 라이프스타일 날짜 영역에 놓았을 때 — 편성 시간 지정 팝업
+  function BidTimeModal({ state, day, bidId, onClose }) {
+    const b = state.bids.find((x) => x.id === bidId);
+    const [start, setStart] = useState('');
+    const dur = b && b.product && b.product.durationMin ? b.product.durationMin : '';
+    function save() {
+      if (!/^\d{1,2}:\d{2}$/.test(start)) { alert('시작 시간을 24시간 형식(예: 21:00)으로 입력하세요.'); return; }
+      store.assignBidToDay(bidId, day.id, { start, durationMin: dur || null });
+      onClose();
+    }
+    return html`
+      <${Modal} title=${`${fmtDay(day)} · 편성 시간 지정${b && b.product ? ' · ' + b.product.name : ''}`} onClose=${onClose} onSave=${save}>
+        <${Field} label="편성할 시작 시간 (24시간)"><${TimeInput} value=${start} onChange=${setStart} /><//>
+        <div class="text-[12px] text-ink-soft">${dur ? `노출분 ${dur}분 → 시작~시작+${dur}분 시간대로 생성되어 편성됩니다.` : '입력한 시각으로 새 시간대가 생성되어 편성됩니다.'}</div>
+      <//>`;
   }
 
   // 같은 날짜 안에서 다른 시간대로 이동 (라이프스타일) — 시간 설정 팝업

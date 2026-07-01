@@ -608,6 +608,25 @@
         emit();
         return p;
       },
+      // 입찰카드를 (슬롯이 아닌) 날짜 영역에 놓았을 때: 부/시간대 슬롯 자동 생성 후 편성
+      //  · part 지정 → 순번(1부…) 슬롯 / start 지정 → 시간대 슬롯 / 그 외 → 요일 고정(미정) 버킷
+      assignBidToDay(bidId, dayId, { part, start, end, durationMin } = {}) {
+        const b = state.bids.find((x) => x.id === bidId);
+        const day = state.days.find((d) => d.id === dayId);
+        if (!b || !day) return;
+        let slot;
+        if (part) {
+          slot = day.slots.find((s) => s.label === part && !s.start);
+          if (!slot) { slot = { id: 'slot_' + uid(), start: '', end: '', label: part, manual: true }; day.slots.push(slot); }
+        } else if (start) {
+          const dur = durationMin ? Number(durationMin) : ((b.product && b.product.durationMin) || null);
+          const e = end || (dur ? toHHMM(toMin(start) + dur) : start);
+          slot = ensureSlotOnDay(day, start, e); slot.manual = true;
+        } else {
+          slot = ensureBucketSlotOnDay(day);
+        }
+        return api.assignBid(bidId, slot.id);
+      },
       // 수기 상품 추가 (PD 편성표): 시간 입력 → 해당 시간대 슬롯 자동 생성 후 편성
       addQuickPlacement({ dayId, start, end, durationMin, productName, teamId, part }) {
         const day = state.days.find((d) => d.id === dayId);
@@ -871,6 +890,44 @@
         stamp(p);
         log({ action: '편성수정', productName: p.productName, teamName: teamName(p.teamId),
               detail: patch.pending !== undefined ? (patch.pending ? '미정 표시' : '확정 표시') : '최종편성안 직접수정' });
+        emit();
+      },
+      // PD 편성표 상세 팝업에서 통합 수정: 상품/배정/구성 등 한번에 수정하고
+      // 원본 입찰(sourceBid)에도 반영 → 최종편성안·입찰정보 모두 동기화
+      updatePlacementFull(placementId, patch) {
+        const p = state.placements.find((x) => x.id === placementId);
+        if (!p) return;
+        if (patch.productName !== undefined) p.productName = patch.productName;
+        if (patch.teamId !== undefined) p.teamId = patch.teamId;
+        if (patch.durationMin !== undefined) p.durationMin = patch.durationMin;
+        if (patch.pd !== undefined) p.pd = patch.pd;
+        if (patch.host !== undefined) p.host = patch.host;
+        if (patch.studio !== undefined) p.studio = patch.studio;
+        if (patch.memo !== undefined) p.memo = patch.memo;
+        if (patch.detail) p.detail = { ...(p.detail || {}), ...patch.detail };
+        // 노출분 변경 → 단독 편성된 시간대 띠 자동 조정
+        if (patch.durationMin) {
+          const f = findSlot(p.slotId);
+          const inSlot = state.placements.filter((x) => x.slotId === p.slotId);
+          if (f && f.slot.start && inSlot.length === 1) {
+            f.slot.end = toHHMM(toMin(f.slot.start) + Number(patch.durationMin));
+          }
+        }
+        stamp(p);
+        // 원본 입찰정보에도 반영 (입찰풀·입찰보드에서 동일하게 보이도록)
+        if (p.sourceBidId) {
+          const b = state.bids.find((x) => x.id === p.sourceBidId);
+          if (b) {
+            b.product = b.product || {};
+            if (patch.productName !== undefined) b.product.name = patch.productName;
+            if (patch.durationMin !== undefined) b.product.durationMin = patch.durationMin;
+            if (patch.teamId !== undefined) b.teamId = patch.teamId;
+            if (patch.detail) Object.assign(b.product, patch.detail);
+            stamp(b);
+          }
+        }
+        log({ action: '편성수정', productName: p.productName, teamName: teamName(p.teamId),
+              detail: '상세 통합수정' + (p.sourceBidId ? ' (입찰정보 동기화)' : '') });
         emit();
       },
 
