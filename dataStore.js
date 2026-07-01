@@ -87,6 +87,22 @@
   const PROGRAM_MERGE = { 'pgm_영스타일수': 'pgm_영스타일', 'pgm_영스타일금': 'pgm_영스타일' };
   const EXCLUDE_PROGRAMS = new Set(['pgm_리빙통합', 'pgm_패션통합', 'pgm_레포츠PGM텐션업']);
   const normProgId = (id) => PROGRAM_MERGE[id] || id;
+  // 겹치는 빈 고정(std) 슬롯 자동 정리 (더블링 방지 — 로드/동기화 시 항상 실행)
+  function cleanupSlots(s) {
+    if (!s || !s.days) return s;
+    const bidSlot = new Set((s.bids || []).map((b) => b.slotId));
+    const plSlot = new Set((s.placements || []).map((p) => p.slotId));
+    const has = (sl) => bidSlot.has(sl.id) || plSlot.has(sl.id);
+    s.days.forEach((day) => {
+      const snap = day.slots.slice();
+      day.slots = day.slots.filter((x) => {
+        if (!x.std || has(x)) return true;
+        // 빈 고정슬롯이 다른 '내용 있는' 슬롯과 시간 겹치면 제거
+        return !snap.some((o) => o.id !== x.id && has(o) && slotOverlap(x, o));
+      });
+    });
+    return s;
+  }
   // 제외 프로그램(텐션업 등)의 잔여 데이터를 상태에서 정리
   function pruneExcluded(s) {
     if (!s) return s;
@@ -192,7 +208,7 @@
     function load() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) return pruneExcluded(JSON.parse(raw));
+        if (raw) return cleanupSlots(pruneExcluded(JSON.parse(raw)));
       } catch (e) { /* ignore */ }
       const s = seedState();
       applyProgramSeed(s); // 14개 프로그램 확정편성안 자동 적재
@@ -386,7 +402,7 @@
       _snapshot: () => state,
       _useBackend(saveFn) { saveBackend = saveFn; },
       _hydrate(newState) { // 서버에서 받은 상태로 교체 (재저장 안 함, 이력 초기화)
-        state = keepLocalNav(pruneExcluded(newState), state);
+        state = cleanupSlots(keepLocalNav(pruneExcluded(newState), state));
         baseline = JSON.stringify(state); undoStack = []; redoStack = [];
         subs.forEach((fn) => fn(state));
       },

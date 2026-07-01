@@ -1638,11 +1638,8 @@
     // 로그인 식별을 데이터 계층에 반영 → 이후 모든 변경이 이 이름으로 기록됨
     const displayName = (a) => `${a && a.team ? a.team + ' ' : ''}${(a && a.name) || ''}`.trim();
     useEffect(() => { if (auth) store.setUser(displayName(auth)); }, [auth]);
-    // 로그인 후 1회: 현재 월의 프로그램별 고정 편성시간대 생성
-    const schedInit = useRef(false);
-    useEffect(() => {
-      if (auth && !schedInit.current) { schedInit.current = true; store.setView(state.view.year, state.view.month); }
-    }, [auth]);
+    // (고정 편성시간대는 월 이동·프로그램 선택 시 자동 생성 — 로드 직후 자동저장은 제거:
+    //  하이드레이트 전 옛 로컬 상태가 서버로 되돌아가는 것을 방지)
 
     // Ctrl/Cmd+Z 되돌리기, Ctrl/Cmd+Shift+Z 또는 Ctrl+Y 다시
     useEffect(() => {
