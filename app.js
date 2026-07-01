@@ -1797,7 +1797,12 @@
   function App() {
     const state = useStore();
     const [auth, setAuth] = useState(loadAuth);
-    const [tab, setTab] = useState('schedule'); // schedule | bids | final
+    // 접속 시 기본 탭 = 로그인한 역할의 첫 탭 (MD→입찰보드, PD/관리자→최종편성안)
+    const [tab, setTab] = useState(() => {
+      const a = loadAuth();
+      const r = a && window.AUTH.roles[a.role];
+      return r ? r.tabs[0] : 'schedule';
+    }); // schedule | bids | final
     const [history, setHistory] = useState(false);
     const [backup, setBackup] = useState(false);
     const [sbStatus, setSbStatus] = useState(
@@ -1828,6 +1833,27 @@
       };
       window.addEventListener('keydown', onKey);
       return () => window.removeEventListener('keydown', onKey);
+    }, []);
+
+    // 오래 방치된 화면 자동 리프레시: 30분간 조작이 없으면 새로고침 →
+    // 초기 화면(최유라쇼 + 역할 기본 탭)으로 복귀 + 최신 데이터/버전 반영.
+    // (모든 편집은 즉시 자동 저장되므로 새로고침으로 유실되지 않음)
+    useEffect(() => {
+      const IDLE_MS = 30 * 60 * 1000;
+      let timer = null;
+      const reset = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          if (document.visibilityState === 'visible') window.location.reload();
+        }, IDLE_MS);
+      };
+      const evs = ['mousedown', 'keydown', 'touchstart', 'scroll'];
+      evs.forEach((e) => window.addEventListener(e, reset, { passive: true }));
+      reset();
+      return () => {
+        if (timer) clearTimeout(timer);
+        evs.forEach((e) => window.removeEventListener(e, reset));
+      };
     }, []);
 
     function doLogin(a) {

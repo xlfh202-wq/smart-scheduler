@@ -193,16 +193,29 @@
     let currentUser = null; // 로그인한 사용자 표시명 — 이 브라우저 한정(서버 동기화 안 함)
     let backupAPI = null;   // Supabase 백업/복원 구현 (connectSupabase 에서 주입)
     let hydratedOnce = false; // 첫 서버 로드 이후에는 화면 이동(탭·월)을 로컬 유지
+    // 접속(첫 로드) 시 항상 초기 화면 = 최유라쇼 + 현재 월 (오늘 기준)
+    function defaultView() {
+      const d = new Date();
+      return { year: d.getFullYear(), month: d.getMonth() + 1 };
+    }
     // 화면 이동(activeProgram·view)은 클라이언트별 로컬 — 다른 접속자 변경이 내 화면을 바꾸지 않도록
     function keepLocalNav(newState, prev) {
       if (hydratedOnce && prev) {
+        // 이후 하이드레이트(다른 접속자의 데이터 변경)는 내 화면 이동을 그대로 유지
         if (prev.activeProgram) newState.activeProgram = prev.activeProgram;
         if (prev.view) newState.view = prev.view;
+      } else {
+        // 첫 접속: 서버에 저장된 화면 위치를 따르지 않고 항상 초기 화면으로 시작
+        newState.activeProgram = MAIN_PROGRAM;
+        newState.view = defaultView();
       }
       hydratedOnce = true;
       return newState;
     }
     let state = load();
+    // 접속 시 초기 화면 강제 (localStorage에 남은 이전 위치를 따르지 않음)
+    state.activeProgram = MAIN_PROGRAM;
+    state.view = defaultView();
     const subs = new Set();
 
     function load() {
