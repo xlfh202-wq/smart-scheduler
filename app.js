@@ -518,7 +518,7 @@
     const [snapOpen, setSnapOpen] = useState(false);
     const [addDayOpen, setAddDayOpen] = useState(false);
     const [memoOpen, setMemoOpen] = useState(false);
-    const hasMemo = !!(state.castingMemo && state.castingMemo[state.activeProgram]);
+    const hasMemo = !!(state.castingMemo && state.castingMemo[`${state.activeProgram}|${state.view.year}-${String(state.view.month).padStart(2, '0')}`]);
     const { year, month } = state.view;
     const days = daysInView(state);
     const monthSlotIds = new Set(days.flatMap((d) => d.slots.map((s) => s.id)));
@@ -925,7 +925,8 @@
     const [studio, setStudio] = useState(p.studio || '');
     const [dur, setDur] = useState(p.durationMin || '');
     const castOpts = (window.AUTH.casting && window.AUTH.casting[p.programId]) || null;
-    const memo = (state && state.castingMemo && state.castingMemo[p.programId]) || '';
+    const memoYm = state ? `${state.view.year}-${String(state.view.month).padStart(2, '0')}` : '';
+    const memo = (state && state.castingMemo && state.castingMemo[p.programId + '|' + memoYm]) || '';
     function save() {
       store.updatePlacementMeta(p.id, {
         pd, host, studio, durationMin: dur ? parseInt(dur, 10) : null,
@@ -939,7 +940,7 @@
     return html`
       <${Modal} title=${`배정 편집 · ${p.productName}`} onClose=${onClose} onSave=${save}>
         ${memo && html`<div class="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-[12px] text-amber-800 whitespace-pre-line">
-          <div class="font-semibold mb-0.5">📌 캐스팅 특이사항</div>${memo}</div>`}
+          <div class="font-semibold mb-0.5">📌 캐스팅 특이사항 (${state.view.month}월)</div>${memo}</div>`}
         <${Field} label="담당 PD (선택/직접입력)">${castField('pd', pd, setPd, '예: 강성현')}<//>
         <${Field} label="쇼호스트 (선택/직접입력)">${castField('host', host, setHost, '예: 홍성보')}<//>
         <${Field} label="스튜디오 (선택/직접입력)">${castField('studio', studio, setStudio, '예: 250')}<//>
@@ -952,11 +953,12 @@
   // 캐스팅 특이사항 메모 (PD/관리자 전용 — 휴가·특정일 불가 등)
   function CastingMemoModal({ state, onClose }) {
     const pid = state.activeProgram;
-    const [text, setText] = useState((state.castingMemo && state.castingMemo[pid]) || '');
-    function save() { store.setCastingMemo(pid, text); onClose(); }
+    const ym = `${state.view.year}-${String(state.view.month).padStart(2, '0')}`;
+    const [text, setText] = useState((state.castingMemo && state.castingMemo[pid + '|' + ym]) || '');
+    function save() { store.setCastingMemo(pid, ym, text); onClose(); }
     return html`
-      <${Modal} title=${`${activeProgramObj(state).name} · 캐스팅 특이사항`} onClose=${onClose} onSave=${save}>
-        <div class="text-[12px] text-ink-soft">PD·쇼호스트 배정 시 참고할 메모입니다. (예: “강성현 7/15 휴가”, “홍성보 7/20~25 불가”) PD·관리자만 보고 수정합니다.</div>
+      <${Modal} title=${`${activeProgramObj(state).name} · ${state.view.year}년 ${state.view.month}월 캐스팅 특이사항`} onClose=${onClose} onSave=${save}>
+        <div class="text-[12px] text-ink-soft"><b>이 달(${state.view.month}월) 전용</b> 메모입니다 — PD·쇼호스트 배정 시 참고. (예: “강성현 ${state.view.month}/15 휴가”, “홍성보 ${state.view.month}/20~25 불가”) 월·프로그램별로 분리 저장되며 PD·관리자만 보고 수정합니다.</div>
         <textarea value=${text} onInput=${(e) => setText(e.target.value)} rows="8" class=${`${inputCls} leading-relaxed`}
           placeholder=${'예)\n· 강성현 PD: 7/15(목) 휴가\n· 홍성보: 7/20~7/25 불가\n· 250스튜디오: 7/10 점검'}></textarea>
       <//>`;

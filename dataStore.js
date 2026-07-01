@@ -605,11 +605,11 @@
         emit();
         return { added, newDays, programs: progs.size };
       },
-      // 캐스팅 특이사항 메모 (PD/쇼호스트 휴가·불가일 등) — 프로그램별
-      setCastingMemo(programId, text) {
+      // 캐스팅 특이사항 메모 (PD/쇼호스트 휴가·불가일 등) — 프로그램별 + 월별 분리
+      setCastingMemo(programId, ym, text) {
         if (!state.castingMemo) state.castingMemo = {};
-        state.castingMemo[programId] = text;
-        log({ action: '캐스팅메모', detail: '캐스팅 특이사항 수정' });
+        state.castingMemo[programId + '|' + ym] = text;
+        log({ action: '캐스팅메모', detail: `${ym} 캐스팅 특이사항 수정` });
         emit();
       },
       // 빈 카드(입찰 없이) 직접 편성
