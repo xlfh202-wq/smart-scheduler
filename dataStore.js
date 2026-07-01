@@ -167,6 +167,16 @@
     let saveBackend = null; // 설정 시 localStorage 대신 이 함수로 저장 (Supabase 등)
     let currentUser = null; // 로그인한 사용자 표시명 — 이 브라우저 한정(서버 동기화 안 함)
     let backupAPI = null;   // Supabase 백업/복원 구현 (connectSupabase 에서 주입)
+    let hydratedOnce = false; // 첫 서버 로드 이후에는 화면 이동(탭·월)을 로컬 유지
+    // 화면 이동(activeProgram·view)은 클라이언트별 로컬 — 다른 접속자 변경이 내 화면을 바꾸지 않도록
+    function keepLocalNav(newState, prev) {
+      if (hydratedOnce && prev) {
+        if (prev.activeProgram) newState.activeProgram = prev.activeProgram;
+        if (prev.view) newState.view = prev.view;
+      }
+      hydratedOnce = true;
+      return newState;
+    }
     let state = load();
     const subs = new Set();
 
@@ -346,7 +356,8 @@
       _snapshot: () => state,
       _useBackend(saveFn) { saveBackend = saveFn; },
       _hydrate(newState) { // 서버에서 받은 상태로 교체 (재저장 안 함, 이력 초기화)
-        state = pruneExcluded(newState); baseline = JSON.stringify(state); undoStack = []; redoStack = [];
+        state = keepLocalNav(pruneExcluded(newState), state);
+        baseline = JSON.stringify(state); undoStack = []; redoStack = [];
         subs.forEach((fn) => fn(state));
       },
 
@@ -358,7 +369,7 @@
       exportJSON() { return JSON.stringify(state, null, 2); },
       // 백업 시점 데이터로 전체 교체 → notify() 가 서버('main')에도 저장하여 다른 접속자에 전파
       _applyRestore(data) {
-        state = data;
+        state = keepLocalNav(data, state);
         state.changeLog = state.changeLog || [];
         state.changeLog.unshift({ id: uid(), ts: nowISO(), user: currentUser || '익명',
           action: '백업복원', productName: '', teamName: '', from: '', to: '', detail: '백업 시점으로 전체 복원' });
