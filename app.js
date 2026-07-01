@@ -1634,7 +1634,8 @@
       return () => window.removeEventListener('keydown', h);
     }, []);
     return html`
-      <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4">
+      <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4"
+        onClick=${(e) => e.stopPropagation()} onDoubleClick=${(e) => e.stopPropagation()}>
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[88vh] flex flex-col">
           <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200">
             <h3 class="font-bold text-ink text-sm">${title}</h3>
