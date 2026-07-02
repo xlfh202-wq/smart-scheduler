@@ -634,7 +634,7 @@
     }
 
     return html`
-      <aside class=${`w-64 shrink-0 flex flex-col border-r border-slate-200 bg-white ${over ? 'drop-active' : ''}`}
+      <aside class=${`w-full md:w-64 shrink-0 flex flex-col border-b md:border-b-0 md:border-r border-slate-200 bg-white max-h-52 md:max-h-none ${over ? 'drop-active' : ''}`}
         onDragOver=${(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave=${(e) => { if (e.currentTarget === e.target) setOver(false); }}
         onDrop=${onPoolDrop}>
@@ -762,9 +762,9 @@
       onSaved && onSaved(); // 최종편성안 탭으로 이동
     }
     return html`
-      <div class="flex flex-1 min-h-0">
+      <div class="flex flex-col md:flex-row flex-1 min-h-0">
         <${BidPool} state=${state} />
-        <div class="flex-1 overflow-y-auto p-4">
+        <div class="flex-1 overflow-y-auto p-2 sm:p-4">
           <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
             <h2 class="text-base font-bold text-ink">${year}년 ${month}월 편성표
               <span class="text-[12px] font-normal text-ink-soft">방송일 ${days.length}일 · 편성 ${placedCount}건 · +${shiftMonth(state.view, 1).month}월 첫주 포함</span>
@@ -789,7 +789,7 @@
             ${groupByWeek(days).map(([wk, days]) => html`
               <div key=${wk} class="flex flex-wrap gap-3 items-start">
                 ${days.map((d) => html`
-                  <div class="flex-1 min-w-[300px]">
+                  <div class="w-full sm:flex-1 sm:min-w-[280px]">
                     <${DayBlock} state=${state} day=${d} onEdit=${setEditing} />
                   </div>`)}
               </div>`)}
@@ -983,11 +983,11 @@
               ${saving ? '이미지 생성 중…' : '🖼 이미지 저장 (PNG)'}</button>
           </div>
         </div>
-        <div ref=${capRef} id="final-capture" class="bg-white rounded-lg shadow-sm overflow-hidden">
+        <div ref=${capRef} id="final-capture" class="bg-white rounded-lg shadow-sm overflow-x-auto">
           <div class="px-3 py-2 border-b-2 border-brand text-[13px] font-bold text-ink">
             ${prog.name} · ${year}년 ${month}월 최종편성안 <span class="font-normal text-ink-soft">(총 ${total}편성)</span>
           </div>
-          <table class="w-full text-[12px] border-collapse">
+          <table class="w-full min-w-[820px] text-[12px] border-collapse">
             <thead class="sticky top-0">
               <tr>
                 <th class=${th} style=${{ width: '70px' }}>방송일</th>
