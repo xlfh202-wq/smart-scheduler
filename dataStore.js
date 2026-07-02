@@ -1204,6 +1204,22 @@
         state.changeLog = [];
         emit();
       },
+      // 상품별 편성 이동횟수 초기화 (범위: programId/ym 지정 시 해당 프로그램·월만, 아니면 전체)
+      resetMoveCounts({ programId, ym } = {}) {
+        const slotMonth = {};
+        state.days.forEach((d) => d.slots.forEach((s) => { slotMonth[s.id] = d.date.slice(0, 7); }));
+        let n = 0;
+        state.placements.forEach((p) => {
+          if (!(p.moveCount > 0)) return;
+          if (programId && programId !== 'all' && p.programId !== programId) return;
+          if (ym && ym !== 'all' && slotMonth[p.slotId] !== ym) return;
+          p.moveCount = 0; n++;
+        });
+        const scope = [(programId && programId !== 'all') ? programId : '', (ym && ym !== 'all') ? ym : ''].filter(Boolean).join(' · ');
+        log({ action: '이동초기화', detail: `이동횟수 초기화 ${n}건${scope ? ' · ' + scope : ' · 전체'}` });
+        emit();
+        return { reset: n };
+      },
 
       /* ---------- 프로그램 생성 (관리자) ---------- */
       // opts: { name, fashion, irregular, schedule:[{wd, slots:[[s,e]]}] }

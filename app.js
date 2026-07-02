@@ -1618,12 +1618,23 @@
       store.clearChangeLog();
     }
 
-    // 상품별 이동 횟수 요약
-    const moveSummary = useMemo(() => {
+    // 상품별 이동 횟수 요약 (선택한 프로그램/월로 필터 — store 제자리변경이라 매 렌더 계산)
+    const slotMonth = (() => { const m = {}; state.days.forEach((d) => d.slots.forEach((s) => { m[s.id] = d.date.slice(0, 7); })); return m; })();
+    const moveSummary = (() => {
       const m = {};
-      state.placements.forEach((p) => { if (p.moveCount > 0) m[p.productName] = (m[p.productName] || 0) + p.moveCount; });
+      state.placements.forEach((p) => {
+        if (!(p.moveCount > 0)) return;
+        if (prog !== 'all' && p.programId !== prog) return;
+        if (ym !== 'all' && slotMonth[p.slotId] !== ym) return;
+        m[p.productName] = (m[p.productName] || 0) + p.moveCount;
+      });
       return Object.entries(m).sort((a, b) => b[1] - a[1]);
-    }, [state.placements]);
+    })();
+    function resetMoves() {
+      const scope = (prog === 'all' ? '전체 프로그램' : progName(prog)) + ' / ' + (ym === 'all' ? '전체 월' : ym.slice(5) + '월');
+      if (!confirm(`상품별 편성 이동횟수를 초기화합니다. (${scope})\n이동 기록만 0으로 리셋되며 편성 자체는 그대로입니다. 계속할까요?`)) return;
+      store.resetMoveCounts({ programId: prog, ym });
+    }
 
     const actions = ['all', ...Array.from(new Set(state.changeLog.map((l) => l.action)))];
     const actionColor = { 편성: '#16a34a', 이동: '#da291c', 편성제외: '#64748b', 입찰등록: '#0891b2',
@@ -1643,7 +1654,12 @@
 
           ${moveSummary.length > 0 && html`
             <div class="px-4 py-2 bg-brand-light/60 border-b border-slate-200">
-              <div class="text-[12px] font-semibold text-brand-dark mb-1">상품별 편성 이동 횟수</div>
+              <div class="flex items-center gap-2 mb-1">
+                <span class="text-[12px] font-semibold text-brand-dark">상품별 편성 이동 횟수
+                  <span class="font-normal text-ink-soft">· ${prog === 'all' ? '전체' : progName(prog)} / ${ym === 'all' ? '전체 월' : ym.slice(5) + '월'}</span></span>
+                ${isAdmin && html`<button onClick=${resetMoves}
+                  class="text-[11px] px-2 py-0.5 rounded border border-rose-300 text-rose-600 bg-white hover:bg-rose-50 whitespace-nowrap" title="관리자 전용">이동횟수 초기화 🔒</button>`}
+              </div>
               <div class="flex flex-wrap gap-1.5">
                 ${moveSummary.map(([name, cnt]) => html`
                   <span key=${name} class="text-[12px] bg-white border border-brand/30 rounded px-2 py-0.5">
