@@ -1604,8 +1604,8 @@
     const curYm = `${state.view.year}-${String(state.view.month).padStart(2, '0')}`;
     const [q, setQ] = useState('');
     const [action, setAction] = useState('all');
-    const [prog, setProg] = useState(state.activeProgram);
-    const [ym, setYm] = useState(curYm);
+    const [prog, setProg] = useState('all');
+    const [ym, setYm] = useState('all');
     const progName = (id) => { const p = (state.programs || []).find((x) => x.id === id); return p ? p.name : id; };
     const ymList = Array.from(new Set(state.changeLog.map((l) => l.ym).filter(Boolean))).sort().reverse();
     let logs = state.changeLog;
@@ -1628,7 +1628,10 @@
     const actions = ['all', ...Array.from(new Set(state.changeLog.map((l) => l.action)))];
     const actionColor = { 편성: '#16a34a', 이동: '#da291c', 편성제외: '#64748b', 입찰등록: '#0891b2',
       입찰수정: '#0891b2', 입찰삭제: '#64748b', 배정변경: '#7c3aed', 시간분할: '#d97706',
-      시간추가: '#d97706', 시간삭제: '#64748b', 편성일추가: '#2563eb', 편성일삭제: '#64748b' };
+      시간추가: '#d97706', 시간삭제: '#64748b', 편성일추가: '#2563eb', 편성일삭제: '#64748b',
+      편성수정: '#16a34a', 편성저장: '#0d9488', 편성복원: '#0d9488', 저장본삭제: '#64748b',
+      팀추가: '#2563eb', 팀수정: '#7c3aed', 팀삭제: '#64748b', 팀병합: '#7c3aed', 팀정리: '#7c3aed',
+      프로그램생성: '#2563eb', 프로그램삭제: '#64748b', 백업복원: '#da291c' };
 
     return html`
       <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick=${onClose}>
@@ -1673,6 +1676,8 @@
               <thead class="sticky top-0 bg-slate-50 text-ink-soft">
                 <tr class="text-left">
                   <th class="px-3 py-1.5 font-medium w-32">시각</th>
+                  <th class="px-3 py-1.5 font-medium w-24">프로그램</th>
+                  <th class="px-3 py-1.5 font-medium w-16">월</th>
                   <th class="px-3 py-1.5 font-medium w-24">수정자</th>
                   <th class="px-3 py-1.5 font-medium w-20">동작</th>
                   <th class="px-3 py-1.5 font-medium">상품 / 내용</th>
@@ -1680,10 +1685,12 @@
                 </tr>
               </thead>
               <tbody>
-                ${logs.length === 0 && html`<tr><td colspan="5" class="text-center text-slate-400 py-8">이력이 없습니다</td></tr>`}
+                ${logs.length === 0 && html`<tr><td colspan="7" class="text-center text-slate-400 py-8">이력이 없습니다</td></tr>`}
                 ${logs.map((l) => html`
                   <tr key=${l.id} class="border-t border-slate-100 hover:bg-slate-50 align-top">
                     <td class="px-3 py-1.5 text-ink-soft tabular-nums whitespace-nowrap">${fmtTs(l.ts)}</td>
+                    <td class="px-3 py-1.5 whitespace-nowrap text-ink">${l.programId ? progName(l.programId) : '—'}</td>
+                    <td class="px-3 py-1.5 whitespace-nowrap tabular-nums text-ink-soft">${l.ym ? l.ym.slice(5) + '월' : '—'}</td>
                     <td class="px-3 py-1.5 whitespace-nowrap font-medium ${l.user === 'system' || l.user === '익명' ? 'text-slate-400' : 'text-ink'}">${l.user || '—'}</td>
                     <td class="px-3 py-1.5"><${Badge} color=${actionColor[l.action]}>${l.action}<//></td>
                     <td class="px-3 py-1.5">
