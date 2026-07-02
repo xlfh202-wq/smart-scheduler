@@ -188,6 +188,8 @@
       snapshots: [],
       changeLog: [],
       hiddenDays: [], // 사용자가 삭제한 고정 스케줄 날짜 키('programId|YYYY-MM-DD') — ensureMonth 재생성 방지
+      programSchedules: {}, // 관리자 생성 프로그램의 고정 스케줄 { pid: [{wd, slots:[[s,e]]}] }
+      programMeta: {},      // 프로그램 부가정보 { pid: { fashion, custom, irregular } }
     };
   }
 
@@ -1141,6 +1143,33 @@
         emit();
       },
 
+      /* ---------- 프로그램 생성 (관리자) ---------- */
+      // opts: { name, fashion, irregular, schedule:[{wd, slots:[[s,e]]}] }
+      addProgram({ name, fashion, irregular, schedule } = {}) {
+        const nm = (name || '').trim();
+        if (!nm) return { error: '프로그램명을 입력하세요.' };
+        // 고유 pid 생성
+        let base = 'pgm_' + nm.replace(/\s+/g, '');
+        let pid = base, n = 2;
+        while ((state.programs || []).some((p) => p.id === pid)) { pid = base + '_' + n; n++; }
+        state.programs = state.programs || [];
+        const color = PROGRAM_COLORS[state.programs.length % PROGRAM_COLORS.length];
+        state.programs.push({ id: pid, name: nm, color });
+        state.programMeta = state.programMeta || {};
+        state.programMeta[pid] = { fashion: !!fashion, custom: true, irregular: !!irregular };
+        if (!irregular && schedule && schedule.length) {
+          state.programSchedules = state.programSchedules || {};
+          state.programSchedules[pid] = schedule;
+          // 이번 달 + 다음 달 방송일 생성
+          this.ensureMonth(state.view.year, state.view.month, pid);
+          const nmn = nextMonthOf(state.view.year, state.view.month);
+          this.ensureMonth(nmn.year, nmn.month, pid);
+        }
+        state.activeProgram = pid; // 새 프로그램으로 이동
+        log({ action: '프로그램생성', detail: `${nm}${irregular ? ' (비정기)' : ''}${fashion ? ' · 패션형' : ''}` });
+        emit();
+        return { ok: true, pid };
+      },
       /* ---------- 프로그램 삭제 (탭 + 관련 데이터 제거) ---------- */
       removeProgram(programId) {
         const slotIds = new Set();
@@ -1150,6 +1179,8 @@
         state.bids = state.bids.filter((b) => !slotIds.has(b.slotId));
         state.programs = (state.programs || []).filter((p) => p.id !== programId);
         state.snapshots = (state.snapshots || []).filter((s) => s.programId !== programId);
+        if (state.programSchedules) delete state.programSchedules[programId];
+        if (state.programMeta) delete state.programMeta[programId];
         if (state.activeProgram === programId) state.activeProgram = MAIN_PROGRAM;
         log({ action: '프로그램삭제', detail: `${programId} 삭제` });
         emit();

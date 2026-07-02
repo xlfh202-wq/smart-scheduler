@@ -1698,7 +1698,8 @@
   /* =====================================================================
    *  프로그램 탭 (엑셀/크롬 탭처럼)
    * ===================================================================== */
-  function ProgramTabs({ state }) {
+  function ProgramTabs({ state, isAdmin }) {
+    const [addOpen, setAddOpen] = useState(false);
     // 배지 = 현재 보는 월의 프로그램별 편성(상품 배치) 건수
     const ym = `${state.view.year}-${String(state.view.month).padStart(2, '0')}`;
     const counts = useMemo(() => {
@@ -1708,10 +1709,12 @@
       state.placements.forEach((p) => { if (p.programId && slotMonth[p.slotId] === ym) byProg[p.programId] = (byProg[p.programId] || 0) + 1; });
       return byProg;
     }, [state.placements, state.days, ym]);
+    const meta = state.programMeta || {};
     return html`
       <div class="flex items-stretch gap-0.5 px-2 pt-1.5 bg-slate-200/70 overflow-x-auto">
         ${(state.programs || []).map((p) => {
           const active = p.id === state.activeProgram;
+          const custom = meta[p.id] && meta[p.id].custom;
           return html`
             <button key=${p.id} onClick=${() => store.setActiveProgram(p.id)}
               title=${`${p.name} · ${state.view.month}월 편성 ${counts[p.id] || 0}건`}
@@ -1720,9 +1723,74 @@
               <span class="inline-block w-2 h-2 rounded-full" style=${{ background: p.color }}></span>
               ${p.name}
               ${counts[p.id] ? html`<span class=${`text-[10px] px-1 rounded ${active ? 'bg-slate-100 text-ink-soft' : 'bg-slate-200 text-slate-500'}`}>${counts[p.id]}</span>` : ''}
+              ${isAdmin && custom && html`<span role="button" title="이 프로그램 삭제(관리자)"
+                onClick=${(e) => { e.stopPropagation(); if (confirm(`[${p.name}] 프로그램을 삭제할까요?\n이 프로그램의 편성일·편성·입찰이 모두 삭제됩니다.`)) store.removeProgram(p.id); }}
+                class="ml-0.5 text-[11px] text-slate-400 hover:text-brand">✕</span>`}
             </button>`;
         })}
+        ${isAdmin && html`<button onClick=${() => setAddOpen(true)} title="테마 프로그램 추가 (관리자)"
+          class="ml-1 shrink-0 px-2.5 py-1.5 rounded-t-lg text-[12.5px] font-semibold text-brand bg-slate-100 border-t border-x border-transparent hover:bg-white">+ 프로그램</button>`}
+        ${addOpen && html`<${AddProgramModal} state=${state} onClose=${() => setAddOpen(false)} />`}
       </div>`;
+  }
+
+  /* =====================================================================
+   *  프로그램 생성 모달 (관리자) — 시간대/요일 선택 · 비정기(수기) 지원
+   * ===================================================================== */
+  function AddProgramModal({ state, onClose }) {
+    const WD = ['일', '월', '화', '수', '목', '금', '토'];
+    const [name, setName] = useState('');
+    const [fashion, setFashion] = useState(false);
+    const [irregular, setIrregular] = useState(false);
+    const [wdSel, setWdSel] = useState({}); // { wd: {start,end} }
+    const toggleWd = (wd) => setWdSel((prev) => {
+      const n = { ...prev };
+      if (n[wd]) delete n[wd]; else n[wd] = { start: '', end: '' };
+      return n;
+    });
+    const setTime = (wd, key, val) => setWdSel((prev) => ({ ...prev, [wd]: { ...prev[wd], [key]: val } }));
+    function save() {
+      if (!name.trim()) { alert('프로그램명을 입력하세요.'); return; }
+      let schedule = [];
+      if (!irregular) {
+        const wds = Object.keys(wdSel);
+        if (!wds.length) { alert('요일을 하나 이상 선택하거나 "비정기"를 체크하세요.'); return; }
+        for (const wd of wds) {
+          const { start, end } = wdSel[wd];
+          if (!start || !end) { alert(`${WD[wd]}요일의 시작·종료 시간을 입력하세요.`); return; }
+          schedule.push({ wd: Number(wd), slots: [[start, end]] });
+        }
+      }
+      const r = store.addProgram({ name: name.trim(), fashion, irregular, schedule });
+      if (r && r.error) { alert(r.error); return; }
+      onClose();
+    }
+    return html`
+      <${Modal} title="테마 프로그램 추가" onClose=${onClose} onSave=${save}>
+        <${Field} label="프로그램명 *"><input value=${name} onInput=${(e) => setName(e.target.value)} class=${inputCls} placeholder="예: 새 특집쇼" autofocus /><//>
+        <div class="flex flex-wrap gap-4">
+          <label class="flex items-center gap-1.5 text-[13px]"><input type="checkbox" checked=${fashion} onChange=${(e) => setFashion(e.target.checked)} /> 패션형 (1부·2부 순번, 방송시간은 날짜 옆)</label>
+          <label class="flex items-center gap-1.5 text-[13px]"><input type="checkbox" checked=${irregular} onChange=${(e) => setIrregular(e.target.checked)} /> 비정기 (요일 고정 없음 · 편성일 수기 추가)</label>
+        </div>
+        ${!irregular && html`
+          <${Field} label="정기 방송 요일 · 시간">
+            <div class="flex flex-wrap gap-1 mb-2">
+              ${WD.map((w, wd) => html`<button key=${wd} type="button" onClick=${() => toggleWd(wd)}
+                class=${`w-9 h-9 rounded text-[13px] border ${wdSel[wd] ? 'bg-brand text-white border-brand' : 'bg-white border-slate-300 text-ink-soft hover:border-brand'}`}>${w}</button>`)}
+            </div>
+            <div class="space-y-1.5">
+              ${Object.keys(wdSel).sort().map((wd) => html`
+                <div key=${wd} class="flex items-center gap-2 text-[13px]">
+                  <span class="w-12 font-semibold text-ink">${WD[wd]}요일</span>
+                  <${TimeInput} value=${wdSel[wd].start} onChange=${(v) => setTime(wd, 'start', v)} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+                  <span class="text-ink-soft">~</span>
+                  <${TimeInput} value=${wdSel[wd].end} onChange=${(v) => setTime(wd, 'end', v)} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+                </div>`)}
+              ${Object.keys(wdSel).length === 0 && html`<div class="text-[12px] text-slate-400">요일 버튼을 눌러 방송 요일을 선택하세요. (시간대는 편성표에서 추가로 나눌 수 있음)</div>`}
+            </div>
+          <//>`}
+        <div class="text-[12px] text-ink-soft">비정기 프로그램은 요일 없이 만들고, 편성표에서 <b>+ 편성일 추가</b> / <b>+ 시간대</b>로 건바이건 편성합니다.</div>
+      <//>`;
   }
 
   /* =====================================================================
@@ -1974,7 +2042,7 @@
           </div>
         </header>
 
-        <${ProgramTabs} state=${state} />
+        <${ProgramTabs} state=${state} isAdmin=${!!roleCfg.isAdmin} />
 
         <main class="flex-1 min-h-0 flex flex-col border-t border-slate-300">
           ${curTab === 'schedule' ? html`<${ScheduleView} state=${state} onSaved=${() => setTab('final')} />`
