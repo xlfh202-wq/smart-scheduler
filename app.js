@@ -1044,7 +1044,7 @@
                         : html`<span class="px-2 text-slate-300">—</span>`}
                     </td>
                     <td class=${`${td} p-0`}>${p ? html`${Cell(det.note, (val) => store.updatePlacementContent(p.id, { detail: { note: val } }), { ph: '내용/타이틀…' })}
-                      ${det.issue ? html`<div class="px-2 pb-1 text-[11px] text-rose-500">${det.issue}</div>` : ''}` : ''}</td>
+                      <div class="border-t border-dashed border-rose-200">${Cell(det.issue, (val) => store.updatePlacementContent(p.id, { detail: { issue: val } }), { ph: '이슈/특이사항…', color: 'text-rose-500' })}</div>` : ''}</td>
                     <td class=${`${td} p-0`}>${p ? Cell(det.comp, (val) => store.updatePlacementContent(p.id, { detail: { comp: val } }), { ph: '구성…' }) : ''}</td>
                     <td class=${`${td} p-0`}>${p ? Cell(det.prep, (val) => store.updatePlacementContent(p.id, { detail: { prep: val } }), { ph: '00억…', color: 'tabular-nums' }) : ''}</td>
                     <td class=${`${td} p-0`}>${p ? Cell(det.price, (val) => store.updatePlacementContent(p.id, { detail: { price: val } }), { ph: '가격…', color: 'tabular-nums' }) : ''}</td>

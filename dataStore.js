@@ -927,8 +927,20 @@
         if (patch.pending !== undefined) p.pending = patch.pending;
         if (patch.detail) p.detail = { ...(p.detail || {}), ...patch.detail };
         stamp(p);
+        // 원본 입찰(입찰보드)에도 반영 → 최종편성안·편성표·입찰보드 모두 동기화
+        if (p.sourceBidId) {
+          const b = state.bids.find((x) => x.id === p.sourceBidId);
+          if (b) {
+            b.product = b.product || {};
+            if (patch.productName !== undefined) b.product.name = patch.productName;
+            if (patch.items !== undefined) b.product.items = patch.items;
+            if (patch.detail) Object.assign(b.product, patch.detail);
+            stamp(b);
+          }
+        }
         log({ action: '편성수정', productName: p.productName, teamName: teamName(p.teamId),
-              detail: patch.pending !== undefined ? (patch.pending ? '미정 표시' : '확정 표시') : '최종편성안 직접수정' });
+              detail: (patch.pending !== undefined ? (patch.pending ? '미정 표시' : '확정 표시') : '최종편성안 직접수정')
+                + (p.sourceBidId ? ' (입찰정보 동기화)' : '') });
         emit();
       },
       // PD 편성표 상세 팝업에서 통합 수정: 상품/배정/구성 등 한번에 수정하고
