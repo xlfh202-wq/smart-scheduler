@@ -31,6 +31,29 @@
     { id: 'etc',       name: '기타',     color: '#64748b' },
   ];
 
+  // 2026 조직 표준 팀 (부문별) — 접속 시 1회 시드(teamsSeed2026 플래그), 이후 관리자가 추가/수정/삭제
+  const TEAMS_2026 = [
+    { name: '패션상품개발팀', div: '패션부문' }, { name: '트렌드패션팀', div: '패션부문' },
+    { name: '잡화명품팀', div: '잡화레포츠부문' }, { name: '레포츠팀', div: '잡화레포츠부문' }, { name: '캐주얼팀', div: '잡화레포츠부문' },
+    { name: '뷰티1팀', div: 'H&B부문' }, { name: '뷰티2팀', div: 'H&B부문' }, { name: '건식1팀', div: 'H&B부문' }, { name: '건식2팀', div: 'H&B부문' }, { name: '식품팀', div: 'H&B부문' },
+    { name: '가전팀', div: '리빙부문' }, { name: '리빙팀', div: '리빙부문' }, { name: '주방팀', div: '리빙부문' }, { name: '무형상품팀', div: '리빙부문' },
+    { name: '패션DT팀', div: '그로스비즈부문' }, { name: '해외DT팀', div: '그로스비즈부문' }, { name: '국내DT팀', div: '그로스비즈부문' },
+  ];
+  // 이름 기준 병합(같은 이름이면 기존 팀 재사용 → 기존 입찰 데이터 매핑 유지), 없으면 추가. 1회만.
+  function ensureTeams2026(s) {
+    if (!s || s.teamsSeed2026) return s;
+    s.teams = s.teams || [];
+    const byName = new Map(s.teams.map((t) => [t.name, t]));
+    let ci = s.teams.length;
+    TEAMS_2026.forEach((t) => {
+      const ex = byName.get(t.name);
+      if (ex) { if (!ex.div) ex.div = t.div; }
+      else { s.teams.push({ id: 'tm_' + t.name, name: t.name, color: PROGRAM_COLORS[ci % PROGRAM_COLORS.length], div: t.div }); ci++; }
+    });
+    s.teamsSeed2026 = true;
+    return s;
+  }
+
   // 표준 편성 시간대 템플릿
   const THU_SLOTS = [
     { start: '20:45', end: '21:45' }, // 60분
@@ -190,6 +213,7 @@
       hiddenDays: [], // 사용자가 삭제한 고정 스케줄 날짜 키('programId|YYYY-MM-DD') — ensureMonth 재생성 방지
       programSchedules: {}, // 관리자 생성 프로그램의 고정 스케줄 { pid: [{wd, slots:[[s,e]]}] }
       programMeta: {},      // 프로그램 부가정보 { pid: { fashion, custom, irregular } }
+      programTeamIds: {},   // 프로그램별 대상 팀 { pid: [teamId,...] } — 없으면 PROGRAM_CONFIG/전체
     };
   }
 
@@ -239,7 +263,7 @@
     function load() {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) return cleanupSlots(pruneExcluded(JSON.parse(raw)));
+        if (raw) return ensureTeams2026(cleanupSlots(pruneExcluded(JSON.parse(raw))));
       } catch (e) { /* ignore */ }
       const s = seedState();
       applyProgramSeed(s); // 14개 프로그램 확정편성안 자동 적재
@@ -433,7 +457,7 @@
       _snapshot: () => state,
       _useBackend(saveFn) { saveBackend = saveFn; },
       _hydrate(newState) { // 서버에서 받은 상태로 교체 (재저장 안 함, 이력 초기화)
-        state = cleanupSlots(keepLocalNav(pruneExcluded(newState), state));
+        state = ensureTeams2026(cleanupSlots(keepLocalNav(pruneExcluded(newState), state)));
         baseline = JSON.stringify(state); undoStack = []; redoStack = [];
         subs.forEach((fn) => fn(state));
       },
@@ -1157,7 +1181,7 @@
 
       /* ---------- 프로그램 생성 (관리자) ---------- */
       // opts: { name, fashion, irregular, schedule:[{wd, slots:[[s,e]]}] }
-      addProgram({ name, fashion, irregular, schedule } = {}) {
+      addProgram({ name, fashion, irregular, schedule, teamIds } = {}) {
         const nm = (name || '').trim();
         if (!nm) return { error: '프로그램명을 입력하세요.' };
         // 고유 pid 생성
@@ -1169,6 +1193,10 @@
         state.programs.push({ id: pid, name: nm, color });
         state.programMeta = state.programMeta || {};
         state.programMeta[pid] = { fashion: !!fashion, custom: true, irregular: !!irregular };
+        if (teamIds && teamIds.length) {
+          state.programTeamIds = state.programTeamIds || {};
+          state.programTeamIds[pid] = teamIds.slice();
+        }
         if (!irregular && schedule && schedule.length) {
           state.programSchedules = state.programSchedules || {};
           state.programSchedules[pid] = schedule;
@@ -1193,8 +1221,55 @@
         state.snapshots = (state.snapshots || []).filter((s) => s.programId !== programId);
         if (state.programSchedules) delete state.programSchedules[programId];
         if (state.programMeta) delete state.programMeta[programId];
+        if (state.programTeamIds) delete state.programTeamIds[programId];
         if (state.activeProgram === programId) state.activeProgram = MAIN_PROGRAM;
         log({ action: '프로그램삭제', detail: `${programId} 삭제` });
+        emit();
+      },
+
+      /* ---------- 팀 관리 (관리자, 조직개편 대응) ---------- */
+      addTeam({ name, color, div } = {}) {
+        const nm = (name || '').trim();
+        if (!nm) return { error: '팀명을 입력하세요.' };
+        state.teams = state.teams || [];
+        if (state.teams.some((t) => t.name === nm)) return { error: '이미 있는 팀명입니다.' };
+        let base = 'tm_' + nm.replace(/\s+/g, ''), id = base, n = 2;
+        while (state.teams.some((t) => t.id === id)) { id = base + '_' + n; n++; }
+        state.teams.push({ id, name: nm, color: color || PROGRAM_COLORS[state.teams.length % PROGRAM_COLORS.length], div: div || '' });
+        log({ action: '팀추가', detail: nm });
+        emit();
+        return { ok: true, id };
+      },
+      updateTeam(id, patch) {
+        const t = (state.teams || []).find((x) => x.id === id);
+        if (!t) return { error: '팀을 찾을 수 없습니다.' };
+        if (patch.name !== undefined) {
+          const nm = patch.name.trim();
+          if (!nm) return { error: '팀명을 비울 수 없습니다.' };
+          if (state.teams.some((x) => x.id !== id && x.name === nm)) return { error: '이미 있는 팀명입니다.' };
+          t.name = nm;
+        }
+        if (patch.color !== undefined) t.color = patch.color;
+        if (patch.div !== undefined) t.div = patch.div;
+        log({ action: '팀수정', detail: t.name });
+        emit();
+        return { ok: true };
+      },
+      // 팀 삭제 — 이 팀 입찰/편성 건수 반환(호출부에서 확인). 참조 데이터는 남으나 팀명 미표시.
+      teamUsage(id) {
+        const bids = (state.bids || []).filter((b) => b.teamId === id).length;
+        const pls = (state.placements || []).filter((p) => p.teamId === id).length;
+        return { bids, placements: pls };
+      },
+      removeTeam(id) {
+        const t = (state.teams || []).find((x) => x.id === id);
+        if (!t) return;
+        state.teams = state.teams.filter((x) => x.id !== id);
+        // 프로그램별 대상 팀 목록에서도 제거
+        if (state.programTeamIds) Object.keys(state.programTeamIds).forEach((pid) => {
+          state.programTeamIds[pid] = (state.programTeamIds[pid] || []).filter((x) => x !== id);
+        });
+        log({ action: '팀삭제', detail: t.name });
         emit();
       },
 

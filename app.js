@@ -55,8 +55,10 @@
   const PCONF = () => (typeof window !== 'undefined' && window.PROGRAM_CONFIG) || { teams: [], programs: {} };
   const programCfg = (state) => PCONF().programs[state.activeProgram] || null;
   const programTeams = (state) => {
+    const pid = state.activeProgram;
+    const custom = state.programTeamIds && state.programTeamIds[pid];
     const cfg = programCfg(state);
-    const ids = cfg ? cfg.teamIds : state.teams.map((t) => t.id);
+    const ids = (custom && custom.length) ? custom : (cfg ? cfg.teamIds : state.teams.map((t) => t.id));
     return ids.map((id) => state.teams.find((t) => t.id === id)).filter(Boolean);
   };
   const programSchema = (state) => (programCfg(state) || {}).schema || 'lifestyle';
@@ -1457,6 +1459,79 @@
   }
 
   /* =====================================================================
+   *  팀 관리 (관리자) — 조직개편 대응: 추가 / 이름·부문 수정 / 삭제
+   * ===================================================================== */
+  function TeamManagerModal({ state, onClose }) {
+    const [newName, setNewName] = useState('');
+    const [newDiv, setNewDiv] = useState('');
+    const teams = state.teams || [];
+    // store가 state를 제자리 변경(참조 유지)하므로 useMemo 대신 매 렌더 계산
+    const byDiv = (() => {
+      const g = {};
+      teams.forEach((t) => { const d = t.div || '기타'; (g[d] = g[d] || []).push(t); });
+      return g;
+    })();
+    // 팀별 사용량(입찰+편성) — 0이면 안전하게 삭제 가능
+    const usage = (() => {
+      const u = {};
+      (state.bids || []).forEach((b) => { u[b.teamId] = u[b.teamId] || { b: 0, p: 0 }; u[b.teamId].b++; });
+      (state.placements || []).forEach((p) => { u[p.teamId] = u[p.teamId] || { b: 0, p: 0 }; u[p.teamId].p++; });
+      return u;
+    })();
+    function add() {
+      if (!newName.trim()) { alert('팀명을 입력하세요.'); return; }
+      const r = store.addTeam({ name: newName.trim(), div: newDiv.trim() });
+      if (r && r.error) { alert(r.error); return; }
+      setNewName('');
+    }
+    function rename(t) {
+      const nm = prompt('팀명 수정', t.name);
+      if (nm === null) return;
+      const r = store.updateTeam(t.id, { name: nm });
+      if (r && r.error) alert(r.error);
+    }
+    function editDiv(t) {
+      const d = prompt('부문 수정 (예: H&B부문)', t.div || '');
+      if (d === null) return;
+      store.updateTeam(t.id, { div: d });
+    }
+    function del(t) {
+      const u = store.teamUsage(t.id);
+      const warn = (u.bids || u.placements)
+        ? `\n\n※ 이 팀에 입찰 ${u.bids}건 · 편성 ${u.placements}건이 연결돼 있습니다.\n삭제해도 데이터는 남지만 팀명이 표시되지 않습니다.` : '';
+      if (!confirm(`[${t.name}] 팀을 삭제할까요?${warn}`)) return;
+      store.removeTeam(t.id);
+    }
+    return html`
+      <${Modal} title="팀 관리 (조직개편)" onClose=${onClose} onSave=${onClose} extra=${html`<span class="text-[12px] text-ink-soft">총 ${teams.length}팀 · 변경 즉시 반영·저장</span>`}>
+        <div class="flex items-end gap-2">
+          <${Field} label="새 팀명"><input value=${newName} onInput=${(e) => setNewName(e.target.value)} class=${inputCls} placeholder="예: 무형상품팀" /><//>
+          <${Field} label="부문(선택)"><input value=${newDiv} onInput=${(e) => setNewDiv(e.target.value)} class=${inputCls} placeholder="예: 리빙부문" /><//>
+          <button onClick=${add} class="shrink-0 text-[13px] px-3 py-1.5 rounded bg-brand text-white hover:bg-brand-dark">+ 추가</button>
+        </div>
+        <div class="space-y-3 mt-1">
+          ${Object.keys(byDiv).map((div) => html`
+            <div key=${div}>
+              <div class="text-[12px] font-semibold text-ink-soft mb-1">${div}</div>
+              <div class="space-y-1">
+                ${byDiv[div].map((t) => html`
+                  <div key=${t.id} class="flex items-center gap-2 text-[13px] border border-slate-100 rounded px-2 py-1">
+                    <input type="color" value=${t.color || '#64748b'} onInput=${(e) => store.updateTeam(t.id, { color: e.target.value })}
+                      class="w-6 h-6 rounded cursor-pointer border border-slate-200 shrink-0" title="색상" />
+                    <span class="flex-1 font-medium text-ink">${t.name}</span>
+                    ${(() => { const u = usage[t.id]; const n = u ? u.b + u.p : 0;
+                      return html`<span class=${`text-[11px] px-1.5 rounded ${n ? 'bg-slate-100 text-ink-soft' : 'bg-emerald-50 text-emerald-600'}`} title="입찰+편성 사용 건수">${n ? n + '건' : '미사용'}</span>`; })()}
+                    <button onClick=${() => rename(t)} class="text-[12px] text-ink-soft hover:text-brand">이름</button>
+                    <button onClick=${() => editDiv(t)} class="text-[12px] text-ink-soft hover:text-brand">부문</button>
+                    <button onClick=${() => del(t)} class="text-[12px] text-rose-500 hover:underline">삭제</button>
+                  </div>`)}
+              </div>
+            </div>`)}
+        </div>
+      <//>`;
+  }
+
+  /* =====================================================================
    *  변경 이력 팝업
    * ===================================================================== */
   function HistoryModal({ state, onClose, isAdmin }) {
@@ -1743,6 +1818,13 @@
     const [fashion, setFashion] = useState(false);
     const [irregular, setIrregular] = useState(false);
     const [wdSel, setWdSel] = useState({}); // { wd: {start,end} }
+    const [teamSel, setTeamSel] = useState({}); // { teamId: true }
+    const teamsByDiv = (() => {
+      const g = {};
+      (state.teams || []).forEach((t) => { const d = t.div || '기타'; (g[d] = g[d] || []).push(t); });
+      return g;
+    })();
+    const toggleTeam = (id) => setTeamSel((p) => { const n = { ...p }; if (n[id]) delete n[id]; else n[id] = true; return n; });
     const toggleWd = (wd) => setWdSel((prev) => {
       const n = { ...prev };
       if (n[wd]) delete n[wd]; else n[wd] = { start: '', end: '' };
@@ -1761,7 +1843,9 @@
           schedule.push({ wd: Number(wd), slots: [[start, end]] });
         }
       }
-      const r = store.addProgram({ name: name.trim(), fashion, irregular, schedule });
+      const teamIds = Object.keys(teamSel);
+      if (!teamIds.length) { alert('대상 팀을 하나 이상 선택하세요.'); return; }
+      const r = store.addProgram({ name: name.trim(), fashion, irregular, schedule, teamIds });
       if (r && r.error) { alert(r.error); return; }
       onClose();
     }
@@ -1789,7 +1873,20 @@
               ${Object.keys(wdSel).length === 0 && html`<div class="text-[12px] text-slate-400">요일 버튼을 눌러 방송 요일을 선택하세요. (시간대는 편성표에서 추가로 나눌 수 있음)</div>`}
             </div>
           <//>`}
-        <div class="text-[12px] text-ink-soft">비정기 프로그램은 요일 없이 만들고, 편성표에서 <b>+ 편성일 추가</b> / <b>+ 시간대</b>로 건바이건 편성합니다.</div>
+        <${Field} label=${`대상 입찰팀 * (선택 ${Object.keys(teamSel).length}팀)`}>
+          <div class="space-y-2 max-h-56 overflow-y-auto border border-slate-200 rounded p-2">
+            ${Object.keys(teamsByDiv).map((div) => html`
+              <div key=${div}>
+                <div class="text-[11px] font-semibold text-ink-soft mb-1">${div}</div>
+                <div class="flex flex-wrap gap-1">
+                  ${teamsByDiv[div].map((t) => html`<button key=${t.id} type="button" onClick=${() => toggleTeam(t.id)}
+                    class=${`text-[12px] px-2 py-1 rounded-full border ${teamSel[t.id] ? 'text-white border-transparent' : 'bg-white text-ink-soft border-slate-300 hover:border-slate-400'}`}
+                    style=${teamSel[t.id] ? { background: t.color } : {}}>${t.name}</button>`)}
+                </div>
+              </div>`)}
+          </div>
+        <//>
+        <div class="text-[12px] text-ink-soft">비정기 프로그램은 요일 없이 만들고, 편성표에서 <b>+ 편성일 추가</b> / <b>+ 시간대</b>로 건바이건 편성합니다. 팀은 나중에 <b>팀 관리</b>에서 추가/수정할 수 있습니다.</div>
       <//>`;
   }
 
@@ -1912,6 +2009,7 @@
     }); // schedule | bids | final
     const [history, setHistory] = useState(false);
     const [backup, setBackup] = useState(false);
+    const [teamMgr, setTeamMgr] = useState(false);
     const [sbStatus, setSbStatus] = useState(
       (window.SUPABASE && window.SUPABASE.enabled) ? 'connecting' : null);
     useEffect(() => {
@@ -2033,6 +2131,9 @@
                 class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0">
                 변경 이력 <span class="text-[11px] text-ink-soft">(${state.changeLog.length})</span>
               </button>
+              ${roleCfg.isAdmin && html`<button onClick=${() => setTeamMgr(true)}
+                class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0"
+                title="입찰팀 추가/수정/삭제 (조직개편)">🏷 팀 관리</button>`}
               ${roleCfg.canManage && html`<button onClick=${() => setBackup(true)}
                 class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0"
                 title="자동 백업 목록 / 특정 시점으로 복원">백업/복원</button>`}
@@ -2053,6 +2154,7 @@
 
         ${history && html`<${HistoryModal} state=${state} isAdmin=${roleCfg.isAdmin} onClose=${() => setHistory(false)} />`}
         ${backup && html`<${BackupModal} isAdmin=${roleCfg.isAdmin} onClose=${() => setBackup(false)} />`}
+        ${teamMgr && html`<${TeamManagerModal} state=${state} onClose=${() => setTeamMgr(false)} />`}
       </div>`;
   }
   const tabCls = (active) =>
