@@ -128,15 +128,16 @@
   /* =====================================================================
    *  편성 카드 (PD 편성표 내부, 드래그 가능)
    * ===================================================================== */
-  function PlacementCard({ state, p, onEdit }) {
+  function PlacementCard({ state, p }) {
     const team = teamOf(state, p.teamId);
     const [info, setInfo] = useState(false);
+    const [startEdit, setStartEdit] = useState(false);
     const det = p.detail || {};
     const items = p.items || [];
     return html`
       <div draggable=${true}
         onDragStart=${(e) => drag.start(e, 'placement', p.id)}
-        onClick=${() => setInfo(true)} title="클릭하면 입찰 상세 정보"
+        onClick=${() => { setStartEdit(false); setInfo(true); }} title="클릭하면 상세 정보 · ✎ 로 바로 수정"
         class="card-drag group relative rounded-md border bg-white px-2 py-1.5 shadow-sm hover:shadow hover:border-brand transition"
         style=${{ borderLeft: `4px solid ${team.color}` }}>
         <div class="flex items-start justify-between gap-1">
@@ -158,25 +159,26 @@
               </div>`}
           </div>
           <div class="flex flex-col items-center gap-1 opacity-0 group-hover:opacity-100 transition">
-            <button title="배정 편집" onClick=${(e) => { e.stopPropagation(); onEdit(p); }}
+            <button title="수정" onClick=${(e) => { e.stopPropagation(); setStartEdit(true); setInfo(true); }}
               class="text-ink-soft hover:text-brand text-xs leading-none p-0.5">✎</button>
             <button title="편성 제외" onClick=${(e) => { e.stopPropagation(); store.removePlacement(p.id); }}
               class="text-ink-soft hover:text-brand text-xs leading-none p-0.5">✕</button>
           </div>
         </div>
-        ${info && html`<${PlacementDetailModal} state=${state} p=${p} onClose=${(e) => { e && e.stopPropagation && e.stopPropagation(); setInfo(false); }} />`}
+        ${info && html`<${PlacementDetailModal} state=${state} p=${p} startEdit=${startEdit} onClose=${(e) => { e && e.stopPropagation && e.stopPropagation(); setInfo(false); }} />`}
       </div>`;
   }
 
   /* =====================================================================
    *  편성 상세 팝업 (입찰보드에 입력한 정보)
    * ===================================================================== */
-  function PlacementDetailModal({ state, p, onClose }) {
+  function PlacementDetailModal({ state, p, onClose, startEdit }) {
     const t = teamOf(state, p.teamId);
     const det = p.detail || {};
     const items = p.items || [];
     // 이 팝업은 PD·관리자 전용 편성표(ScheduleView)에서만 뜨므로 수정 허용
-    const [edit, setEdit] = useState(false);
+    // startEdit=true(✎ 바로가기)면 상세 없이 수정 폼으로 바로 진입
+    const [edit, setEdit] = useState(!!startEdit);
     if (edit) return html`<${PlacementEditForm} state=${state} p=${p} onClose=${onClose} onBack=${() => setEdit(false)} />`;
     const rows = [
       ['편성 시간', U.slotLabel(p.slotId)],
@@ -256,6 +258,8 @@
     const [host, setHost] = useState(p.host || '');
     const [studio, setStudio] = useState(p.studio || '');
     const [memo, setMemo] = useState(p.memo || '');
+    const memoYm = `${state.view.year}-${String(state.view.month).padStart(2, '0')}`;
+    const castMemo = (state.castingMemo && state.castingMemo[p.programId + '|' + memoYm]) || '';
     function save() {
       if (!name.trim()) { alert('상품명을 입력하세요.'); return; }
       store.updatePlacementFull(p.id, {
@@ -272,6 +276,8 @@
     return html`
       <${Modal} title=${`상세 수정 · ${p.productName}`} onClose=${onBack} onSave=${save}>
         <div class="text-[12px] text-ink-soft -mt-1">여기서 수정하면 <b>최종편성안</b>과 <b>입찰정보</b>에도 함께 반영됩니다.</div>
+        ${castMemo && html`<div class="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-[12px] text-amber-800 whitespace-pre-line">
+          <div class="font-semibold mb-0.5">📌 캐스팅 특이사항 (${state.view.month}월)</div>${castMemo}</div>`}
         <${Field} label="상품명 *"><input value=${name} onInput=${(e) => setName(e.target.value)} class=${inputCls} autofocus /><//>
         <div class="grid grid-cols-2 gap-3">
           <${Field} label="팀명">
@@ -350,7 +356,7 @@
   /* =====================================================================
    *  슬롯 셀 (드롭 타깃)
    * ===================================================================== */
-  function SlotCell({ state, day, slot, onEdit }) {
+  function SlotCell({ state, day, slot }) {
     const [over, setOver] = useState(false);
     const [splitOpen, setSplitOpen] = useState(false);
     const [addOpen, setAddOpen] = useState(false);
@@ -392,7 +398,7 @@
           onDoubleClick=${placements.length === 0 ? (() => setAddOpen(true)) : undefined} title=${placements.length === 0 ? '더블클릭하면 상품 추가' : ''}>
           ${placements.length === 0
             ? html`<div class="text-[11px] text-slate-400 text-center py-2 select-none hover:text-brand">입찰 카드를 끌어다 놓거나 더블클릭해 추가</div>`
-            : placements.map((p) => html`<${PlacementCard} key=${p.id} state=${state} p=${p} onEdit=${onEdit} />`)}
+            : placements.map((p) => html`<${PlacementCard} key=${p.id} state=${state} p=${p} />`)}
         </div>
         ${splitOpen && html`<${SplitModal} slot=${slot} dur=${dur} onClose=${() => setSplitOpen(false)} />`}
         ${addOpen && html`<${SlotAddModal} state=${state} slot=${slot} onClose=${() => setAddOpen(false)} />`}
@@ -462,7 +468,7 @@
       <//>`}`;
   }
 
-  function DayBlock({ state, day, onEdit }) {
+  function DayBlock({ state, day }) {
     const isThu = day.weekday === 4, isSat = day.weekday === 6;
     const accent = isThu ? '#da291c' : isSat ? '#2563eb' : '#7c3aed';
     const fashion = programSchema(state) === 'fashion';
@@ -517,7 +523,7 @@
         <div class="p-2 grid gap-2" style=${{ gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))' }}>
           ${day.slots.length === 0
             ? html`<div class="text-[12px] text-slate-400 py-3 text-center col-span-full">시간대가 없습니다. “+ 상품” 또는 “+ 시간대”로 추가하세요.</div>`
-            : day.slots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} onEdit=${onEdit} />`)}
+            : day.slots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} />`)}
         </div>
         ${addOpen && html`<${AddSlotModal} day=${day} onClose=${() => setAddOpen(false)} />`}
         ${quickOpen && html`<${QuickAddModal} state=${state} day=${day} onClose=${() => setQuickOpen(false)} />`}
@@ -760,7 +766,6 @@
    *  PD 편성표 뷰
    * ===================================================================== */
   function ScheduleView({ state, onSaved }) {
-    const [editing, setEditing] = useState(null);
     const [snapOpen, setSnapOpen] = useState(false);
     const [addDayOpen, setAddDayOpen] = useState(false);
     const [memoOpen, setMemoOpen] = useState(false);
@@ -806,12 +811,11 @@
               <div key=${wk} class="flex flex-wrap gap-3 items-start">
                 ${days.map((d) => html`
                   <div class="w-full sm:flex-1 sm:min-w-[280px]">
-                    <${DayBlock} state=${state} day=${d} onEdit=${setEditing} />
+                    <${DayBlock} state=${state} day=${d} />
                   </div>`)}
               </div>`)}
           </div>
         </div>
-        ${editing && html`<${MetaEditor} p=${editing} state=${state} onClose=${() => setEditing(null)} />`}
         ${snapOpen && html`<${SnapshotsModal} state=${state} onClose=${() => setSnapOpen(false)} />`}
         ${addDayOpen && html`<${AddDayModal} state=${state} onClose=${() => setAddDayOpen(false)} />`}
         ${memoOpen && html`<${CastingMemoModal} state=${state} onClose=${() => setMemoOpen(false)} />`}
@@ -1155,40 +1159,6 @@
           </div>
         </div>
       </div>`;
-  }
-
-  /* =====================================================================
-   *  배정 편집 모달 (PD / 쇼호스트 / 스튜디오)
-   * ===================================================================== */
-  function MetaEditor({ p, onClose, state }) {
-    const [pd, setPd] = useState(p.pd || '');
-    const [host, setHost] = useState(p.host || '');
-    const [studio, setStudio] = useState(p.studio || '');
-    const [dur, setDur] = useState(p.durationMin || '');
-    const castOpts = (window.AUTH.casting && window.AUTH.casting[p.programId]) || null;
-    const memoYm = state ? `${state.view.year}-${String(state.view.month).padStart(2, '0')}` : '';
-    const memo = (state && state.castingMemo && state.castingMemo[p.programId + '|' + memoYm]) || '';
-    function save() {
-      store.updatePlacementMeta(p.id, {
-        pd, host, studio, durationMin: dur ? parseInt(dur, 10) : null,
-      });
-      onClose();
-    }
-    // 캐스팅: 목록에서 선택 또는 직접 입력 (드롭다운 + 수기입력 통일)
-    const castField = (field, val, setVal, ph) => html`
-      <input value=${val} onInput=${(e) => setVal(e.target.value)} list=${castOpts && castOpts[field] ? 'meta-' + field + '-dl' : undefined} class=${inputCls} placeholder=${ph} />
-      ${castOpts && castOpts[field] ? html`<datalist id=${'meta-' + field + '-dl'}>${castOpts[field].map((o) => html`<option key=${o} value=${o}></option>`)}</datalist>` : ''}`;
-    return html`
-      <${Modal} title=${`배정 편집 · ${p.productName}`} onClose=${onClose} onSave=${save}>
-        ${memo && html`<div class="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-[12px] text-amber-800 whitespace-pre-line">
-          <div class="font-semibold mb-0.5">📌 캐스팅 특이사항 (${state.view.month}월)</div>${memo}</div>`}
-        <${Field} label="담당 PD (선택/직접입력)">${castField('pd', pd, setPd, '예: 강성현')}<//>
-        <${Field} label="쇼호스트 (선택/직접입력)">${castField('host', host, setHost, '예: 홍성보')}<//>
-        <${Field} label="스튜디오 (선택/직접입력)">${castField('studio', studio, setStudio, '예: 250')}<//>
-        <${Field} label="방송 분량(분)">
-          <input type="number" value=${dur} onInput=${(e) => setDur(e.target.value)} class=${inputCls} placeholder="예: 30" />
-        <//>
-      <//>`;
   }
 
   // 캐스팅 특이사항 메모 (PD/관리자 전용 — 휴가·특정일 불가 등)
