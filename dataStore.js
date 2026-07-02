@@ -39,8 +39,16 @@
     { name: '가전팀', div: '리빙부문' }, { name: '리빙팀', div: '리빙부문' }, { name: '주방팀', div: '리빙부문' }, { name: '무형상품팀', div: '리빙부문' },
     { name: '패션DT팀', div: '그로스비즈부문' }, { name: '해외DT팀', div: '그로스비즈부문' }, { name: '국내DT팀', div: '그로스비즈부문' },
   ];
+  const DIVISIONS_2026 = ['패션부문', '잡화레포츠부문', 'H&B부문', '리빙부문', '그로스비즈부문', '기타'];
+  // 부문 목록 기본값 보강 (없을 때만)
+  function ensureDivisions(s) {
+    if (!s) return s;
+    if (!s.divisions) s.divisions = DIVISIONS_2026.slice();
+    return s;
+  }
   // 이름 기준 병합(같은 이름이면 기존 팀 재사용 → 기존 입찰 데이터 매핑 유지), 없으면 추가. 1회만.
   function ensureTeams2026(s) {
+    ensureDivisions(s);
     if (!s || s.teamsSeed2026) return s;
     s.teams = s.teams || [];
     const byName = new Map(s.teams.map((t) => [t.name, t]));
@@ -254,6 +262,23 @@
     function isFashionProgram(pid) {
       return FASHION_PROGRAMS.has(pid) || !!((state.programMeta || {})[pid] && state.programMeta[pid].fashion);
     }
+    // 내장 프로그램(PROGRAM_CONFIG)의 대상팀을 state로 구체화 → 병합 시 팀 id 교체가 반영되도록
+    function materializeProgramTeams() {
+      state.programTeamIds = state.programTeamIds || {};
+      const progCfg = (typeof window !== 'undefined' && window.PROGRAM_CONFIG && window.PROGRAM_CONFIG.programs) || {};
+      Object.keys(progCfg).forEach((pid) => {
+        if (!state.programTeamIds[pid]) state.programTeamIds[pid] = (progCfg[pid].teamIds || []).slice();
+      });
+    }
+    // 한 팀(fromId)의 입찰·편성·프로그램 대상팀 참조를 toId로 이관
+    function reassignTeam(fromId, toId) {
+      (state.bids || []).forEach((b) => { if (b.teamId === fromId) b.teamId = toId; });
+      (state.placements || []).forEach((p) => { if (p.teamId === fromId) p.teamId = toId; });
+      if (state.programTeamIds) Object.keys(state.programTeamIds).forEach((pid) => {
+        const arr = state.programTeamIds[pid] || [];
+        state.programTeamIds[pid] = arr.map((id) => (id === fromId ? toId : id)).filter((id, i, a) => a.indexOf(id) === i);
+      });
+    }
     let state = load();
     // 접속 시 초기 화면 강제 (localStorage에 남은 이전 위치를 따르지 않음)
     state.activeProgram = MAIN_PROGRAM;
@@ -268,6 +293,7 @@
       const s = seedState();
       applyProgramSeed(s); // 14개 프로그램 확정편성안 자동 적재
       applySeedBids(s);    // 최유라쇼 MD 입찰 자동 적재
+      ensureTeams2026(s);  // 2026 표준팀 + 부문 시드
       persist(s);
       return s;
     }
@@ -1270,6 +1296,66 @@
           state.programTeamIds[pid] = (state.programTeamIds[pid] || []).filter((x) => x !== id);
         });
         log({ action: '팀삭제', detail: t.name });
+        emit();
+      },
+      // 팀 병합: fromId의 입찰·편성·프로그램대상팀을 toId로 이관 후 fromId 삭제
+      mergeTeam(fromId, toId) {
+        if (fromId === toId) return { error: '같은 팀입니다.' };
+        const to = (state.teams || []).find((x) => x.id === toId);
+        if (!to) return { error: '대상 팀이 없습니다.' };
+        materializeProgramTeams();
+        reassignTeam(fromId, toId);
+        state.teams = state.teams.filter((x) => x.id !== fromId);
+        log({ action: '팀병합', detail: `→ ${to.name}` });
+        emit();
+        return { ok: true };
+      },
+      // 2026 표준팀으로 일괄 정리: 같은 이름 중복팀을 표준 id로 병합 + 부문 지정 (기타는 그대로)
+      mergeTeams2026() {
+        materializeProgramTeams();
+        let merged = 0, reassigned = 0;
+        TEAMS_2026.forEach(({ name, div }) => {
+          const same = (state.teams || []).filter((t) => t.name === name);
+          if (!same.length) return;
+          // 표준 id 우선(tm_<name>), 없으면 첫 팀을 대표로
+          const canon = same.find((t) => t.id === 'tm_' + name) || same[0];
+          canon.div = div;
+          same.filter((t) => t.id !== canon.id).forEach((dup) => {
+            const u = (state.bids || []).filter((b) => b.teamId === dup.id).length
+              + (state.placements || []).filter((p) => p.teamId === dup.id).length;
+            reassignTeam(dup.id, canon.id);
+            reassigned += u;
+            state.teams = state.teams.filter((x) => x.id !== dup.id);
+            merged++;
+          });
+        });
+        log({ action: '팀정리', detail: `2026 표준 병합 ${merged}팀 · 데이터 ${reassigned}건 이관` });
+        emit();
+        return { merged, reassigned };
+      },
+
+      /* ---------- 부문(division) 관리 ---------- */
+      addDivision(name) {
+        const nm = (name || '').trim();
+        if (!nm) return { error: '부문명을 입력하세요.' };
+        state.divisions = state.divisions || [];
+        if (state.divisions.includes(nm)) return { error: '이미 있는 부문입니다.' };
+        state.divisions.push(nm);
+        emit();
+        return { ok: true };
+      },
+      renameDivision(oldName, newName) {
+        const nm = (newName || '').trim();
+        if (!nm) return { error: '부문명을 비울 수 없습니다.' };
+        state.divisions = (state.divisions || []).map((d) => (d === oldName ? nm : d));
+        (state.teams || []).forEach((t) => { if (t.div === oldName) t.div = nm; });
+        emit();
+        return { ok: true };
+      },
+      // 부문 삭제 — 소속 팀은 '기타'로 이동(팀·데이터는 보존)
+      removeDivision(name) {
+        state.divisions = (state.divisions || []).filter((d) => d !== name);
+        (state.teams || []).forEach((t) => { if (t.div === name) t.div = '기타'; });
         emit();
       },
 

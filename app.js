@@ -1464,14 +1464,21 @@
   function TeamManagerModal({ state, onClose }) {
     const [newName, setNewName] = useState('');
     const [newDiv, setNewDiv] = useState('');
+    const [newDivName, setNewDivName] = useState('');
     const teams = state.teams || [];
+    const divisions = state.divisions || [];
     // store가 state를 제자리 변경(참조 유지)하므로 useMemo 대신 매 렌더 계산
     const byDiv = (() => {
       const g = {};
       teams.forEach((t) => { const d = t.div || '기타'; (g[d] = g[d] || []).push(t); });
       return g;
     })();
-    // 팀별 사용량(입찰+편성) — 0이면 안전하게 삭제 가능
+    // 부문 표시 순서 = state.divisions 순 + 목록에 없는 부문(기타 등) 뒤에
+    const divOrder = (() => {
+      const o = divisions.slice();
+      Object.keys(byDiv).forEach((d) => { if (!o.includes(d)) o.push(d); });
+      return o.filter((d) => byDiv[d] || divisions.includes(d));
+    })();
     const usage = (() => {
       const u = {};
       (state.bids || []).forEach((b) => { u[b.teamId] = u[b.teamId] || { b: 0, p: 0 }; u[b.teamId].b++; });
@@ -1480,7 +1487,7 @@
     })();
     function add() {
       if (!newName.trim()) { alert('팀명을 입력하세요.'); return; }
-      const r = store.addTeam({ name: newName.trim(), div: newDiv.trim() });
+      const r = store.addTeam({ name: newName.trim(), div: newDiv || (divisions[0] || '') });
       if (r && r.error) { alert(r.error); return; }
       setNewName('');
     }
@@ -1490,44 +1497,85 @@
       const r = store.updateTeam(t.id, { name: nm });
       if (r && r.error) alert(r.error);
     }
-    function editDiv(t) {
-      const d = prompt('부문 수정 (예: H&B부문)', t.div || '');
-      if (d === null) return;
-      store.updateTeam(t.id, { div: d });
-    }
     function del(t) {
       const u = store.teamUsage(t.id);
       const warn = (u.bids || u.placements)
-        ? `\n\n※ 이 팀에 입찰 ${u.bids}건 · 편성 ${u.placements}건이 연결돼 있습니다.\n삭제해도 데이터는 남지만 팀명이 표시되지 않습니다.` : '';
+        ? `\n\n※ 이 팀에 입찰 ${u.bids}건 · 편성 ${u.placements}건이 연결돼 있습니다.\n삭제하면 그 데이터의 팀 표시가 사라집니다. (병합을 권장)` : '';
       if (!confirm(`[${t.name}] 팀을 삭제할까요?${warn}`)) return;
       store.removeTeam(t.id);
     }
+    function mergeInto(t, targetId) {
+      if (!targetId) return;
+      const to = teams.find((x) => x.id === targetId);
+      const u = store.teamUsage(t.id);
+      if (!confirm(`[${t.name}] → [${to.name}]로 병합합니다.\n${t.name}의 입찰 ${u.bids}건·편성 ${u.placements}건이 ${to.name}으로 옮겨지고 ${t.name}은 삭제됩니다. 계속할까요?`)) return;
+      const r = store.mergeTeam(t.id, targetId);
+      if (r && r.error) alert(r.error);
+    }
+    function autoMerge2026() {
+      if (!confirm('같은 이름의 중복 팀을 2026 표준 팀으로 병합하고 부문을 지정합니다.\n(입찰·편성 데이터는 표준 팀으로 이관됩니다. "기타"는 그대로) 계속할까요?')) return;
+      const r = store.mergeTeams2026();
+      alert(`정리 완료: 중복 ${r.merged}팀 병합 · 데이터 ${r.reassigned}건 이관`);
+    }
+    function delDivision(d) {
+      if (!confirm(`부문 [${d}]을(를) 삭제할까요?\n소속 팀은 "기타"로 이동합니다. (팀·데이터는 유지)`)) return;
+      store.removeDivision(d);
+    }
+    function renameDivision(d) {
+      const nm = prompt('부문명 수정', d);
+      if (nm === null || !nm.trim()) return;
+      store.renameDivision(d, nm.trim());
+    }
+    const divSelCls = 'text-[12px] px-1 py-1 rounded border border-slate-200 bg-white outline-none';
     return html`
-      <${Modal} title="팀 관리 (조직개편)" onClose=${onClose} onSave=${onClose} extra=${html`<span class="text-[12px] text-ink-soft">총 ${teams.length}팀 · 변경 즉시 반영·저장</span>`}>
-        <div class="flex items-end gap-2">
+      <${Modal} title="팀 · 부문 관리 (조직개편)" onClose=${onClose} onSave=${onClose} extra=${html`<button onClick=${autoMerge2026} class="text-[12px] px-2.5 py-1.5 rounded border border-violet-300 text-violet-700 bg-white hover:bg-violet-50">🧹 2026 표준 자동정리</button>`}>
+        <div class="flex items-end gap-2 flex-wrap">
           <${Field} label="새 팀명"><input value=${newName} onInput=${(e) => setNewName(e.target.value)} class=${inputCls} placeholder="예: 무형상품팀" /><//>
-          <${Field} label="부문(선택)"><input value=${newDiv} onInput=${(e) => setNewDiv(e.target.value)} class=${inputCls} placeholder="예: 리빙부문" /><//>
-          <button onClick=${add} class="shrink-0 text-[13px] px-3 py-1.5 rounded bg-brand text-white hover:bg-brand-dark">+ 추가</button>
+          <${Field} label="부문">
+            <select value=${newDiv} onChange=${(e) => setNewDiv(e.target.value)} class=${inputCls}>
+              <option value="">(미지정)</option>
+              ${divisions.map((d) => html`<option key=${d} value=${d}>${d}</option>`)}
+            </select>
+          <//>
+          <button onClick=${add} class="shrink-0 text-[13px] px-3 py-1.5 rounded bg-brand text-white hover:bg-brand-dark">+ 팀 추가</button>
+        </div>
+        <div class="flex items-end gap-2">
+          <${Field} label="새 부문 추가"><input value=${newDivName} onInput=${(e) => setNewDivName(e.target.value)} class=${inputCls} placeholder="예: 신설부문" /><//>
+          <button onClick=${() => { if (newDivName.trim()) { const r = store.addDivision(newDivName.trim()); if (r && r.error) alert(r.error); else setNewDivName(''); } }}
+            class="shrink-0 text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand">+ 부문</button>
         </div>
         <div class="space-y-3 mt-1">
-          ${Object.keys(byDiv).map((div) => html`
+          ${divOrder.map((div) => html`
             <div key=${div}>
-              <div class="text-[12px] font-semibold text-ink-soft mb-1">${div}</div>
+              <div class="flex items-center gap-2 mb-1">
+                <span class="text-[12px] font-bold text-ink">${div}</span>
+                <span class="text-[11px] text-slate-400">${(byDiv[div] || []).length}팀</span>
+                ${div !== '기타' && html`<button onClick=${() => renameDivision(div)} class="text-[11px] text-ink-soft hover:text-brand">부문명</button>
+                  <button onClick=${() => delDivision(div)} class="text-[11px] text-rose-400 hover:underline">부문삭제</button>`}
+              </div>
               <div class="space-y-1">
-                ${byDiv[div].map((t) => html`
+                ${(byDiv[div] || []).map((t) => html`
                   <div key=${t.id} class="flex items-center gap-2 text-[13px] border border-slate-100 rounded px-2 py-1">
                     <input type="color" value=${t.color || '#64748b'} onInput=${(e) => store.updateTeam(t.id, { color: e.target.value })}
                       class="w-6 h-6 rounded cursor-pointer border border-slate-200 shrink-0" title="색상" />
-                    <span class="flex-1 font-medium text-ink">${t.name}</span>
+                    <span class="flex-1 font-medium text-ink truncate">${t.name}</span>
                     ${(() => { const u = usage[t.id]; const n = u ? u.b + u.p : 0;
-                      return html`<span class=${`text-[11px] px-1.5 rounded ${n ? 'bg-slate-100 text-ink-soft' : 'bg-emerald-50 text-emerald-600'}`} title="입찰+편성 사용 건수">${n ? n + '건' : '미사용'}</span>`; })()}
-                    <button onClick=${() => rename(t)} class="text-[12px] text-ink-soft hover:text-brand">이름</button>
-                    <button onClick=${() => editDiv(t)} class="text-[12px] text-ink-soft hover:text-brand">부문</button>
-                    <button onClick=${() => del(t)} class="text-[12px] text-rose-500 hover:underline">삭제</button>
+                      return html`<span class=${`text-[11px] px-1.5 rounded shrink-0 ${n ? 'bg-slate-100 text-ink-soft' : 'bg-emerald-50 text-emerald-600'}`} title="입찰+편성 사용 건수">${n ? n + '건' : '미사용'}</span>`; })()}
+                    <select value=${t.div || ''} onChange=${(e) => store.updateTeam(t.id, { div: e.target.value })} class=${divSelCls} title="부문 이동">
+                      <option value="">(미지정)</option>
+                      ${divOrder.map((d) => html`<option key=${d} value=${d}>${d}</option>`)}
+                    </select>
+                    <select value="" onChange=${(e) => { mergeInto(t, e.target.value); e.target.value = ''; }} class=${divSelCls} title="다른 팀으로 병합">
+                      <option value="">병합→</option>
+                      ${teams.filter((x) => x.id !== t.id).map((x) => html`<option key=${x.id} value=${x.id}>${x.name}</option>`)}
+                    </select>
+                    <button onClick=${() => rename(t)} class="text-[12px] text-ink-soft hover:text-brand shrink-0">이름</button>
+                    <button onClick=${() => del(t)} class="text-[12px] text-rose-500 hover:underline shrink-0">삭제</button>
                   </div>`)}
               </div>
             </div>`)}
         </div>
+        <div class="text-[12px] text-ink-soft">중복/구팀은 <b>병합→</b>으로 표준 팀에 합치면 데이터가 이관됩니다. <b>2026 표준 자동정리</b>는 같은 이름 중복을 한 번에 정리합니다.</div>
       <//>`;
   }
 
