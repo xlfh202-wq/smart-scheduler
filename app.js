@@ -32,8 +32,22 @@
   };
   // 현재 보고 있는 월(view) + 활성 프로그램 기준 헬퍼
   const monthKey = (v) => `${v.year}-${String(v.month).padStart(2, '0')}`;
+  const shiftMonth = (v, delta) => {
+    let y = v.year, m = v.month + delta;
+    while (m > 12) { m -= 12; y += 1; }
+    while (m < 1) { m += 12; y -= 1; }
+    return { year: y, month: m };
+  };
+  // 편성표 노출 범위 = 이번 달 전체 + 다음 달 첫째주(1~7일). (월간 이동이 잦아 다음달 초까지 함께 봄)
+  const NEXT_MONTH_PEEK_DAYS = 7;
+  const inScheduleView = (dateStr, view) => {
+    const ym = dateStr.slice(0, 7);
+    if (ym === monthKey(view)) return true;
+    if (ym === monthKey(shiftMonth(view, 1)) && Number(dateStr.slice(8, 10)) <= NEXT_MONTH_PEEK_DAYS) return true;
+    return false;
+  };
   const daysInView = (state) => state.days.filter((d) =>
-    d.programId === state.activeProgram && d.date.slice(0, 7) === monthKey(state.view));
+    d.programId === state.activeProgram && inScheduleView(d.date, state.view));
   const activeProgramObj = (state) =>
     (state.programs || []).find((p) => p.id === state.activeProgram) || { name: '', color: '#da291c' };
 
@@ -596,18 +610,37 @@
     const [team, setTeam] = useState('all');
     const [q, setQ] = useState('');
     const [detail, setDetail] = useState(null);
+    const [over, setOver] = useState(false);
     const placedBidIds = new Set(state.placements.map((p) => p.sourceBidId).filter(Boolean));
-    const monthDayIds = new Set(daysInView(state).map((d) => d.id));
+    // 미편성 입찰 풀 = 지난달 + 이번달 (편성이 월간 이동이 잦아 두 달치 함께 봄)
+    const prevKey = monthKey(shiftMonth(state.view, -1));
+    const curKey = monthKey(state.view);
+    const poolDayIds = new Set(state.days
+      .filter((d) => d.programId === state.activeProgram && (d.date.slice(0, 7) === prevKey || d.date.slice(0, 7) === curKey))
+      .map((d) => d.id));
     // 편성표에 올라가지 않은(미편성) 입찰만 풀에 표시
-    let bids = state.bids.filter((b) => monthDayIds.has(b.dayId) && !placedBidIds.has(b.id));
+    let bids = state.bids.filter((b) => poolDayIds.has(b.dayId) && !placedBidIds.has(b.id));
     if (team !== 'all') bids = bids.filter((b) => b.teamId === team);
     if (q.trim()) bids = bids.filter((b) => (b.product.name || '').includes(q.trim()));
+    // 지난달 입찰은 흐리게 구분 (dayId로 월 판별)
+    const dayMonth = {};
+    state.days.forEach((d) => { dayMonth[d.id] = d.date.slice(0, 7); });
+    const prevMonthNum = shiftMonth(state.view, -1).month;
+
+    function onPoolDrop(e) {
+      e.preventDefault(); setOver(false);
+      const pl = drag.read(e);
+      if (pl && pl.kind === 'placement') store.removePlacement(pl.id); // 편성 카드를 풀로 → 미편성 복귀
+    }
 
     return html`
-      <aside class="w-64 shrink-0 flex flex-col border-r border-slate-200 bg-white">
+      <aside class=${`w-64 shrink-0 flex flex-col border-r border-slate-200 bg-white ${over ? 'drop-active' : ''}`}
+        onDragOver=${(e) => { e.preventDefault(); setOver(true); }}
+        onDragLeave=${(e) => { if (e.currentTarget === e.target) setOver(false); }}
+        onDrop=${onPoolDrop}>
         <div class="px-3 py-2 border-b border-slate-200">
-          <div class="text-sm font-bold text-ink">입찰 풀 <span class="text-[11px] font-normal text-ink-soft">${state.view.month}월 · ${bids.length}건</span></div>
-          <div class="text-[11px] text-ink-soft mt-0.5">카드 클릭=상세 / 드래그=편성</div>
+          <div class="text-sm font-bold text-ink">입찰 풀 <span class="text-[11px] font-normal text-ink-soft">${prevMonthNum}~${state.view.month}월 · ${bids.length}건</span></div>
+          <div class="text-[11px] text-ink-soft mt-0.5">카드 클릭=상세 / 드래그=편성 · 편성카드를 여기로 끌면 미편성 복귀</div>
           <input value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="상품명 검색"
             class="mt-2 w-full text-xs px-2 py-1 rounded border border-slate-300 focus:border-brand outline-none" />
           <select value=${team} onChange=${(e) => setTeam(e.target.value)}
@@ -623,14 +656,16 @@
             const placed = placedBidIds.has(b.id);
             const slotInfo = U.slotLabel(b.slotId);
             const pr = b.product;
+            const isPrev = dayMonth[b.dayId] === prevKey;
             return html`
               <div key=${b.id} draggable=${true} onDragStart=${(e) => drag.start(e, 'bid', b.id)}
                 onClick=${() => setDetail(b)} title="클릭하면 상세 정보"
-                class=${`card-drag rounded-md border px-2 py-1.5 ${placed ? 'bg-slate-100 opacity-70' : 'bg-white'} hover:shadow-sm hover:border-brand`}
+                class=${`card-drag rounded-md border px-2 py-1.5 ${placed ? 'bg-slate-100 opacity-70' : isPrev ? 'bg-amber-50/60' : 'bg-white'} hover:shadow-sm hover:border-brand`}
                 style=${{ borderLeft: `4px solid ${t.color}` }}>
                 <div class="text-[12px] font-semibold text-ink leading-tight">${pr.name}</div>
                 <div class="mt-0.5 flex flex-wrap items-center gap-1">
                   <${Badge} color=${t.color}>${t.name}<//>
+                  ${isPrev && html`<${Badge} color="#d97706">${prevMonthNum}월<//>`}
                   ${(pr.items && pr.items.length > 1) && html`<${Badge} color="#7c3aed">동시 ${pr.items.length}<//>`}
                   ${pr.durationMin && html`<${Badge}>${pr.durationMin}분<//>`}
                   ${pr.sme && html`<${Badge} color="#16a34a">중소<//>`}
@@ -732,7 +767,7 @@
         <div class="flex-1 overflow-y-auto p-4">
           <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
             <h2 class="text-base font-bold text-ink">${year}년 ${month}월 편성표
-              <span class="text-[12px] font-normal text-ink-soft">방송일 ${days.length}일 · 편성 ${placedCount}건</span>
+              <span class="text-[12px] font-normal text-ink-soft">방송일 ${days.length}일 · 편성 ${placedCount}건 · +${shiftMonth(state.view, 1).month}월 첫주 포함</span>
               ${lastSnap
                 ? html`<span class="text-[11px] font-normal text-emerald-600 ml-1">· 마지막 저장 ${fmtTs(lastSnap.ts)}</span>`
                 : html`<span class="text-[11px] font-normal text-slate-400 ml-1">· 저장 안 됨</span>`}

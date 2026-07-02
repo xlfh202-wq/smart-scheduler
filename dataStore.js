@@ -58,6 +58,11 @@
     if (d < 0) d += 24 * 60;
     return d;
   }
+  function nextMonthOf(year, month) {
+    let y = year, m = month + 1;
+    if (m > 12) { m = 1; y += 1; }
+    return { year: y, month: m };
+  }
   // 두 시간대 슬롯이 겹치는지 (자정 넘김 고려)
   function slotOverlap(a, b) {
     if (!a.start || !a.end || !b.start || !b.end) return false;
@@ -213,6 +218,16 @@
       hydratedOnce = true;
       return newState;
     }
+    // 프로그램 편성 스케줄 조회 — 기본(PROGRAM_SCHEDULE) + 관리자가 만든 커스텀(state.programSchedules)
+    function progSchedule(pid) {
+      return PROGRAM_SCHEDULE[pid] || ((state.programSchedules || {})[pid]) || null;
+    }
+    function allScheduledPids() {
+      return Array.from(new Set([...Object.keys(PROGRAM_SCHEDULE), ...Object.keys(state.programSchedules || {})]));
+    }
+    function isFashionProgram(pid) {
+      return FASHION_PROGRAMS.has(pid) || !!((state.programMeta || {})[pid] && state.programMeta[pid].fashion);
+    }
     let state = load();
     // 접속 시 초기 화면 강제 (localStorage에 남은 이전 위치를 따르지 않음)
     state.activeProgram = MAIN_PROGRAM;
@@ -367,9 +382,9 @@
     //  · 라이프스타일(스케줄 有) → 고정 시간대 슬롯
     //  · 그 외 → '미정' 버킷
     function ensureBucketSlotOnDay(day) {
-      const sched = PROGRAM_SCHEDULE[day.programId];
+      const sched = progSchedule(day.programId);
       const entry = sched && sched.find((s) => s.wd === day.weekday);
-      if (FASHION_PROGRAMS.has(day.programId)) {
+      if (isFashionProgram(day.programId)) {
         if (entry && !day.airTime) day.airTime = entry.slots[0][0] + '~' + entry.slots[0][1];
         let slot = day.slots.find((x) => x.label && !x.start);
         if (!slot) { slot = { id: 'slot_' + uid(), start: '', end: '', label: '1부' }; day.slots.push(slot); }
@@ -466,6 +481,9 @@
       setActiveProgram(programId) {
         state.activeProgram = programId;
         this.ensureMonth(state.view.year, state.view.month, programId);
+        // 다음 달 첫째주도 함께 보므로 다음 달 방송일도 미리 생성
+        const nm = nextMonthOf(state.view.year, state.view.month);
+        this.ensureMonth(nm.year, nm.month, programId);
         emit();
       },
 
@@ -473,8 +491,8 @@
       // 프로그램별 고정 편성 스케줄로 해당 월의 방송일 + 시간대를 미리 생성 (중복 없이)
       ensureMonth(year, month, programId) {
         const pid = programId || state.activeProgram || MAIN_PROGRAM;
-        const sched = PROGRAM_SCHEDULE[pid];
-        if (!sched) return; // 스케줄 미정의 프로그램은 엑셀 편성일만 사용
+        const sched = progSchedule(pid);
+        if (!sched) return; // 스케줄 미정의(비정기) 프로그램은 수기 편성일만 사용
         const mm = String(month).padStart(2, '0');
         const last = new Date(year, month, 0).getDate();
         for (let dnum = 1; dnum <= last; dnum++) {
@@ -489,7 +507,7 @@
           if (day) continue;
           day = { id: 'day_' + pid + '_' + dateStr, programId: pid, date: dateStr, weekday: wd, slots: [] };
           state.days.push(day);
-          if (FASHION_PROGRAMS.has(pid)) {
+          if (isFashionProgram(pid)) {
             // 패션: 방송시간은 날짜 옆(airTime)에 표기, 슬롯은 '1부' 순번 (부는 PD가 나눔)
             day.airTime = entry.slots[0][0] + '~' + entry.slots[0][1];
             day.slots.push({ id: 'slot_' + uid(), start: '', end: '', label: '1부' });
@@ -501,10 +519,13 @@
       },
       // 모든 스케줄 프로그램에 대해 해당 월의 고정 시간대를 미리 생성
       ensureScheduleAll(year, month) {
-        Object.keys(PROGRAM_SCHEDULE).forEach((pid) => this.ensureMonth(year, month, pid));
+        allScheduledPids().forEach((pid) => this.ensureMonth(year, month, pid));
       },
       setView(year, month) {
         this.ensureScheduleAll(year, month);
+        // 다음 달 첫째주도 함께 노출 → 다음 달 방송일도 미리 생성
+        const nm = nextMonthOf(year, month);
+        this.ensureScheduleAll(nm.year, nm.month);
         state.view = { year, month };
         emit();
       },
@@ -723,10 +744,10 @@
       fixScheduleSlots() {
         let merged = 0, removedSlots = 0, removedDays = 0;
         state.days.forEach((day) => {
-          const sched = PROGRAM_SCHEDULE[day.programId];
+          const sched = progSchedule(day.programId);
           if (!sched) return;
           const entry = sched.find((s) => s.wd === day.weekday);
-          if (FASHION_PROGRAMS.has(day.programId)) {
+          if (isFashionProgram(day.programId)) {
             // 방송시간: 기존 시간슬롯 or 스케줄 창 → day.airTime
             if (!day.airTime) {
               const ts = day.slots.find((x) => x.start && x.end);
@@ -772,7 +793,7 @@
           day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
         });
         state.days = state.days.filter((d) => {
-          if (!PROGRAM_SCHEDULE[d.programId] || d.slots.length > 0) return true;
+          if (!progSchedule(d.programId) || d.slots.length > 0) return true;
           removedDays++; return false;
         });
         log({ action: '편성정리', detail: `1부/고정 통합 ${merged}건 · 빈슬롯 ${removedSlots}개 · 빈날짜 ${removedDays}개 정리` });
