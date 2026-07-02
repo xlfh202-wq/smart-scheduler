@@ -46,9 +46,19 @@
     if (!s.divisions) s.divisions = DIVISIONS_2026.slice();
     return s;
   }
+  // PD 편성팀 목록 기본값 보강 (없을 때만) — 관리자가 추가/수정/삭제
+  function ensurePdTeams(s) {
+    if (!s) return s;
+    if (!s.pdTeams) {
+      const seed = (typeof window !== 'undefined' && window.AUTH && window.AUTH.pdTeams) || ['리빙PD팀', '식품PD팀', '잡화뷰티PD팀', '패션레포츠PD팀'];
+      s.pdTeams = seed.slice();
+    }
+    return s;
+  }
   // 이름 기준 병합(같은 이름이면 기존 팀 재사용 → 기존 입찰 데이터 매핑 유지), 없으면 추가. 1회만.
   function ensureTeams2026(s) {
     ensureDivisions(s);
+    ensurePdTeams(s);
     if (!s || s.teamsSeed2026) return s;
     s.teams = s.teams || [];
     const byName = new Map(s.teams.map((t) => [t.name, t]));
@@ -1372,6 +1382,33 @@
       removeDivision(name) {
         state.divisions = (state.divisions || []).filter((d) => d !== name);
         (state.teams || []).forEach((t) => { if (t.div === name) t.div = '기타'; });
+        emit();
+      },
+
+      /* ---------- PD 편성팀 관리 (관리자) ---------- */
+      addPdTeam(name) {
+        const nm = (name || '').trim();
+        if (!nm) return { error: 'PD팀명을 입력하세요.' };
+        state.pdTeams = state.pdTeams || [];
+        if (state.pdTeams.includes(nm)) return { error: '이미 있는 PD팀입니다.' };
+        state.pdTeams.push(nm);
+        log({ action: 'PD팀추가', detail: nm });
+        emit();
+        return { ok: true };
+      },
+      renamePdTeam(oldName, newName) {
+        const nm = (newName || '').trim();
+        if (!nm) return { error: 'PD팀명을 비울 수 없습니다.' };
+        state.pdTeams = state.pdTeams || [];
+        if (state.pdTeams.some((d) => d !== oldName && d === nm)) return { error: '이미 있는 PD팀입니다.' };
+        state.pdTeams = state.pdTeams.map((d) => (d === oldName ? nm : d));
+        log({ action: 'PD팀수정', detail: `${oldName} → ${nm}` });
+        emit();
+        return { ok: true };
+      },
+      removePdTeam(name) {
+        state.pdTeams = (state.pdTeams || []).filter((d) => d !== name);
+        log({ action: 'PD팀삭제', detail: name });
         emit();
       },
 

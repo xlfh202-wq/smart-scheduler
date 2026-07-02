@@ -1483,8 +1483,17 @@
     const [newName, setNewName] = useState('');
     const [newDiv, setNewDiv] = useState('');
     const [newDivName, setNewDivName] = useState('');
+    const [newPdTeam, setNewPdTeam] = useState('');
     const teams = state.teams || [];
     const divisions = state.divisions || [];
+    const pdTeams = state.pdTeams || [];
+    function addPd() {
+      if (!newPdTeam.trim()) return;
+      const r = store.addPdTeam(newPdTeam.trim());
+      if (r && r.error) alert(r.error); else setNewPdTeam('');
+    }
+    function renamePd(d) { const nm = prompt('PD팀명 수정', d); if (nm === null) return; const r = store.renamePdTeam(d, nm.trim()); if (r && r.error) alert(r.error); }
+    function delPd(d) { if (confirm(`PD 편성팀 [${d}]을(를) 삭제할까요?\n(로그인 선택지에서만 사라지며, 기존 기록은 유지)`)) store.removePdTeam(d); }
     // store가 state를 제자리 변경(참조 유지)하므로 useMemo 대신 매 렌더 계산
     const byDiv = (() => {
       const g = {};
@@ -1561,6 +1570,23 @@
           <${Field} label="새 부문 추가"><input value=${newDivName} onInput=${(e) => setNewDivName(e.target.value)} class=${inputCls} placeholder="예: 신설부문" /><//>
           <button onClick=${() => { if (newDivName.trim()) { const r = store.addDivision(newDivName.trim()); if (r && r.error) alert(r.error); else setNewDivName(''); } }}
             class="shrink-0 text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand">+ 부문</button>
+        </div>
+        <div class="border border-slate-200 rounded-lg p-2 bg-slate-50/50">
+          <div class="text-[12px] font-bold text-ink mb-1.5">PD 편성팀 <span class="font-normal text-ink-soft">(PD 로그인 소속 선택지)</span></div>
+          <div class="flex flex-wrap gap-1.5 mb-2">
+            ${pdTeams.length === 0 && html`<span class="text-[12px] text-slate-400">등록된 PD팀이 없습니다.</span>`}
+            ${pdTeams.map((d) => html`
+              <span key=${d} class="inline-flex items-center gap-1 text-[13px] bg-white border border-slate-200 rounded-full pl-3 pr-1.5 py-1">
+                <span class="font-medium text-ink">${d}</span>
+                <button onClick=${() => renamePd(d)} class="text-[11px] text-ink-soft hover:text-brand px-1">수정</button>
+                <button onClick=${() => delPd(d)} class="text-[12px] text-rose-400 hover:text-rose-600">✕</button>
+              </span>`)}
+          </div>
+          <div class="flex items-center gap-2">
+            <input value=${newPdTeam} onInput=${(e) => setNewPdTeam(e.target.value)} onKeyDown=${(e) => { if (e.key === 'Enter') addPd(); }}
+              class="flex-1 ${inputCls}" placeholder="예: 리빙PD팀" />
+            <button onClick=${addPd} class="shrink-0 text-[13px] px-3 py-1.5 rounded bg-brand text-white hover:bg-brand-dark">+ PD팀</button>
+          </div>
         </div>
         <div class="space-y-3 mt-1">
           ${divOrder.map((div) => html`
@@ -2013,7 +2039,7 @@
     } catch (e) {}
     return null;
   }
-  function LoginGate({ onLogin, teams }) {
+  function LoginGate({ onLogin, teams, pdTeams }) {
     const roles = window.AUTH.roles;
     const [role, setRole] = useState('pd');
     const [team, setTeam] = useState('');
@@ -2021,10 +2047,10 @@
     const [pw, setPw] = useState('');
     const [err, setErr] = useState('');
     const r = roles[role];
-    // 팀 목록: MD = 앱 전체 팀, PD = 지정 PD 구분
+    // 팀 목록: MD = 관리되는 전체 입찰팀(팀 관리 반영), PD = 관리되는 PD 편성팀
     const teamList = role === 'md'
-      ? (window.AUTH.mdTeams || Array.from(new Set((teams || []).map((t) => t.name))))
-      : (window.AUTH.pdTeams || []);
+      ? Array.from(new Set((teams || []).map((t) => t.name)))
+      : ((pdTeams && pdTeams.length) ? pdTeams : (window.AUTH.pdTeams || []));
     const needsTeam = role !== 'admin'; // 관리자는 비밀번호만 입력
     function submit(e) {
       e && e.preventDefault();
@@ -2164,7 +2190,7 @@
     }
 
     // 미로그인 → 로그인 화면 (이 아래의 훅 없음: 훅 순서 유지)
-    if (!auth) return html`<${LoginGate} onLogin=${doLogin} teams=${state.teams} />`;
+    if (!auth) return html`<${LoginGate} onLogin=${doLogin} teams=${state.teams} pdTeams=${state.pdTeams} />`;
 
     const roleCfg = window.AUTH.roles[auth.role] || { tabs: ['schedule'], canManage: true, label: '', color: '#64748b' };
     const allowed = roleCfg.tabs;
