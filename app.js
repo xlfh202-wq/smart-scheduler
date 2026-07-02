@@ -62,6 +62,20 @@
     return ids.map((id) => state.teams.find((t) => t.id === id)).filter(Boolean);
   };
   const programSchema = (state) => (programCfg(state) || {}).schema || 'lifestyle';
+  // 전체 팀을 부문별로 그룹핑 (순서: state.divisions → 목록에 없는 부문). 팀 드롭다운/칩 공통.
+  const teamsGrouped = (state) => {
+    const teams = state.teams || [];
+    const byDiv = {};
+    teams.forEach((t) => { const d = t.div || '기타'; (byDiv[d] = byDiv[d] || []).push(t); });
+    const order = (state.divisions || []).slice();
+    Object.keys(byDiv).forEach((d) => { if (!order.includes(d)) order.push(d); });
+    return order.filter((d) => byDiv[d]).map((d) => [d, byDiv[d]]);
+  };
+  // <select> 내부 optgroup 옵션 (전체 팀, 부문별 카테고리)
+  const teamOptions = (state) => teamsGrouped(state).map(([div, ts]) => html`
+    <optgroup key=${div} label=${div}>
+      ${ts.map((t) => html`<option key=${t.id} value=${t.id}>${t.name}</option>`)}
+    </optgroup>`);
   // 시간 슬롯 표시: 시간이 있으면 HH:MM~HH:MM, 순번형이면 label
   const slotName = (s) => (s.start && s.end) ? `${s.start}~${s.end}` : (s.label || '슬롯');
 
@@ -262,7 +276,7 @@
         <div class="grid grid-cols-2 gap-3">
           <${Field} label="팀명">
             <select value=${team} onChange=${(e) => setTeam(e.target.value)} class=${inputCls}>
-              ${teams.map((t) => html`<option key=${t.id} value=${t.id}>${t.name}</option>`)}
+              ${teamOptions(state)}
             </select>
           <//>
           <${Field} label="방송 분량(분)"><input type="number" value=${dur} onInput=${(e) => setDur(e.target.value)} class=${inputCls} placeholder="예: 30" /><//>
@@ -402,7 +416,7 @@
         <div class="grid grid-cols-2 gap-3">
           <${Field} label="팀명">
             <select value=${team} onChange=${(e) => setTeam(e.target.value)} class=${inputCls}>
-              ${teams.map((t) => html`<option key=${t.id} value=${t.id}>${t.name}</option>`)}
+              ${teamOptions(state)}
             </select>
           <//>
           <${Field} label="노출분"><input type="number" value=${dur} onInput=${(e) => setDur(e.target.value)} class=${inputCls} placeholder="예: 20" /><//>
@@ -648,7 +662,7 @@
           <select value=${team} onChange=${(e) => setTeam(e.target.value)}
             class="mt-1.5 w-full text-xs px-2 py-1 rounded border border-slate-300 outline-none">
             <option value="all">전체 팀</option>
-            ${programTeams(state).map((t) => html`<option key=${t.id} value=${t.id}>${t.name}</option>`)}
+            ${teamOptions(state)}
           </select>
         </div>
         <div class="flex-1 overflow-y-auto p-2 space-y-1.5">
@@ -1195,7 +1209,7 @@
    *  MD 입찰 보드
    * ===================================================================== */
   function BidBoard({ state }) {
-    const teams = programTeams(state);
+    const teams = state.teams || []; // MD 입찰은 전체 팀 대상(부문별 그룹 표시)
     const schema = programSchema(state);
     const fashion = schema === 'fashion';
     const isMain = state.activeProgram === U.MAIN_PROGRAM;
@@ -1211,14 +1225,18 @@
     return html`
       <div class="flex-1 overflow-y-auto">
         <div class="sticky top-0 z-10 bg-white border-b border-slate-200 px-4 py-2">
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="text-sm font-bold text-ink mr-1">${activeProgramObj(state).name} · 입찰팀</span>
-            ${teams.map((t) => html`
-              <button key=${t.id} onClick=${() => setTeamSel(t.id)}
-                class=${`text-xs px-2.5 py-1 rounded-full border transition ${team === t.id ? 'text-white border-transparent' : 'bg-white text-ink-soft border-slate-300 hover:border-slate-400'}`}
-                style=${team === t.id ? { background: t.color } : {}}>
-                <${TeamDot} color=${t.color} /> <span class="ml-1">${t.name}</span>
-              </button>`)}
+          <div class="flex items-baseline gap-2 flex-wrap">
+            <span class="text-sm font-bold text-ink mr-1 shrink-0">${activeProgramObj(state).name} · 입찰팀</span>
+            ${teamsGrouped(state).map(([div, ts]) => html`
+              <span key=${div} class="inline-flex items-center gap-1 flex-wrap">
+                <span class="text-[11px] font-semibold text-slate-400 ml-1">${div}</span>
+                ${ts.map((t) => html`
+                  <button key=${t.id} onClick=${() => setTeamSel(t.id)}
+                    class=${`text-xs px-2.5 py-1 rounded-full border transition ${team === t.id ? 'text-white border-transparent' : 'bg-white text-ink-soft border-slate-300 hover:border-slate-400'}`}
+                    style=${team === t.id ? { background: t.color } : {}}>
+                    <${TeamDot} color=${t.color} /> <span class="ml-1">${t.name}</span>
+                  </button>`)}
+              </span>`)}
           </div>
         </div>
         <div class="p-4 space-y-3 max-w-[1100px]">
