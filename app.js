@@ -2180,6 +2180,7 @@
                     const warn = sbStatus === 'connecting' || sbStatus === 'local';
                     const txt = sbStatus === 'connecting' ? '서버 연결 중…'
                       : sbStatus === 'local' ? '로컬 저장 (서버 대기)'
+                      : sbStatus === 'rows' ? '서버 연결됨 · 행동기화'
                       : sbStatus === 'saved' ? '서버 저장됨' : '서버 연결됨';
                     return html`<span class=${`ml-1 inline-flex items-center gap-1 px-1.5 rounded ${warn ? 'text-amber-600' : 'text-emerald-600'}`}>
                       <span class=${`w-1.5 h-1.5 rounded-full ${warn ? 'bg-amber-500' : 'bg-emerald-500'}`}></span>${txt}</span>`;

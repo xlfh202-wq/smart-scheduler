@@ -240,6 +240,7 @@
    * =================================================================== */
   function LocalStore() {
     let saveBackend = null; // 설정 시 localStorage 대신 이 함수로 저장 (Supabase 등)
+    let rowMode = false;    // bids/placements를 개별 행 테이블로 동기화(활성 시) → 하이드레이트가 이들을 덮어쓰지 않음
     let currentUser = null; // 로그인한 사용자 표시명 — 이 브라우저 한정(서버 동기화 안 함)
     let backupAPI = null;   // Supabase 백업/복원 구현 (connectSupabase 에서 주입)
     let hydratedOnce = false; // 첫 서버 로드 이후에는 화면 이동(탭·월)을 로컬 유지
@@ -492,9 +493,29 @@
       // ----- 저장 백엔드(Supabase) 연동 훅 -----
       _snapshot: () => state,
       _useBackend(saveFn) { saveBackend = saveFn; },
-      _hydrate(newState) { // 서버에서 받은 상태로 교체 (재저장 안 함, 이력 초기화)
+      _hydrate(newState) { // 서버(메인 문서)에서 받은 상태로 교체 (재저장 안 함, 이력 초기화)
+        // 행 동기화 모드: bids/placements는 개별 행 테이블이 소스이므로 메인 문서 값으로 덮어쓰지 않음
+        if (rowMode) { newState.bids = state.bids; newState.placements = state.placements; }
         state = ensureTeams2026(cleanupSlots(keepLocalNav(pruneExcluded(newState), state)));
         baseline = JSON.stringify(state); undoStack = []; redoStack = [];
+        subs.forEach((fn) => fn(state));
+      },
+      // ----- 개별 행 동기화(bids/placements) 훅 -----
+      _setRowMode(on) { rowMode = !!on; },
+      _rowMode() { return rowMode; },
+      // 초기 로드: 테이블에서 받은 행으로 교체(저장 안 함)
+      _setRows(kind, arr) { state[kind] = arr || []; subs.forEach((fn) => fn(state)); },
+      // 원격 행 변경 병합: upserts=[{...}], removedIds=[id] → 상태 반영 후 렌더(저장·이력 없음)
+      _mergeRemote(kind, upserts, removedIds) {
+        const arr = state[kind] || (state[kind] = []);
+        (upserts || []).forEach((row) => {
+          const i = arr.findIndex((x) => x.id === row.id);
+          if (i >= 0) arr[i] = row; else arr.push(row);
+        });
+        if (removedIds && removedIds.length) {
+          const rm = new Set(removedIds);
+          state[kind] = arr.filter((x) => !rm.has(x.id));
+        }
         subs.forEach((fn) => fn(state));
       },
 
@@ -1436,6 +1457,23 @@
     let timer = null;
     const myRevs = new Set(); // 내가 보낸 저장의 nonce (echo 식별용)
     const status = (s) => global.__SB_STATUS && global.__SB_STATUS(s);
+    // ----- 개별 행 동기화(bids/placements) -----
+    const ROW_TABLES = ['bids', 'placements'];
+    let rowMode = false; // 테이블 감지되면 true
+    const lastRows = { bids: new Map(), placements: new Map() }; // id → JSON(마지막 동기화 값), echo/변경 판별
+    async function syncRows(kind, arr) {
+      const cur = new Map((arr || []).map((o) => [o.id, JSON.stringify(o)]));
+      const last = lastRows[kind];
+      const upserts = [];
+      cur.forEach((json, id) => { if (last.get(id) !== json) upserts.push({ id, data: JSON.parse(json), updated_at: new Date().toISOString() }); });
+      const removed = [];
+      last.forEach((_, id) => { if (!cur.has(id)) removed.push(id); });
+      try {
+        if (upserts.length) { const { error } = await client.from(kind).upsert(upserts); if (error) throw error; }
+        if (removed.length) { const { error } = await client.from(kind).delete().in('id', removed); if (error) throw error; }
+        lastRows[kind] = cur; // 성공 시에만 기준 갱신(실패하면 다음 저장 때 재시도)
+      } catch (e) { console.warn('[supabase] ' + kind + ' 행 동기화 실패:', e.message || e); }
+    }
     function disableServer(reason) {
       if (!serverOk) return;
       serverOk = false;
@@ -1450,10 +1488,14 @@
       clearTimeout(timer);
       timer = setTimeout(async () => {
         try {
+          // 행 모드: bids/placements는 개별 행으로 동기화, 메인 문서에서는 비움(문서 비대화 방지)
+          if (rowMode) { syncRows('bids', state.bids); syncRows('placements', state.placements); }
           const rev = uid() + uid();
           state._rev = rev; // 데이터 안에 nonce → realtime echo 식별
           myRevs.add(rev);
           if (myRevs.size > 20) myRevs.delete(myRevs.values().next().value);
+          // 전환기 이중저장: 행 모드라도 메인 문서에 bids/placements를 함께 남겨 구버전(단일문서) 클라이언트 호환.
+          // (행 모드 클라이언트는 하이드레이트 시 메인 문서의 bids/placements를 무시하고 테이블을 소스로 사용)
           const { error } = await client.from('app_state')
             .upsert({ id: 'main', data: state, updated_at: new Date().toISOString() });
           if (error) disableServer(error.message);
@@ -1515,15 +1557,76 @@
     }
     store._setBackupAPI({ now: doBackup, list: listBackups, restore: restoreBackup });
 
+    // bids/placements 개별 행 테이블이 있는지 감지 → 있으면 행 모드 활성(없으면 기존 단일문서 그대로)
+    async function detectRowTables() {
+      try {
+        // 반드시 올바른 스키마(id + data jsonb)를 가진 테이블만 인정 → 구스키마/부재 시 단일문서로 폴백
+        const b = await client.from('bids').select('id,data').limit(1);
+        const p = await client.from('placements').select('id,data').limit(1);
+        if (b.error || p.error) return false;
+        return true;
+      } catch (e) { return false; }
+    }
+    // 행 모드 초기화: 테이블 행을 소스로 채택. 테이블이 비었고 로컬(메인문서)에 데이터가 있으면 1회 이관.
+    async function initRows() {
+      const local = store._snapshot();
+      const b = await client.from('bids').select('id,data');
+      const p = await client.from('placements').select('id,data');
+      const bidRows = (b.data || []).map((r) => r.data);
+      const plRows = (p.data || []).map((r) => r.data);
+      const empty = bidRows.length === 0 && plRows.length === 0;
+      const localHas = (local.bids && local.bids.length) || (local.placements && local.placements.length);
+      if (empty && localHas) {
+        // 최초 이관: 로컬 bids/placements를 테이블로 업로드
+        const now = new Date().toISOString();
+        if (local.bids && local.bids.length) await client.from('bids').upsert(local.bids.map((o) => ({ id: o.id, data: o, updated_at: now })));
+        if (local.placements && local.placements.length) await client.from('placements').upsert(local.placements.map((o) => ({ id: o.id, data: o, updated_at: now })));
+        (local.bids || []).forEach((o) => lastRows.bids.set(o.id, JSON.stringify(o)));
+        (local.placements || []).forEach((o) => lastRows.placements.set(o.id, JSON.stringify(o)));
+        console.info('[supabase] 행 모드: 로컬 데이터 이관 완료 (bids ' + (local.bids || []).length + ' · placements ' + (local.placements || []).length + ')');
+      } else {
+        // 테이블을 소스로 채택
+        store._setRows('bids', bidRows);
+        store._setRows('placements', plRows);
+        bidRows.forEach((o) => lastRows.bids.set(o.id, JSON.stringify(o)));
+        plRows.forEach((o) => lastRows.placements.set(o.id, JSON.stringify(o)));
+      }
+    }
+    // 행 테이블 realtime → 개별 변경만 병합(전체 교체 아님)
+    function subscribeRows(kind) {
+      client.channel('rows_' + kind)
+        .on('postgres_changes', { event: '*', schema: 'public', table: kind }, (payload) => {
+          if (payload.eventType === 'DELETE') {
+            const id = payload.old && payload.old.id;
+            if (id == null || !lastRows[kind].has(id)) return;
+            lastRows[kind].delete(id);
+            store._mergeRemote(kind, [], [id]);
+          } else {
+            const row = payload.new; if (!row || !row.data) return;
+            const json = JSON.stringify(row.data);
+            if (lastRows[kind].get(row.id) === json) return; // 내가 보낸 변경(echo) 또는 동일값 → 무시
+            lastRows[kind].set(row.id, json);
+            store._mergeRemote(kind, [row.data], []);
+          }
+        }).subscribe();
+    }
+
     (async () => {
       try {
         const { data, error } = await client.from('app_state')
           .select('data').eq('id', 'main').maybeSingle();
         if (error) { disableServer(error.message); ready = true; return; }
+        const rowTablesExist = await detectRowTables();
+        // 1) 먼저 메인 문서를 그대로 하이드레이트(권위 있는 bids/placements 채택 — 아직 행모드 OFF)
         if (data && data.data) store._hydrate(data.data);
         else await client.from('app_state').upsert({ id: 'main', data: store._snapshot(), updated_at: new Date().toISOString() });
+        // 2) 행 테이블이 있으면: 테이블 채택 or 최초 이관 → 이후 행 모드 ON
+        if (rowTablesExist) {
+          await initRows();
+          rowMode = true; store._setRowMode(true);
+          status('rows');
+        } else { status('connected'); }
         ready = true;
-        status('connected');
         maybeAutoBackup(); // 접속 시 마지막 자동백업이 오래됐으면 1회 백업
         client.channel('app_state_main')
           .on('postgres_changes',
@@ -1535,6 +1638,7 @@
               store._hydrate(incoming);
             })
           .subscribe();
+        if (rowMode) ROW_TABLES.forEach(subscribeRows);
       } catch (e) { disableServer(e.message); ready = true; }
     })();
     return store;
