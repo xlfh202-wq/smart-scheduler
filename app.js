@@ -1042,25 +1042,25 @@
           <div class="px-3 py-2 border-b-2 border-brand text-[13px] font-bold text-ink">
             ${prog.name} · ${year}년 ${month}월 최종편성안 <span class="font-normal text-ink-soft">(총 ${total}편성)</span>
           </div>
-          <table class=${`w-full ${readOnly ? 'min-w-[560px]' : 'min-w-[820px]'} text-[12px] border-collapse`}>
+          <table class=${`w-full ${readOnly ? 'min-w-[700px]' : 'min-w-[1420px]'} text-[12px] border-collapse`}>
             <thead class="sticky top-0">
               <tr>
                 <th class=${th} style=${{ width: '70px' }}>방송일</th>
                 <th class=${th} style=${{ width: '36px' }}>요일</th>
                 <th class=${th} style=${{ width: '104px' }}>시간</th>
                 ${!readOnly && html`<th class=${th} style=${{ width: '58px' }}>상태</th>`}
-                <th class=${th}>상품명</th>
+                <th class=${th} style=${{ minWidth: '150px' }}>상품명</th>
                 ${!readOnly && html`
-                  <th class=${th}>내용 / 타이틀</th>
-                  <th class=${th}>구성</th>
+                  <th class=${th} style=${{ minWidth: '170px' }}>내용 / 타이틀</th>
+                  <th class=${th} style=${{ minWidth: '130px' }}>구성</th>
                   <th class=${th} style=${{ width: '78px' }}>준비물량</th>
-                  <th class=${th} style=${{ width: '88px' }}>가격</th>
+                  <th class=${th} style=${{ width: '100px' }}>가격</th>
                   <th class=${th} style=${{ width: '64px' }}>마진</th>
                   <th class=${th} style=${{ width: '128px' }}>최근 3회 달성률</th>`}
                 <th class=${th} style=${{ width: '74px' }}>PD</th>
                 <th class=${th} style=${{ width: '74px' }}>쇼호스트</th>
                 <th class=${th} style=${{ width: '64px' }}>스튜디오</th>
-                ${!readOnly && html`<th class=${th}>비고 (PD)</th>`}
+                ${!readOnly && html`<th class=${th} style=${{ minWidth: '140px' }}>비고 (PD)</th>`}
               </tr>
             </thead>
             <tbody>
