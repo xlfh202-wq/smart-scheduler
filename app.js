@@ -837,13 +837,37 @@
   // 인라인 편집 셀 (blur 시 커밋)
   function EditCell({ value, onCommit, placeholder, color, list }) {
     const [v, setV] = useState(value || '');
+    const ref = useRef(null);
     useEffect(() => { setV(value || ''); }, [value]);
-    return html`<input value=${v} list=${list || undefined}
+    // 긴 텍스트 자동 줄바꿈: textarea 높이를 내용에 맞춰 자동 조절 (잘림 방지)
+    const fit = (el) => { if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; } };
+    useEffect(() => { fit(ref.current); }, [v]);
+    // 표 레이아웃이 정착하며 칸 너비가 바뀌면 재계산 (초기 좁은 폭 기준으로 높이가 부풀지 않게)
+    useEffect(() => {
+      const el = ref.current; if (!el || typeof ResizeObserver === 'undefined') return;
+      let lastW = el.offsetWidth;
+      const ro = new ResizeObserver(() => {
+        const w = el.offsetWidth;
+        if (w !== lastW) { lastW = w; fit(el); }
+      });
+      ro.observe(el);
+      return () => ro.disconnect();
+    }, []);
+    // datalist(추천목록)가 필요한 칸은 input 유지 (textarea는 datalist 미지원 — 짧은 값이라 잘림 없음)
+    if (list) {
+      return html`<input value=${v} list=${list}
+        onInput=${(e) => setV(e.target.value)}
+        onBlur=${() => { if (v !== (value || '')) onCommit(v); }}
+        onKeyDown=${(e) => { if (e.key === 'Enter') e.target.blur(); }}
+        placeholder=${placeholder || ''}
+        class=${`w-full px-2 py-1.5 text-[12px] bg-transparent outline-none focus:bg-amber-50 ${color || ''}`} />`;
+    }
+    return html`<textarea ref=${ref} value=${v} rows="1"
       onInput=${(e) => setV(e.target.value)}
       onBlur=${() => { if (v !== (value || '')) onCommit(v); }}
-      onKeyDown=${(e) => { if (e.key === 'Enter') e.target.blur(); }}
+      onKeyDown=${(e) => { if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); } }}
       placeholder=${placeholder || ''}
-      class=${`w-full px-2 py-1.5 text-[12px] bg-transparent outline-none focus:bg-amber-50 ${color || ''}`} />`;
+      class=${`block w-full px-2 py-1.5 text-[12px] leading-snug bg-transparent outline-none focus:bg-amber-50 resize-none overflow-hidden ${color || ''}`}></textarea>`;
   }
 
   // 최근 3회 달성률: 3칸 분할, 숫자만 입력 → 뒤에 % 자동 표기
@@ -880,20 +904,29 @@
     const castOpts = (window.AUTH.casting && window.AUTH.casting[state.activeProgram]) || null;
     function saveExcel() {
       if (!window.XLSX) { alert('엑셀 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.'); return; }
-      const header = ['방송일', '요일', '시간', '상태', '상품명', '내용/타이틀', '구성', '준비물량', '가격', '마진', '최근달성률', 'PD', '쇼호스트', '스튜디오', '비고(PD)'];
+      // MD(조회 전용)는 민감 항목(구성·준비물량·가격·마진·달성률·비고) 제외한 축약본으로 출력
+      const header = readOnly
+        ? ['방송일', '요일', '시간', '상품명', 'PD', '쇼호스트', '스튜디오']
+        : ['방송일', '요일', '시간', '상태', '상품명', '내용/타이틀', '구성', '준비물량', '가격', '마진', '최근달성률', 'PD', '쇼호스트', '스튜디오', '비고(PD)'];
       const aoa = [header]; const merges = []; let ri = 1;
       rows.forEach((r) => {
         const p = r.p; const det = (p && p.detail) || {};
         const dnum = Number(r.day.date.slice(8)); const mm = Number(r.day.date.slice(5, 7));
         const items = (p && p.items && p.items.length > 1) ? '\n· ' + p.items.join('\n· ') : '';
-        aoa.push([
-          r.firstOfDay ? `${mm}/${dnum}` : '', r.firstOfDay ? U.WEEKDAY_KO[r.day.weekday] : '',
-          slotName(r.slot), p ? (p.pending ? '미정' : '확정') : '',
-          p ? ((p.productName || '') + items) : '', p ? (det.note || '') : '', p ? (det.comp || '') : '',
-          p ? (det.prep || '') : '', p ? (det.price || '') : '', p ? (det.margin || '') : '',
-          p ? recentText(det.recent) : '', p ? (p.pd || '') : '', p ? (p.host || '') : '',
-          p ? (p.studio || '') : '', p ? (p.memo || '') : '',
-        ]);
+        aoa.push(readOnly
+          ? [
+            r.firstOfDay ? `${mm}/${dnum}` : '', r.firstOfDay ? U.WEEKDAY_KO[r.day.weekday] : '',
+            slotName(r.slot), p ? ((p.productName || '') + items) : '',
+            p ? (p.pd || '') : '', p ? (p.host || '') : '', p ? (p.studio || '') : '',
+          ]
+          : [
+            r.firstOfDay ? `${mm}/${dnum}` : '', r.firstOfDay ? U.WEEKDAY_KO[r.day.weekday] : '',
+            slotName(r.slot), p ? (p.pending ? '미정' : '확정') : '',
+            p ? ((p.productName || '') + items) : '', p ? (det.note || '') : '', p ? (det.comp || '') : '',
+            p ? (det.prep || '') : '', p ? (det.price || '') : '', p ? (det.margin || '') : '',
+            p ? recentText(det.recent) : '', p ? (p.pd || '') : '', p ? (p.host || '') : '',
+            p ? (p.studio || '') : '', p ? (p.memo || '') : '',
+          ]);
         if (r.firstOfDay) {
           const span = dayCount[r.day.date];
           if (span > 1) { merges.push({ s: { r: ri, c: 0 }, e: { r: ri + span - 1, c: 0 } }); merges.push({ s: { r: ri, c: 1 }, e: { r: ri + span - 1, c: 1 } }); }
@@ -902,7 +935,9 @@
       });
       const ws = window.XLSX.utils.aoa_to_sheet(aoa);
       ws['!merges'] = merges;
-      ws['!cols'] = [{ wch: 7 }, { wch: 5 }, { wch: 12 }, { wch: 6 }, { wch: 26 }, { wch: 24 }, { wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 22 }];
+      ws['!cols'] = readOnly
+        ? [{ wch: 7 }, { wch: 5 }, { wch: 12 }, { wch: 30 }, { wch: 8 }, { wch: 8 }, { wch: 8 }]
+        : [{ wch: 7 }, { wch: 5 }, { wch: 12 }, { wch: 6 }, { wch: 26 }, { wch: 24 }, { wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 22 }];
       const wb = window.XLSX.utils.book_new();
       window.XLSX.utils.book_append_sheet(wb, ws, `${year}년${month}월`);
       window.XLSX.writeFile(wb, `${prog.name}_${year}-${String(month).padStart(2, '0')}_최종편성안.xlsx`);
@@ -1007,28 +1042,29 @@
           <div class="px-3 py-2 border-b-2 border-brand text-[13px] font-bold text-ink">
             ${prog.name} · ${year}년 ${month}월 최종편성안 <span class="font-normal text-ink-soft">(총 ${total}편성)</span>
           </div>
-          <table class="w-full min-w-[820px] text-[12px] border-collapse">
+          <table class=${`w-full ${readOnly ? 'min-w-[560px]' : 'min-w-[820px]'} text-[12px] border-collapse`}>
             <thead class="sticky top-0">
               <tr>
                 <th class=${th} style=${{ width: '70px' }}>방송일</th>
                 <th class=${th} style=${{ width: '36px' }}>요일</th>
                 <th class=${th} style=${{ width: '104px' }}>시간</th>
-                <th class=${th} style=${{ width: '58px' }}>상태</th>
+                ${!readOnly && html`<th class=${th} style=${{ width: '58px' }}>상태</th>`}
                 <th class=${th}>상품명</th>
-                <th class=${th}>내용 / 타이틀</th>
-                <th class=${th}>구성</th>
-                <th class=${th} style=${{ width: '78px' }}>준비물량</th>
-                <th class=${th} style=${{ width: '88px' }}>가격</th>
-                <th class=${th} style=${{ width: '64px' }}>마진</th>
-                <th class=${th} style=${{ width: '128px' }}>최근 3회 달성률</th>
+                ${!readOnly && html`
+                  <th class=${th}>내용 / 타이틀</th>
+                  <th class=${th}>구성</th>
+                  <th class=${th} style=${{ width: '78px' }}>준비물량</th>
+                  <th class=${th} style=${{ width: '88px' }}>가격</th>
+                  <th class=${th} style=${{ width: '64px' }}>마진</th>
+                  <th class=${th} style=${{ width: '128px' }}>최근 3회 달성률</th>`}
                 <th class=${th} style=${{ width: '74px' }}>PD</th>
                 <th class=${th} style=${{ width: '74px' }}>쇼호스트</th>
                 <th class=${th} style=${{ width: '64px' }}>스튜디오</th>
-                <th class=${th}>비고 (PD)</th>
+                ${!readOnly && html`<th class=${th}>비고 (PD)</th>`}
               </tr>
             </thead>
             <tbody>
-              ${rows.length === 0 && html`<tr><td class=${td} colspan="15"><div class="text-center text-slate-400 py-8">이 달 편성이 없습니다.</div></td></tr>`}
+              ${rows.length === 0 && html`<tr><td class=${td} colspan=${readOnly ? 7 : 15}><div class="text-center text-slate-400 py-8">이 달 편성이 없습니다.</div></td></tr>`}
               ${rows.map((r, i) => {
                 const p = r.p; const det = (p && p.detail) || {};
                 const dnum = Number(r.day.date.slice(8));
@@ -1044,25 +1080,25 @@
                     <td class=${`${td} tabular-nums font-medium ${r.compete ? 'text-amber-700' : ''}`}>
                       ${slotName(r.slot)} ${r.compete && html`<span class="text-[10px] text-amber-600">●경쟁</span>`}
                     </td>
-                    <td class=${`${td} text-center`}>
-                      ${p ? (readOnly
-                        ? (pend ? html`<${Badge} color="#d97706">미정<//>` : html`<span class="text-[11px] text-emerald-600">확정</span>`)
-                        : html`<label class="flex items-center justify-center gap-1 text-[11px] cursor-pointer ${pend ? 'text-amber-700 font-semibold' : 'text-ink-soft'}">
-                            <input type="checkbox" checked=${!!pend} onChange=${(e) => store.updatePlacementContent(p.id, { pending: e.target.checked })} /> 미정</label>`)
+                    ${!readOnly && html`<td class=${`${td} text-center`}>
+                      ${p ? html`<label class="flex items-center justify-center gap-1 text-[11px] cursor-pointer ${pend ? 'text-amber-700 font-semibold' : 'text-ink-soft'}">
+                            <input type="checkbox" checked=${!!pend} onChange=${(e) => store.updatePlacementContent(p.id, { pending: e.target.checked })} /> 미정</label>`
                         : ''}
-                    </td>
+                    </td>`}
                     <td class=${`${td} p-0`}>
                       ${p ? html`<div>
                           <div class="flex items-center gap-1 pr-2">
                             ${Cell(p.productName, (val) => store.updatePlacementContent(p.id, { productName: val }), { color: 'font-semibold text-ink' })}
                             ${(p.items && p.items.length > 1) && html`<span class="shrink-0 text-[10px] text-violet-600">동시 ${p.items.length}착장</span>`}
                             ${det.isNew && html`<span class="shrink-0 text-[10px] text-cyan-600">新</span>`}
+                            ${readOnly && pend && html`<${Badge} color="#d97706">미정<//>`}
                           </div>
                           ${(p.items && p.items.length > 1) && html`<ul class="px-2 pb-1 text-[11px] text-ink-soft">${p.items.map((it, k) => html`<li key=${k}>· ${it}</li>`)}</ul>`}
                           <div class="px-2 pb-1 text-[10px] text-slate-400">${teamOf(state, p.teamId).name}</div>
                         </div>`
                         : html`<span class="px-2 text-slate-300">—</span>`}
                     </td>
+                    ${!readOnly && html`
                     <td class=${`${td} p-0`}>${p ? html`${Cell(det.note, (val) => store.updatePlacementContent(p.id, { detail: { note: val } }), { ph: '내용/타이틀…' })}
                       <div class="border-t border-dashed border-rose-200">${Cell(det.issue, (val) => store.updatePlacementContent(p.id, { detail: { issue: val } }), { ph: '이슈/특이사항…', color: 'text-rose-500' })}</div>` : ''}</td>
                     <td class=${`${td} p-0`}>${p ? Cell(det.comp, (val) => store.updatePlacementContent(p.id, { detail: { comp: val } }), { ph: '구성…' }) : ''}</td>
@@ -1070,11 +1106,11 @@
                     <td class=${`${td} p-0`}>${p ? Cell(det.price, (val) => store.updatePlacementContent(p.id, { detail: { price: val } }), { ph: '가격…', color: 'tabular-nums' }) : ''}</td>
                     <td class=${`${td} p-0`}>${p ? Cell(det.margin, (val) => store.updatePlacementContent(p.id, { detail: { margin: val } }), { ph: '마진…', color: 'tabular-nums' }) : ''}</td>
                     <td class=${`${td} p-0`}>${p ? html`<${Recent3Cell} value=${det.recent} readOnly=${readOnly}
-                      onCommit=${(val) => store.updatePlacementContent(p.id, { detail: { recent: val } })} />` : ''}</td>
+                      onCommit=${(val) => store.updatePlacementContent(p.id, { detail: { recent: val } })} />` : ''}</td>`}
                     <td class=${`${td} p-0`}>${p ? castCell(p, 'pd') : ''}</td>
                     <td class=${`${td} p-0`}>${p ? castCell(p, 'host') : ''}</td>
                     <td class=${`${td} p-0`}>${p ? castCell(p, 'studio') : ''}</td>
-                    <td class=${`${td} p-0`}>${p ? Cell(p.memo, (val) => store.updatePlacementContent(p.id, { memo: val }), { ph: 'PD 코멘트…', color: 'text-violet-700' }) : ''}</td>
+                    ${!readOnly && html`<td class=${`${td} p-0`}>${p ? Cell(p.memo, (val) => store.updatePlacementContent(p.id, { memo: val }), { ph: 'PD 코멘트…', color: 'text-violet-700' }) : ''}</td>`}
                   </tr>`;
               })}
             </tbody>
