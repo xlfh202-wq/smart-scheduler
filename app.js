@@ -779,9 +779,11 @@
     const [saveOpen, setSaveOpen] = useState(false);
     function doSave(label) {
       store.saveSnapshot(year, month, (label || '').trim());
+      if (store.flushDraft) store.flushDraft(); // 보류된 초안을 서버에 일괄 반영
       setSaveOpen(false);
       onSaved && onSaved(); // 최종편성안 탭으로 이동
     }
+    const draftN = store.draftCount ? store.draftCount() : 0;
     return html`
       <div class="flex flex-col md:flex-row flex-1 min-h-0">
         <${BidPool} state=${state} />
@@ -794,6 +796,8 @@
                 : html`<span class="text-[11px] font-normal text-slate-400 ml-1">· 저장 안 됨</span>`}
             </h2>
             <div class="flex items-center gap-2 flex-wrap justify-end">
+              ${draftN > 0 && html`<span class="text-[11px] font-semibold text-amber-800 bg-amber-100 border border-amber-300 rounded px-2 py-1 whitespace-nowrap shrink-0"
+                title="수정 내용은 '편성 저장'을 눌러야 서버(다른 사람 화면)에 반영됩니다">● 저장 안 된 변경 ${draftN}건</span>`}
               <button onClick=${() => setMemoOpen(true)}
                 class=${`text-xs px-2.5 py-1 rounded border whitespace-nowrap shrink-0 ${hasMemo ? 'border-amber-400 text-amber-700 bg-amber-50' : 'border-slate-300 bg-white hover:border-brand hover:text-brand'}`}
                 title="PD·쇼호스트 캐스팅 특이사항(휴가·불가일 등)">📌 캐스팅 메모${hasMemo ? ' ●' : ''}</button>
@@ -802,7 +806,7 @@
               <button onClick=${() => setSnapOpen(true)}
                 class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0">저장본 ${snaps.length}</button>
               <button onClick=${() => setSaveOpen(true)}
-                class="text-xs font-semibold px-3 py-1 rounded bg-brand text-white hover:bg-brand-dark whitespace-nowrap shrink-0">편성 저장</button>
+                class=${`text-xs font-semibold px-3 py-1 rounded bg-brand text-white hover:bg-brand-dark whitespace-nowrap shrink-0 ${draftN > 0 ? 'ring-2 ring-amber-400 ring-offset-1' : ''}`}>편성 저장${draftN > 0 ? ` (${draftN})` : ''}</button>
             </div>
           </div>
           <div class="space-y-4">
@@ -2117,6 +2121,27 @@
   }
 
   /* =====================================================================
+   *  저장 안 된 편성 초안 — 탭 이동 확인 팝업
+   * ===================================================================== */
+  function LeaveGuardModal({ count, onSave, onDiscard, onStay }) {
+    return html`
+      <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick=${(e) => e.stopPropagation()}>
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-md p-5">
+          <div class="text-base font-bold text-ink mb-1">⚠️ 저장되지 않은 편성 변경이 있습니다</div>
+          <div class="text-[13px] text-ink-soft mb-4 leading-relaxed">
+            편성표에서 수정한 <b class="text-brand">${count}건</b>이 아직 저장되지 않았습니다.<br/>
+            저장하지 않고 이동하면 변경 내용이 다른 사람에게 반영되지 않습니다.
+          </div>
+          <div class="flex flex-col gap-2">
+            <button onClick=${onSave} class="w-full text-[13px] font-semibold px-3 py-2 rounded bg-brand text-white hover:bg-brand-dark">저장하고 이동</button>
+            <button onClick=${onDiscard} class="w-full text-[13px] px-3 py-2 rounded border border-slate-300 text-rose-600 hover:bg-rose-50">저장 안 함 — 변경을 취소하고 이동</button>
+            <button onClick=${onStay} class="w-full text-[13px] px-3 py-2 rounded border border-slate-300 hover:bg-slate-50">계속 편집</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  /* =====================================================================
    *  앱 루트
    * ===================================================================== */
   function App() {
@@ -2163,13 +2188,14 @@
 
     // 오래 방치된 화면 자동 리프레시: 30분간 조작이 없으면 새로고침 →
     // 초기 화면(최유라쇼 + 역할 기본 탭)으로 복귀 + 최신 데이터/버전 반영.
-    // (모든 편집은 즉시 자동 저장되므로 새로고침으로 유실되지 않음)
+    // (편성표 초안이 저장 전이면 새로고침하지 않고 대기)
     useEffect(() => {
       const IDLE_MS = 30 * 60 * 1000;
       let timer = null;
       const reset = () => {
         if (timer) clearTimeout(timer);
         timer = setTimeout(() => {
+          if (store.draftCount && store.draftCount() > 0) { reset(); return; } // 저장 안 된 초안 보호
           if (document.visibilityState === 'visible') window.location.reload();
         }, IDLE_MS);
       };
@@ -2182,6 +2208,28 @@
       };
     }, []);
 
+    const roleCfg = auth ? (window.AUTH.roles[auth.role] || { tabs: ['schedule'], canManage: true, label: '', color: '#64748b' }) : null;
+    const allowed = roleCfg ? roleCfg.tabs : [];
+    const curTab = roleCfg ? (allowed.includes(tab) ? tab : allowed[0]) : null;
+
+    // 편성표 초안 모드: PD 편성표에 있는 동안 수정은 로컬 보류 → '편성 저장'으로 일괄 반영
+    const [leaveTo, setLeaveTo] = useState(null); // 저장 안 된 채 이동 시 확인 팝업 대상 탭
+    useEffect(() => {
+      if (!store.beginHold) return;
+      if (curTab === 'schedule') store.beginHold();
+      else store.endHold();
+    }, [curTab]);
+    // 새로고침/창닫기 시 브라우저 경고 (저장 안 된 초안)
+    useEffect(() => {
+      const h = (e) => { if (store.draftCount && store.draftCount() > 0) { e.preventDefault(); e.returnValue = ''; } };
+      window.addEventListener('beforeunload', h);
+      return () => window.removeEventListener('beforeunload', h);
+    }, []);
+    function guardTab(next) {
+      if (curTab === 'schedule' && next !== 'schedule' && store.draftCount && store.draftCount() > 0) { setLeaveTo(next); return; }
+      setTab(next);
+    }
+
     function doLogin(a) {
       try { localStorage.setItem(window.AUTH.storageKey, JSON.stringify({ ...a, ts: Date.now() })); } catch (e) {}
       store.setUser(displayName(a));
@@ -2189,18 +2237,16 @@
       setAuth(a);
     }
     function logout() {
-      if (!confirm('로그아웃할까요?')) return;
+      const n = store.draftCount ? store.draftCount() : 0;
+      if (!confirm(n > 0 ? `저장하지 않은 편성 변경 ${n}건이 사라집니다.\n그래도 로그아웃할까요?` : '로그아웃할까요?')) return;
+      if (n > 0 && store.discardDraft) store.discardDraft();
       try { localStorage.removeItem(window.AUTH.storageKey); } catch (e) {}
       store.setUser(null);
       setAuth(null);
     }
 
-    // 미로그인 → 로그인 화면 (이 아래의 훅 없음: 훅 순서 유지)
+    // 미로그인 → 로그인 화면 (훅은 모두 위에서 실행됨 — 순서 유지)
     if (!auth) return html`<${LoginGate} onLogin=${doLogin} teams=${state.teams} pdTeams=${state.pdTeams} />`;
-
-    const roleCfg = window.AUTH.roles[auth.role] || { tabs: ['schedule'], canManage: true, label: '', color: '#64748b' };
-    const allowed = roleCfg.tabs;
-    const curTab = allowed.includes(tab) ? tab : allowed[0];
 
     return html`
       <div class="flex flex-col h-screen">
@@ -2226,13 +2272,13 @@
             </div>
             <div class="shrink-0"><${MonthNav} view=${state.view} /></div>
             <nav class="flex items-center gap-1 shrink-0">
-              ${allowed.includes('bids') && html`<button onClick=${() => setTab('bids')}
+              ${allowed.includes('bids') && html`<button onClick=${() => guardTab('bids')}
                 class=${tabCls(curTab === 'bids')}>MD 입찰보드</button>`}
-              ${allowed.includes('schedule') && html`<button onClick=${() => setTab('schedule')}
+              ${allowed.includes('schedule') && html`<button onClick=${() => guardTab('schedule')}
                 class=${tabCls(curTab === 'schedule')}>PD 편성표</button>`}
-              ${allowed.includes('final') && html`<button onClick=${() => setTab('final')}
+              ${allowed.includes('final') && html`<button onClick=${() => guardTab('final')}
                 class=${tabCls(curTab === 'final')}>최종편성안</button>`}
-              ${allowed.includes('finalview') && html`<button onClick=${() => setTab('finalview')}
+              ${allowed.includes('finalview') && html`<button onClick=${() => guardTab('finalview')}
                 class=${tabCls(curTab === 'finalview')}>최종편성안 조회</button>`}
             </nav>
             <div class="ml-auto flex items-center gap-2 flex-wrap justify-end">
@@ -2277,6 +2323,10 @@
         ${history && html`<${HistoryModal} state=${state} isAdmin=${roleCfg.isAdmin} onClose=${() => setHistory(false)} />`}
         ${backup && html`<${BackupModal} isAdmin=${roleCfg.isAdmin} onClose=${() => setBackup(false)} />`}
         ${teamMgr && html`<${TeamManagerModal} state=${state} onClose=${() => setTeamMgr(false)} />`}
+        ${leaveTo && html`<${LeaveGuardModal} count=${store.draftCount ? store.draftCount() : 0}
+          onSave=${() => { store.flushDraft(); setTab(leaveTo); setLeaveTo(null); }}
+          onDiscard=${() => { store.discardDraft(); setTab(leaveTo); setLeaveTo(null); }}
+          onStay=${() => setLeaveTo(null)} />`}
       </div>`;
   }
   const tabCls = (active) =>

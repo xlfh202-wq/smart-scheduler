@@ -242,6 +242,12 @@
     let saveBackend = null; // 설정 시 localStorage 대신 이 함수로 저장 (Supabase 등)
     let rowMode = false;    // bids/placements를 개별 행 테이블로 동기화(활성 시) → 하이드레이트가 이들을 덮어쓰지 않음
     let currentUser = null; // 로그인한 사용자 표시명 — 이 브라우저 한정(서버 동기화 안 함)
+    // ----- 편성표 초안(draft) 모드: 서버 반영 보류, '편성 저장' 시 일괄 반영 -----
+    let holdSync = false;      // true면 변경을 로컬에만 저장(서버 업로드 보류)
+    let draftDirty = 0;        // 보류 중 실제 변경 건수
+    let serverBase = null;     // 보류 시작/마지막 반영 시점 상태(JSON) — '변경 취소' 복원용
+    let pendingHydrate = null; // 보류 중 도착한 서버 상태(최신 1개) — 취소 시 이걸로 복원
+    let suppressDirty = false; // 월/프로그램 이동 등 자동 생성은 변경 건수로 세지 않음
     let backupAPI = null;   // Supabase 백업/복원 구현 (connectSupabase 에서 주입)
     let hydratedOnce = false; // 첫 서버 로드 이후에는 화면 이동(탭·월)을 로컬 유지
     // 접속(첫 로드) 시 항상 초기 화면 = 최유라쇼 + 현재 월 (오늘 기준)
@@ -371,8 +377,9 @@
       s.changeLog.unshift({ id: uid(), ts: nowISO(), user: 'system', action: '초기적재',
         productName: '', teamName: '', from: '', to: '', detail: `최유라쇼 MD 입찰 ${seed.length}건 자동 적재` });
     }
-    function persist(s) {
-      if (saveBackend) { saveBackend(s); return; }
+    function persist(s, force) {
+      // holdSync(초안 모드) 중에는 서버 반영을 보류(로컬만) — force=true(편성 저장)면 즉시 반영
+      if (saveBackend) { saveBackend(s, holdSync && !force); return; }
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); } catch (e) {}
     }
     // ----- 되돌리기(undo)/다시(redo) 이력 -----
@@ -381,16 +388,20 @@
     let redoStack = [];
     let baseline = null; // 마지막 커밋 시점 상태(JSON)
     function recordHistory() {
-      if (baseline !== null) {
+      const next = JSON.stringify(state);
+      const changed = baseline !== null && next !== baseline;
+      if (changed) {
         undoStack.push(baseline);
         if (undoStack.length > MAX_UNDO) undoStack.shift();
         redoStack = [];
       }
-      baseline = JSON.stringify(state);
+      baseline = next;
+      return changed;
     }
     function notify() { persist(state); subs.forEach((fn) => fn(state)); }
     function emit() {
-      recordHistory();
+      const changed = recordHistory();
+      if (holdSync && changed && !suppressDirty) draftDirty++;
       notify();
     }
     function log(entry) {
@@ -494,10 +505,13 @@
       _snapshot: () => state,
       _useBackend(saveFn) { saveBackend = saveFn; },
       _hydrate(newState) { // 서버(메인 문서)에서 받은 상태로 교체 (재저장 안 함, 이력 초기화)
+        // 초안 편집 중이면 서버 상태로 덮어쓰지 않고 보관 → 저장/취소 시 처리
+        if (holdSync && draftDirty > 0) { pendingHydrate = newState; return; }
         // 행 동기화 모드: bids/placements는 개별 행 테이블이 소스이므로 메인 문서 값으로 덮어쓰지 않음
         if (rowMode) { newState.bids = state.bids; newState.placements = state.placements; }
         state = ensureTeams2026(cleanupSlots(keepLocalNav(pruneExcluded(newState), state)));
         baseline = JSON.stringify(state); undoStack = []; redoStack = [];
+        serverBase = JSON.stringify(state);
         subs.forEach((fn) => fn(state));
       },
       // ----- 개별 행 동기화(bids/placements) 훅 -----
@@ -507,6 +521,7 @@
       _setRows(kind, arr) { state[kind] = arr || []; subs.forEach((fn) => fn(state)); },
       // 원격 행 변경 병합: upserts=[{...}], removedIds=[id] → 상태 반영 후 렌더(저장·이력 없음)
       _mergeRemote(kind, upserts, removedIds) {
+        if (holdSync && draftDirty > 0) return; // 초안 편집 중엔 원격 변경으로 덮지 않음
         const arr = state[kind] || (state[kind] = []);
         (upserts || []).forEach((row) => {
           const i = arr.findIndex((x) => x.id === row.id);
@@ -517,6 +532,29 @@
           state[kind] = arr.filter((x) => !rm.has(x.id));
         }
         subs.forEach((fn) => fn(state));
+      },
+
+      // ----- 편성표 초안(draft) 모드 API -----
+      beginHold() { holdSync = true; draftDirty = 0; pendingHydrate = null; serverBase = JSON.stringify(state); },
+      endHold() { holdSync = false; },
+      draftCount() { return holdSync ? draftDirty : 0; },
+      // '편성 저장': 보류 중 변경을 서버에 일괄 반영
+      flushDraft() {
+        draftDirty = 0; pendingHydrate = null;
+        serverBase = JSON.stringify(state);
+        persist(state, true);
+      },
+      // '변경 취소': 보류 중 변경을 버리고 서버(또는 보류 직전) 상태로 복원
+      discardDraft() {
+        const src = pendingHydrate || (serverBase ? JSON.parse(serverBase) : null);
+        pendingHydrate = null; draftDirty = 0;
+        if (src) {
+          state = ensureTeams2026(cleanupSlots(keepLocalNav(pruneExcluded(src), state)));
+          baseline = JSON.stringify(state); undoStack = []; redoStack = [];
+          serverBase = JSON.stringify(state);
+          try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+          subs.forEach((fn) => fn(state));
+        }
       },
 
       // ----- 백업 / 복원 -----
@@ -567,7 +605,7 @@
         // 다음 달 첫째주도 함께 보므로 다음 달 방송일도 미리 생성
         const nm = nextMonthOf(state.view.year, state.view.month);
         this.ensureMonth(nm.year, nm.month, programId);
-        emit();
+        suppressDirty = true; try { emit(); } finally { suppressDirty = false; } // 이동은 초안 변경으로 세지 않음
       },
 
       /* ---------- 월/연 이동 ---------- */
@@ -610,7 +648,7 @@
         const nm = nextMonthOf(year, month);
         this.ensureScheduleAll(nm.year, nm.month);
         state.view = { year, month };
-        emit();
+        suppressDirty = true; try { emit(); } finally { suppressDirty = false; } // 이동은 초안 변경으로 세지 않음
       },
       shiftView(delta) {
         let { year, month } = state.view;
@@ -1482,8 +1520,9 @@
       status('local');
     }
 
-    store._useBackend((state) => {
+    store._useBackend((state, hold) => {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {} // 로컬 폴백
+      if (hold) return; // 편성표 초안 보류 중 — '편성 저장' 전까지 서버 반영 안 함
       if (!ready || !serverOk) return;
       clearTimeout(timer);
       timer = setTimeout(async () => {
