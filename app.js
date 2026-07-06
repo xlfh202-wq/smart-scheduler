@@ -341,7 +341,7 @@
             class=${`text-xs px-2.5 py-1 rounded-full border ${mode === 'order' ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft'}`}>순번 (N부)</button>
         </div>
         ${mode === 'time'
-          ? html`<${Field} label=${`방송 시간 (24시간) — ${dur}분`}>
+          ? html`<${Field} label=${`방송 시간 (24시간) * — ${dur}분`}>
               <div class="flex items-center gap-1.5">
                 <${TimeInput} value=${s} onChange=${setS} />
                 <span class="text-ink-soft">~</span>
@@ -349,7 +349,7 @@
               </div>
               <div class="text-[11px] text-ink-soft mt-1">24시간제 (예: 20:45~21:05 = 20분)</div>
             <//>`
-          : html`<${Field} label="순번명"><input value=${label} onInput=${(ev) => setLabel(ev.target.value)} class=${inputCls} placeholder="예: 1부" /><//>`}
+          : html`<${Field} label="순번명 *"><input value=${label} onInput=${(ev) => setLabel(ev.target.value)} class=${inputCls} placeholder="예: 1부" /><//>`}
       <//>`;
   }
 
@@ -544,7 +544,7 @@
     }
     return html`
       <${Modal} title=${`${fmtDay(day)} · 편성 시간 지정${b && b.product ? ' · ' + b.product.name : ''}`} onClose=${onClose} onSave=${save}>
-        <${Field} label="편성할 시작 시간 (24시간)"><${TimeInput} value=${start} onChange=${setStart} /><//>
+        <${Field} label="편성할 시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${setStart} /><//>
         <div class="text-[12px] text-ink-soft">${dur ? `노출분 ${dur}분 → 시작~시작+${dur}분 시간대로 생성되어 편성됩니다.` : '입력한 시각으로 새 시간대가 생성되어 편성됩니다.'}</div>
       <//>`;
   }
@@ -561,7 +561,7 @@
     }
     return html`
       <${Modal} title=${`${fmtDay(day)} · 시간대 이동${p ? ' · ' + p.productName : ''}`} onClose=${onClose} onSave=${save}>
-        <${Field} label="이동할 시작 시간 (24시간)"><${TimeInput} value=${start} onChange=${setStart} /><//>
+        <${Field} label="이동할 시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${setStart} /><//>
         <div class="text-[12px] text-ink-soft">${dur ? `노출분 ${dur}분 → 시작~시작+${dur}분 시간대로 생성됩니다.` : '입력한 시각으로 새 시간대가 생성되어 이동합니다.'}</div>
       <//>`;
   }
@@ -618,8 +618,8 @@
     return html`
       <${Modal} title=${`${fmtDay(day)} · 시간대 추가`} onClose=${onClose} onSave=${save}>
         <div class="grid grid-cols-2 gap-3">
-          <${Field} label="시작 시간 (24시간)"><${TimeInput} value=${start} onChange=${setStart} /><//>
-          <${Field} label="종료 시간 (24시간)"><${TimeInput} value=${end} onChange=${setEnd} /><//>
+          <${Field} label="시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${setStart} /><//>
+          <${Field} label="종료 시간 (24시간) *"><${TimeInput} value=${end} onChange=${setEnd} /><//>
         </div>
         <div class="text-[12px] text-ink-soft">24시간제로 입력하세요 (예: 20:45). 특별편성 등으로 앞뒤 시간대를 추가할 수 있습니다.</div>
       <//>`;
@@ -1139,7 +1139,7 @@
     }
     return html`
       <${Modal} title=${`${activeProgramObj(state).name} · 편성일 추가`} onClose=${onClose} onSave=${save}>
-        <${Field} label="방송일">
+        <${Field} label="방송일 *">
           <input type="date" value=${date} onInput=${(e) => setDate(e.target.value)} class=${inputCls} />
         <//>
         ${wdName && html`<div class="text-[12px] text-ink-soft">${date} (${wdName}요일)에 편성일을 추가합니다. 추가 후 각 칸의 “+ 시간대”로 방송 시간을 입력하세요.</div>`}
@@ -1441,7 +1441,7 @@
                 <select value=${slotId} onChange=${(e) => setSlotId(e.target.value)} class=${inputCls}>
                   ${day.slots.map((s) => html`<option key=${s.id} value=${s.id}>${slotName(s)}</option>`)}
                 </select><//>`
-            : html`<${Field} label=${`방송 시간 (24시간) — ${durMin}분`}>
+            : html`<${Field} label=${`방송 시간 (24시간) * — ${durMin}분`}>
                 <div class="flex items-center gap-1.5">
                   <${TimeInput} value=${start} onChange=${setStart} />
                   <span class="text-ink-soft">~</span>
@@ -1567,7 +1567,7 @@
     return html`
       <${Modal} title="팀 · 부문 관리 (조직개편)" onClose=${onClose} onSave=${onClose} extra=${html`<button onClick=${autoMerge2026} class="text-[12px] px-2.5 py-1.5 rounded border border-violet-300 text-violet-700 bg-white hover:bg-violet-50">🧹 2026 표준 자동정리</button>`}>
         <div class="flex items-end gap-2 flex-wrap">
-          <${Field} label="새 팀명"><input value=${newName} onInput=${(e) => setNewName(e.target.value)} class=${inputCls} placeholder="예: 무형상품팀" /><//>
+          <${Field} label="새 팀명 *"><input value=${newName} onInput=${(e) => setNewName(e.target.value)} class=${inputCls} placeholder="예: 무형상품팀" /><//>
           <${Field} label="부문">
             <select value=${newDiv} onChange=${(e) => setNewDiv(e.target.value)} class=${inputCls}>
               <option value="">(미지정)</option>
@@ -1863,7 +1863,13 @@
       placeholder="20:45" class=${`${className || inputCls} tabular-nums`} />`;
   }
   function Field({ label, children }) {
-    return html`<label class="block"><div class="text-[12px] font-medium text-ink-soft mb-1">${label}</div>${children}</label>`;
+    // 라벨에 '*'가 있으면 필수 항목 — 빨간 별표 + (필수) 로 표시
+    let lab = label;
+    if (typeof label === 'string' && label.includes('*')) {
+      const t = label.replace(/\s*\*/g, '').trim();
+      lab = html`${t} <span class="text-red-500 font-bold">*</span> <span class="text-[10px] text-red-400 font-normal">(필수)</span>`;
+    }
+    return html`<label class="block"><div class="text-[12px] font-medium text-ink-soft mb-1">${lab}</div>${children}</label>`;
   }
   function Modal({ title, children, onClose, onSave, extra }) {
     useEffect(() => {
@@ -1982,7 +1988,7 @@
           <label class="flex items-center gap-1.5 text-[13px]"><input type="checkbox" checked=${irregular} onChange=${(e) => setIrregular(e.target.checked)} /> 비정기 (요일 고정 없음 · 편성일 수기 추가)</label>
         </div>
         ${!irregular && html`
-          <${Field} label="정기 방송 요일 · 시간">
+          <${Field} label="정기 방송 요일 · 시간 *">
             <div class="flex flex-wrap gap-1 mb-2">
               ${WD.map((w, wd) => html`<button key=${wd} type="button" onClick=${() => toggleWd(wd)}
                 class=${`w-9 h-9 rounded text-[13px] border ${wdSel[wd] ? 'bg-brand text-white border-brand' : 'bg-white border-slate-300 text-ink-soft hover:border-brand'}`}>${w}</button>`)}
@@ -2249,7 +2255,7 @@
     if (!auth) return html`<${LoginGate} onLogin=${doLogin} teams=${state.teams} pdTeams=${state.pdTeams} />`;
 
     return html`
-      <div class="flex flex-col h-screen">
+      <div class="flex flex-col min-h-screen md:h-screen">
         <header class="shrink-0 bg-white border-b border-slate-200">
           <div class="flex items-center gap-x-3 gap-y-2 px-4 py-2 flex-wrap">
             <div class="flex items-center gap-2 shrink-0">
