@@ -708,6 +708,30 @@
         log({ action: '입찰삭제', productName: b.product.name, teamName: teamName(b.teamId) });
         emit();
       },
+      // 입찰을 다른 날짜로 이동 — 시간대는 같은 시간, 순번은 같은 라벨로 새 날짜에 재배정
+      moveBidToDay(bidId, newDayId) {
+        const b = state.bids.find((x) => x.id === bidId);
+        const day = state.days.find((d) => d.id === newDayId);
+        if (!b || !day || b.dayId === newDayId) return;
+        const oldDay = state.days.find((d) => d.id === b.dayId);
+        const oldSlot = oldDay && oldDay.slots.find((s) => s.id === b.slotId);
+        b.dayId = newDayId;
+        let slot;
+        if (oldSlot && oldSlot.start && oldSlot.end) slot = ensureSlotOnDay(day, oldSlot.start, oldSlot.end);
+        else if (oldSlot && oldSlot.label) {
+          slot = day.slots.find((s) => s.label === oldSlot.label && !s.start) || ensureBucketSlotOnDay(day);
+        } else slot = ensureBucketSlotOnDay(day);
+        b.slotId = slot.id;
+        // 연결된 편성(placement)도 함께 이동
+        const pl = state.placements.find((p) => p.sourceBidId === bidId);
+        if (pl) { pl.slotId = slot.id; stamp(pl); }
+        stamp(b);
+        const fmt = (d) => d ? `${Number(d.date.slice(8))}일(${WEEKDAY_KO[d.weekday]})` : '';
+        log({ action: '입찰이동', productName: b.product && b.product.name, teamName: teamName(b.teamId),
+              from: fmt(oldDay), to: fmt(day) });
+        emit();
+        return { ok: true };
+      },
 
       // 엑셀 일괄 가져오기: [{teamId, date, start, end, product}] → 날짜·시간대로 슬롯 매핑
       importBids(list) {

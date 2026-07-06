@@ -1250,16 +1250,29 @@
           </div>
         </div>
         <div class="p-4 space-y-3 max-w-[1100px]">
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between gap-2 flex-wrap">
             <h2 class="text-base font-bold text-ink">${teamOf(state, team).name} 입찰 · ${state.view.year}년 ${state.view.month}월 — 총 ${teamBids.length}건</h2>
             <button onClick=${() => setAddDayOpen(true)}
               class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand">+ 편성일 추가</button>
           </div>
+          <div class="text-[11px] text-ink-soft -mt-1">💡 날짜 변경: 입찰 카드를 <b>드래그해 다른 날짜 칸에 놓거나</b>, 카드 클릭 → <b>희망 편성일</b>을 바꿔 저장하면 이동됩니다.</div>
           ${days.length === 0 && html`<div class="text-sm text-slate-400 py-8 text-center">이 달에는 편성일이 없습니다. 위 “+ 편성일 추가”로 추가하세요.</div>`}
           ${days.map((day) => {
             const shownSlots = day.slots.filter((slot) => !isMain || slot.std || slot.manual || state.bids.some((b) => b.slotId === slot.id));
             return html`
-            <div key=${day.id} class="rounded-xl border border-slate-200 bg-white overflow-hidden">
+            <div key=${day.id} class="rounded-xl border border-slate-200 bg-white overflow-hidden"
+              onDragOver=${(e) => { e.preventDefault(); e.currentTarget.classList.add('drop-active'); }}
+              onDragLeave=${(e) => { if (e.currentTarget === e.target) e.currentTarget.classList.remove('drop-active'); }}
+              onDrop=${(e) => {
+                e.preventDefault(); e.currentTarget.classList.remove('drop-active');
+                const pl = drag.read(e);
+                if (!pl || pl.kind !== 'bidmove') return;
+                const bid = state.bids.find((x) => x.id === pl.id);
+                if (!bid || bid.dayId === day.id) return;
+                const fromDay = state.days.find((d) => d.id === bid.dayId);
+                if (confirm(`[${bid.product.name}] 입찰을 ${fromDay ? fmtDay(fromDay) + ' → ' : ''}${fmtDay(day)}(으)로 이동할까요?`))
+                  store.moveBidToDay(bid.id, day.id);
+              }}>
               <div class="flex items-center justify-between px-3 py-1.5 bg-slate-100">
                 <span class="flex items-center gap-2">
                   <span class="font-semibold text-[13px] text-ink">${fmtDay(day)}</span>
@@ -1328,7 +1341,8 @@
                  pr.sme && '중소', pr.special && '특약'].filter(Boolean).join(' / ');
     return html`
       <button onClick=${onEdit} title=${tip}
-        class=${`text-left rounded-md border bg-white px-2 py-1 hover:shadow-sm ${isGroup ? 'min-w-[220px]' : ''}`}
+        draggable=${true} onDragStart=${(e) => drag.start(e, 'bidmove', b.id)}
+        class=${`card-drag text-left rounded-md border bg-white px-2 py-1 hover:shadow-sm ${isGroup ? 'min-w-[220px]' : ''}`}
         style=${{ borderLeft: `4px solid ${t.color}` }}>
         <div class="flex items-center gap-1">
           ${isGroup && html`<${Badge} color="#7c3aed" title="동시 노출 묶음">동시 ${items.length}<//>`}
@@ -1364,6 +1378,13 @@
       items: (init.items || []).join('\n'), // 동시 묶음 상품 목록
     });
     const setRecent = (i) => (e) => { const v = e.target.value.replace(/[^\d.]/g, ''); setF((s) => ({ ...s, recent: s.recent.map((x, j) => (j === i ? v : x)) })); };
+    // 그룹코드: 기본 3칸, 필요 시 칸 추가 (저장 시 ' / '로 합쳐 기존 데이터와 호환)
+    const [codes, setCodes] = useState(() => {
+      const parts = String(init.groupCode || '').split(/[\/,\s]+/).filter(Boolean);
+      while (parts.length < 3) parts.push('');
+      return parts;
+    });
+    const setCode = (i) => (e) => setCodes((p) => p.map((c, j) => (j === i ? e.target.value : c)));
     const itemLines = f.items.split('\n').map((s) => s.trim()).filter(Boolean);
     const initSlot = state.days.flatMap((d) => d.slots).find((s) => s.id === ctx.slotId);
     const orderMode = !!(initSlot && initSlot.label && !initSlot.start);
@@ -1384,10 +1405,12 @@
       let name = f.name.trim();
       if (!name && items.length) name = `(동시) ${items[0]}${items.length > 1 ? ` 외 ${items.length - 1}` : ''}`;
       if (!name) { alert('상품명을 입력하거나 동시 묶음 상품을 입력하세요.'); return; }
+      // 수정 중 희망 편성일을 바꿨으면 → 해당 일자로 입찰 이동 (이후 시간/슬롯 갱신은 새 날짜 기준)
+      if (b && dayId && dayId !== b.dayId) store.moveBidToDay(b.id, dayId);
       const product = {
         name, note: f.note, issue: f.issue, comp: f.comp, prep: f.prep,
         price: f.price, margin: f.margin, sme: f.sme, special: f.special, isNew: f.isNew,
-        groupCode: f.groupCode, recent: f.recent.some(Boolean) ? f.recent : undefined,
+        groupCode: codes.map((c) => c.trim()).filter(Boolean).join(' / '), recent: f.recent.some(Boolean) ? f.recent : undefined,
         durationMin: (fashion || orderMode) ? (f.durationMin ? parseInt(f.durationMin, 10) : null) : durMin,
         items: items.length ? items : undefined,
         dongsi: items.length > 1,
@@ -1415,11 +1438,16 @@
       <${Modal} title=${`${teamOf(state, team).name} ${b ? '입찰 수정' : '입찰 등록'}`}
         onClose=${onClose} onSave=${save} extra=${b && html`<button onClick=${del}
           class="text-xs text-brand hover:underline mr-auto">삭제</button>`}>
-        <div class="grid grid-cols-2 gap-3">
-          <${Field} label=${itemLines.length > 1 ? '대표명 / 묶음명 (비우면 자동)' : '상품명 *'}>
-            <input value=${f.name} onInput=${set('name')} class=${inputCls} autofocus placeholder=${itemLines.length > 1 ? '예: (동시) 필립림 25FW' : ''} /><//>
-          <${Field} label="그룹코드"><input value=${f.groupCode} onInput=${set('groupCode')} class=${inputCls} placeholder="예: 12345678" /><//>
-        </div>
+        <${Field} label=${itemLines.length > 1 ? '대표명 / 묶음명 (비우면 자동)' : '상품명 *'}>
+          <input value=${f.name} onInput=${set('name')} class=${inputCls} autofocus placeholder=${itemLines.length > 1 ? '예: (동시) 필립림 25FW' : ''} /><//>
+        <${Field} label=${`그룹코드 (${codes.filter((c) => c.trim()).length ? codes.filter((c) => c.trim()).length + '개' : '최대 ' + codes.length + '칸'})`}>
+          <div class="flex flex-wrap items-center gap-1.5">
+            ${codes.map((c, i) => html`<input key=${i} value=${c} onInput=${setCode(i)}
+              class="w-28 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none tabular-nums" placeholder=${'코드' + (i + 1)} />`)}
+            <button type="button" onClick=${() => setCodes((p) => [...p, ''])}
+              class="text-[12px] px-2 py-1.5 rounded border border-dashed border-slate-300 text-ink-soft hover:border-brand hover:text-brand" title="그룹코드 칸 추가">+ 칸 추가</button>
+          </div>
+        <//>
         <${Field} label=${`동시 묶음 상품 (한 줄에 하나씩 · 여러 개 붙여넣기 가능)${itemLines.length ? ` — ${itemLines.length}개` : ''}`}>
           <textarea value=${f.items} onInput=${set('items')} rows="3" class=${`${inputCls} font-mono text-[12px]`}
             placeholder=${'[동시] 필립림 그래픽 티셔츠 3종 (여성)\n[동시] 필립림 그래픽 티셔츠 3종 (남성)\n[동시] 필립림 워싱 데님 팬츠\n[동시] 필립림 보머자켓(세일)'}></textarea>
@@ -1429,9 +1457,11 @@
           <${Field} label="희망 편성일">
             <select value=${dayId} onChange=${(e) => { setDayId(e.target.value);
                 const nd = state.days.find((d) => d.id === e.target.value); if (nd && nd.slots[0]) setSlotId(nd.slots[0].id); }}
-              class=${inputCls}>
+              class=${`${inputCls} ${b && dayId !== b.dayId ? 'border-amber-400 bg-amber-50' : ''}`}>
               ${monthDays.map((d) => html`<option key=${d.id} value=${d.id}>${fmtDay(d)}</option>`)}
             </select>
+            ${b && html`<div class=${`mt-1 text-[11px] ${dayId !== b.dayId ? 'text-amber-700 font-semibold' : 'text-ink-soft'}`}>
+              ${dayId !== b.dayId ? '💡 저장하면 이 날짜로 입찰이 이동합니다' : '날짜를 바꿔 저장하면 해당 일자로 이동됩니다'}</div>`}
           <//>
           ${fashion
             ? html`<${Field} label="시간/순번">
