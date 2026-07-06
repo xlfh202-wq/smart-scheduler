@@ -774,7 +774,7 @@
     const days = daysInView(state);
     const monthSlotIds = new Set(days.flatMap((d) => d.slots.map((s) => s.id)));
     const placedCount = state.placements.filter((p) => monthSlotIds.has(p.slotId)).length;
-    const snaps = (state.snapshots || []).filter((s) => s.year === year && s.month === month);
+    const snaps = (state.snapshots || []).filter((s) => s.year === year && s.month === month && s.programId === state.activeProgram);
     const lastSnap = snaps[0];
     const [saveOpen, setSaveOpen] = useState(false);
     function doSave(label) {
@@ -904,6 +904,9 @@
     // slim: MD 조회용(민감 열 숨김). full+readOnly: 편성팀 — PD와 동일한 전체 열, 편집만 불가
     const slim = readOnly && !full;
     const prog = activeProgramObj(state);
+    const [snapOpen, setSnapOpen] = useState(false);
+    const snapCount = (state.snapshots || []).filter((s) =>
+      s.year === state.view.year && s.month === state.view.month && s.programId === state.activeProgram).length;
     const capRef = useRef(null);
     const [saving, setSaving] = useState(false);
     const { year, month } = state.view;
@@ -912,8 +915,8 @@
       if (!window.XLSX) { alert('엑셀 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.'); return; }
       // MD(조회 전용)는 민감 항목(구성·준비물량·가격·마진·달성률·비고) 제외한 축약본으로 출력
       const header = slim
-        ? ['방송일', '요일', '시간', '상품명', 'PD', '쇼호스트', '스튜디오']
-        : ['방송일', '요일', '시간', '상태', '상품명', '내용/타이틀', '구성', '준비물량', '가격', '마진', '최근달성률', 'PD', '쇼호스트', '스튜디오', '비고(PD)'];
+        ? ['방송일', '요일', '시간', '상품명', '그룹코드', 'PD', '쇼호스트', '스튜디오']
+        : ['방송일', '요일', '시간', '상태', '상품명', '그룹코드', '내용/타이틀', '구성', '준비물량', '가격', '마진', '최근달성률', 'PD', '쇼호스트', '스튜디오', '비고(PD)'];
       const aoa = [header]; const merges = []; let ri = 1;
       rows.forEach((r) => {
         const p = r.p; const det = (p && p.detail) || {};
@@ -922,13 +925,13 @@
         aoa.push(slim
           ? [
             r.firstOfDay ? `${mm}/${dnum}` : '', r.firstOfDay ? U.WEEKDAY_KO[r.day.weekday] : '',
-            slotName(r.slot), p ? ((p.productName || '') + items) : '',
+            slotName(r.slot), p ? ((p.productName || '') + items) : '', p ? (det.groupCode || '') : '',
             p ? (p.pd || '') : '', p ? (p.host || '') : '', p ? (p.studio || '') : '',
           ]
           : [
             r.firstOfDay ? `${mm}/${dnum}` : '', r.firstOfDay ? U.WEEKDAY_KO[r.day.weekday] : '',
             slotName(r.slot), p ? (p.pending ? '미정' : '확정') : '',
-            p ? ((p.productName || '') + items) : '', p ? (det.note || '') : '', p ? (det.comp || '') : '',
+            p ? ((p.productName || '') + items) : '', p ? (det.groupCode || '') : '', p ? (det.note || '') : '', p ? (det.comp || '') : '',
             p ? (det.prep || '') : '', p ? (det.price || '') : '', p ? (det.margin || '') : '',
             p ? recentText(det.recent) : '', p ? (p.pd || '') : '', p ? (p.host || '') : '',
             p ? (p.studio || '') : '', p ? (p.memo || '') : '',
@@ -942,8 +945,8 @@
       const ws = window.XLSX.utils.aoa_to_sheet(aoa);
       ws['!merges'] = merges;
       ws['!cols'] = slim
-        ? [{ wch: 7 }, { wch: 5 }, { wch: 12 }, { wch: 30 }, { wch: 8 }, { wch: 8 }, { wch: 8 }]
-        : [{ wch: 7 }, { wch: 5 }, { wch: 12 }, { wch: 6 }, { wch: 26 }, { wch: 24 }, { wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 22 }];
+        ? [{ wch: 7 }, { wch: 5 }, { wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }]
+        : [{ wch: 7 }, { wch: 5 }, { wch: 12 }, { wch: 6 }, { wch: 26 }, { wch: 12 }, { wch: 24 }, { wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 22 }];
       const wb = window.XLSX.utils.book_new();
       window.XLSX.utils.book_append_sheet(wb, ws, `${year}년${month}월`);
       window.XLSX.writeFile(wb, `${prog.name}_${year}-${String(month).padStart(2, '0')}_최종편성안.xlsx`);
@@ -1037,6 +1040,9 @@
           <h2 class="text-base font-bold text-ink">${prog.name} · ${year}년 ${month}월 최종편성안
             <span class="text-[12px] font-normal text-ink-soft">총 ${total}편성${readOnly ? ' · 조회 전용' : ' · 셀을 클릭해 직접 수정'}</span></h2>
           <div class="flex items-center gap-2">
+            ${!readOnly && html`<button onClick=${() => setSnapOpen(true)}
+              class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0"
+              title="이 프로그램·월의 저장본(편성 저장 이력) 목록">저장본 ${snapCount}</button>`}
             <button onClick=${saveExcel}
               class="text-xs px-2.5 py-1 rounded border border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50 whitespace-nowrap shrink-0">📊 엑셀 저장 (XLSX)</button>
             <button onClick=${saveImage} disabled=${saving}
@@ -1044,11 +1050,12 @@
               ${saving ? '이미지 생성 중…' : '🖼 이미지 저장 (PNG)'}</button>
           </div>
         </div>
+        ${snapOpen && html`<${SnapshotsModal} state=${state} onClose=${() => setSnapOpen(false)} />`}
         <div ref=${capRef} id="final-capture" class="bg-white rounded-lg shadow-sm overflow-x-auto">
           <div class="px-3 py-2 border-b-2 border-brand text-[13px] font-bold text-ink">
             ${prog.name} · ${year}년 ${month}월 최종편성안 <span class="font-normal text-ink-soft">(총 ${total}편성)</span>
           </div>
-          <table class=${`w-full ${slim ? 'min-w-[700px]' : 'min-w-[1420px]'} text-[12px] border-collapse`}>
+          <table class=${`w-full ${slim ? 'min-w-[790px]' : 'min-w-[1510px]'} text-[12px] border-collapse`}>
             <thead class="sticky top-0">
               <tr>
                 <th class=${th} style=${{ width: '70px' }}>방송일</th>
@@ -1056,6 +1063,7 @@
                 <th class=${th} style=${{ width: '104px' }}>시간</th>
                 ${!slim && html`<th class=${th} style=${{ width: '58px' }}>상태</th>`}
                 <th class=${th} style=${{ minWidth: '150px' }}>상품명</th>
+                <th class=${th} style=${{ width: '92px' }}>그룹코드</th>
                 ${!slim && html`
                   <th class=${th} style=${{ minWidth: '170px' }}>내용 / 타이틀</th>
                   <th class=${th} style=${{ minWidth: '130px' }}>구성</th>
@@ -1070,7 +1078,7 @@
               </tr>
             </thead>
             <tbody>
-              ${rows.length === 0 && html`<tr><td class=${td} colspan=${slim ? 7 : 15}><div class="text-center text-slate-400 py-8">이 달 편성이 없습니다.</div></td></tr>`}
+              ${rows.length === 0 && html`<tr><td class=${td} colspan=${slim ? 8 : 16}><div class="text-center text-slate-400 py-8">이 달 편성이 없습니다.</div></td></tr>`}
               ${rows.map((r, i) => {
                 const p = r.p; const det = (p && p.detail) || {};
                 const dnum = Number(r.day.date.slice(8));
@@ -1106,6 +1114,7 @@
                         </div>`
                         : html`<span class="px-2 text-slate-300">—</span>`}
                     </td>
+                    <td class=${`${td} p-0`}>${p ? Cell(det.groupCode, (val) => store.updatePlacementContent(p.id, { detail: { groupCode: val } }), { ph: '그룹코드', color: 'tabular-nums' }) : ''}</td>
                     ${!slim && html`
                     <td class=${`${td} p-0`}>${p ? html`${Cell(det.note, (val) => store.updatePlacementContent(p.id, { detail: { note: val } }), { ph: '내용/타이틀…' })}
                       <div class="border-t border-dashed border-rose-200">${Cell(det.issue, (val) => store.updatePlacementContent(p.id, { detail: { issue: val } }), { ph: '이슈/특이사항…', color: 'text-rose-500' })}</div>` : ''}</td>
@@ -1154,8 +1163,17 @@
    *  저장본(편성안 스냅샷) 목록
    * ===================================================================== */
   function SnapshotsModal({ state, onClose }) {
-    const snaps = state.snapshots || [];
+    const all = state.snapshots || [];
     const progName = (id) => (((state.programs || []).find((p) => p.id === id)) || {}).name || '(삭제된 프로그램)';
+    // 프로그램별 · 월별 필터 — 기본값은 지금 보고 있는 프로그램/월
+    const [fProg, setFProg] = useState(state.activeProgram || 'all');
+    const [fYm, setFYm] = useState(`${state.view.year}-${String(state.view.month).padStart(2, '0')}`);
+    const ymKey = (s) => `${s.year}-${String(s.month).padStart(2, '0')}`;
+    const ymList = Array.from(new Set(all.map(ymKey))).sort().reverse();
+    const curYm = `${state.view.year}-${String(state.view.month).padStart(2, '0')}`;
+    if (!ymList.includes(curYm)) ymList.unshift(curYm);
+    const snaps = all.filter((s) =>
+      (fProg === 'all' || s.programId === fProg) && (fYm === 'all' || ymKey(s) === fYm));
     function restore(s) {
       if (!confirm(`[${progName(s.programId)}] ${s.year}년 ${s.month}월 — ${fmtTs(s.ts)} 저장본으로 되돌립니다.\n${progName(s.programId)}의 ${s.month}월 편성만 이 저장본 내용으로 교체됩니다. (다른 프로그램/월은 그대로) 계속할까요?`)) return;
       const r = store.restoreSnapshot(s.id);
@@ -1167,12 +1185,25 @@
       <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick=${onClose}>
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col" onClick=${(e) => e.stopPropagation()}>
           <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200">
-            <h3 class="font-bold text-ink">저장된 편성안 <span class="text-[12px] font-normal text-ink-soft">(${snaps.length})</span></h3>
+            <h3 class="font-bold text-ink">저장된 편성안</h3>
             <button onClick=${onClose} class="text-ink-soft hover:text-brand text-lg leading-none">✕</button>
+          </div>
+          <div class="flex items-center gap-2 px-4 py-2 border-b border-slate-200 flex-wrap">
+            <select value=${fProg} onChange=${(e) => setFProg(e.target.value)} class="text-xs px-2 py-1 rounded border border-slate-300">
+              <option value="all">전체 프로그램</option>
+              ${(state.programs || []).map((pg) => html`<option key=${pg.id} value=${pg.id}>${pg.name}</option>`)}
+            </select>
+            <select value=${fYm} onChange=${(e) => setFYm(e.target.value)} class="text-xs px-2 py-1 rounded border border-slate-300">
+              <option value="all">전체 월</option>
+              ${ymList.map((y) => html`<option key=${y} value=${y}>${y.replace('-', '년 ')}월</option>`)}
+            </select>
+            <span class="text-[12px] font-semibold text-ink ml-1">
+              ${fProg === 'all' ? '전체' : progName(fProg)} · ${fYm === 'all' ? '전체 월' : fYm.replace('-', '년 ') + '월'}
+              — 저장 ${snaps.length}회</span>
           </div>
           <div class="flex-1 overflow-y-auto">
             ${snaps.length === 0
-              ? html`<div class="text-center text-slate-400 py-10 text-sm">저장된 편성안이 없습니다.<br/>편성표에서 “편성 저장”을 누르면 이 시점의 편성안이 기록됩니다.</div>`
+              ? html`<div class="text-center text-slate-400 py-10 text-sm">이 프로그램·월에 저장된 편성안이 없습니다.<br/>편성표에서 “편성 저장”을 누르면 이 시점의 편성안이 기록됩니다.</div>`
               : html`<table class="w-full text-[13px]">
                   <thead class="sticky top-0 bg-slate-50 text-ink-soft text-left">
                     <tr>
@@ -1858,7 +1889,9 @@
             ${msg && html`<span class="text-[12px] ${msg.startsWith('✓') ? 'text-emerald-600' : 'text-brand'}">${msg}</span>`}
           </div>
           <div class="px-4 py-2 text-[11px] text-ink-soft border-b border-slate-100 bg-slate-50">
+            백업은 <b>전체 데이터(모든 프로그램·입찰·편성)의 시점 스냅샷</b>입니다 — 사고 시 그 시각으로 통째로 되돌리는 안전망.
             변경이 있으면 <b>최대 1시간마다 자동 백업</b>되고, 복원 직전에도 자동 백업됩니다. 최근 60개 보관(이전 것은 자동 삭제).
+            프로그램·월별 편성 이력은 여기가 아니라 <b>편성표/최종편성안의 “저장본”</b>에서 확인하세요.
           </div>
           <div class="flex-1 overflow-y-auto">
             ${items === null

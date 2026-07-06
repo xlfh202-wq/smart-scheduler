@@ -1585,9 +1585,15 @@
         return { ok: true, id };
       } catch (e) { return { error: e.message }; }
     }
+    let autoBackupBusy = false;
     function maybeAutoBackup() {
-      if (!serverOk) return;
-      if (Date.now() - lastAutoTs() >= AUTO_MIN * 60000) doBackup('auto');
+      if (!serverOk || autoBackupBusy) return;
+      if (Date.now() - lastAutoTs() >= AUTO_MIN * 60000) {
+        // 시작 시점에 먼저 기록 + 진행 플래그 → 연속 저장 레이스로 같은 분에 백업 여러 개 생기는 것 방지
+        autoBackupBusy = true;
+        setLastAutoTs(Date.now());
+        Promise.resolve(doBackup('auto')).finally(() => { autoBackupBusy = false; });
+      }
     }
     async function listBackups() {
       try {
