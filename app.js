@@ -900,7 +900,9 @@
   /* =====================================================================
    *  최종편성안 (엑셀 레이아웃 표 · 직접 편집 가능)
    * ===================================================================== */
-  function FinalScheduleView({ state, readOnly }) {
+  function FinalScheduleView({ state, readOnly, full }) {
+    // slim: MD 조회용(민감 열 숨김). full+readOnly: 편성팀 — PD와 동일한 전체 열, 편집만 불가
+    const slim = readOnly && !full;
     const prog = activeProgramObj(state);
     const capRef = useRef(null);
     const [saving, setSaving] = useState(false);
@@ -909,7 +911,7 @@
     function saveExcel() {
       if (!window.XLSX) { alert('엑셀 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.'); return; }
       // MD(조회 전용)는 민감 항목(구성·준비물량·가격·마진·달성률·비고) 제외한 축약본으로 출력
-      const header = readOnly
+      const header = slim
         ? ['방송일', '요일', '시간', '상품명', 'PD', '쇼호스트', '스튜디오']
         : ['방송일', '요일', '시간', '상태', '상품명', '내용/타이틀', '구성', '준비물량', '가격', '마진', '최근달성률', 'PD', '쇼호스트', '스튜디오', '비고(PD)'];
       const aoa = [header]; const merges = []; let ri = 1;
@@ -917,7 +919,7 @@
         const p = r.p; const det = (p && p.detail) || {};
         const dnum = Number(r.day.date.slice(8)); const mm = Number(r.day.date.slice(5, 7));
         const items = (p && p.items && p.items.length > 1) ? '\n· ' + p.items.join('\n· ') : '';
-        aoa.push(readOnly
+        aoa.push(slim
           ? [
             r.firstOfDay ? `${mm}/${dnum}` : '', r.firstOfDay ? U.WEEKDAY_KO[r.day.weekday] : '',
             slotName(r.slot), p ? ((p.productName || '') + items) : '',
@@ -939,7 +941,7 @@
       });
       const ws = window.XLSX.utils.aoa_to_sheet(aoa);
       ws['!merges'] = merges;
-      ws['!cols'] = readOnly
+      ws['!cols'] = slim
         ? [{ wch: 7 }, { wch: 5 }, { wch: 12 }, { wch: 30 }, { wch: 8 }, { wch: 8 }, { wch: 8 }]
         : [{ wch: 7 }, { wch: 5 }, { wch: 12 }, { wch: 6 }, { wch: 26 }, { wch: 24 }, { wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 22 }];
       const wb = window.XLSX.utils.book_new();
@@ -1046,15 +1048,15 @@
           <div class="px-3 py-2 border-b-2 border-brand text-[13px] font-bold text-ink">
             ${prog.name} · ${year}년 ${month}월 최종편성안 <span class="font-normal text-ink-soft">(총 ${total}편성)</span>
           </div>
-          <table class=${`w-full ${readOnly ? 'min-w-[700px]' : 'min-w-[1420px]'} text-[12px] border-collapse`}>
+          <table class=${`w-full ${slim ? 'min-w-[700px]' : 'min-w-[1420px]'} text-[12px] border-collapse`}>
             <thead class="sticky top-0">
               <tr>
                 <th class=${th} style=${{ width: '70px' }}>방송일</th>
                 <th class=${th} style=${{ width: '36px' }}>요일</th>
                 <th class=${th} style=${{ width: '104px' }}>시간</th>
-                ${!readOnly && html`<th class=${th} style=${{ width: '58px' }}>상태</th>`}
+                ${!slim && html`<th class=${th} style=${{ width: '58px' }}>상태</th>`}
                 <th class=${th} style=${{ minWidth: '150px' }}>상품명</th>
-                ${!readOnly && html`
+                ${!slim && html`
                   <th class=${th} style=${{ minWidth: '170px' }}>내용 / 타이틀</th>
                   <th class=${th} style=${{ minWidth: '130px' }}>구성</th>
                   <th class=${th} style=${{ width: '78px' }}>준비물량</th>
@@ -1064,11 +1066,11 @@
                 <th class=${th} style=${{ width: '74px' }}>PD</th>
                 <th class=${th} style=${{ width: '74px' }}>쇼호스트</th>
                 <th class=${th} style=${{ width: '64px' }}>스튜디오</th>
-                ${!readOnly && html`<th class=${th} style=${{ minWidth: '140px' }}>비고 (PD)</th>`}
+                ${!slim && html`<th class=${th} style=${{ minWidth: '140px' }}>비고 (PD)</th>`}
               </tr>
             </thead>
             <tbody>
-              ${rows.length === 0 && html`<tr><td class=${td} colspan=${readOnly ? 7 : 15}><div class="text-center text-slate-400 py-8">이 달 편성이 없습니다.</div></td></tr>`}
+              ${rows.length === 0 && html`<tr><td class=${td} colspan=${slim ? 7 : 15}><div class="text-center text-slate-400 py-8">이 달 편성이 없습니다.</div></td></tr>`}
               ${rows.map((r, i) => {
                 const p = r.p; const det = (p && p.detail) || {};
                 const dnum = Number(r.day.date.slice(8));
@@ -1084,9 +1086,11 @@
                     <td class=${`${td} tabular-nums font-medium ${r.compete ? 'text-amber-700' : ''}`}>
                       ${slotName(r.slot)} ${r.compete && html`<span class="text-[10px] text-amber-600">●경쟁</span>`}
                     </td>
-                    ${!readOnly && html`<td class=${`${td} text-center`}>
-                      ${p ? html`<label class="flex items-center justify-center gap-1 text-[11px] cursor-pointer ${pend ? 'text-amber-700 font-semibold' : 'text-ink-soft'}">
-                            <input type="checkbox" checked=${!!pend} onChange=${(e) => store.updatePlacementContent(p.id, { pending: e.target.checked })} /> 미정</label>`
+                    ${!slim && html`<td class=${`${td} text-center`}>
+                      ${p ? (readOnly
+                        ? (pend ? html`<${Badge} color="#d97706">미정<//>` : html`<span class="text-[11px] text-emerald-600">확정</span>`)
+                        : html`<label class="flex items-center justify-center gap-1 text-[11px] cursor-pointer ${pend ? 'text-amber-700 font-semibold' : 'text-ink-soft'}">
+                            <input type="checkbox" checked=${!!pend} onChange=${(e) => store.updatePlacementContent(p.id, { pending: e.target.checked })} /> 미정</label>`)
                         : ''}
                     </td>`}
                     <td class=${`${td} p-0`}>
@@ -1095,14 +1099,14 @@
                             ${Cell(p.productName, (val) => store.updatePlacementContent(p.id, { productName: val }), { color: 'font-semibold text-ink' })}
                             ${(p.items && p.items.length > 1) && html`<span class="shrink-0 text-[10px] text-violet-600">동시 ${p.items.length}착장</span>`}
                             ${det.isNew && html`<span class="shrink-0 text-[10px] text-cyan-600">新</span>`}
-                            ${readOnly && pend && html`<${Badge} color="#d97706">미정<//>`}
+                            ${slim && pend && html`<${Badge} color="#d97706">미정<//>`}
                           </div>
                           ${(p.items && p.items.length > 1) && html`<ul class="px-2 pb-1 text-[11px] text-ink-soft">${p.items.map((it, k) => html`<li key=${k}>· ${it}</li>`)}</ul>`}
                           <div class="px-2 pb-1 text-[10px] text-slate-400">${teamOf(state, p.teamId).name}</div>
                         </div>`
                         : html`<span class="px-2 text-slate-300">—</span>`}
                     </td>
-                    ${!readOnly && html`
+                    ${!slim && html`
                     <td class=${`${td} p-0`}>${p ? html`${Cell(det.note, (val) => store.updatePlacementContent(p.id, { detail: { note: val } }), { ph: '내용/타이틀…' })}
                       <div class="border-t border-dashed border-rose-200">${Cell(det.issue, (val) => store.updatePlacementContent(p.id, { detail: { issue: val } }), { ph: '이슈/특이사항…', color: 'text-rose-500' })}</div>` : ''}</td>
                     <td class=${`${td} p-0`}>${p ? Cell(det.comp, (val) => store.updatePlacementContent(p.id, { detail: { comp: val } }), { ph: '구성…' }) : ''}</td>
@@ -1114,7 +1118,7 @@
                     <td class=${`${td} p-0`}>${p ? castCell(p, 'pd') : ''}</td>
                     <td class=${`${td} p-0`}>${p ? castCell(p, 'host') : ''}</td>
                     <td class=${`${td} p-0`}>${p ? castCell(p, 'studio') : ''}</td>
-                    ${!readOnly && html`<td class=${`${td} p-0`}>${p ? Cell(p.memo, (val) => store.updatePlacementContent(p.id, { memo: val }), { ph: 'PD 코멘트…', color: 'text-violet-700' }) : ''}</td>`}
+                    ${!slim && html`<td class=${`${td} p-0`}>${p ? Cell(p.memo, (val) => store.updatePlacementContent(p.id, { memo: val }), { ph: 'PD 코멘트…', color: 'text-violet-700' }) : ''}</td>`}
                   </tr>`;
               })}
             </tbody>
@@ -1218,8 +1222,9 @@
   /* =====================================================================
    *  MD 입찰 보드
    * ===================================================================== */
-  function BidBoard({ state }) {
+  function BidBoard({ state, readOnly }) {
     const teams = state.teams || []; // MD 입찰은 전체 팀 대상(부문별 그룹 표시)
+    const [detailBid, setDetailBid] = useState(null); // 조회 전용: 칩 클릭 → 읽기 상세
     const schema = programSchema(state);
     const fashion = schema === 'fashion';
     const isMain = state.activeProgram === U.MAIN_PROGRAM;
@@ -1252,10 +1257,12 @@
         <div class="p-4 space-y-3 max-w-[1100px]">
           <div class="flex items-center justify-between gap-2 flex-wrap">
             <h2 class="text-base font-bold text-ink">${teamOf(state, team).name} 입찰 · ${state.view.year}년 ${state.view.month}월 — 총 ${teamBids.length}건</h2>
-            <button onClick=${() => setAddDayOpen(true)}
-              class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand">+ 편성일 추가</button>
+            ${!readOnly && html`<button onClick=${() => setAddDayOpen(true)}
+              class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand">+ 편성일 추가</button>`}
           </div>
-          <div class="text-[11px] text-ink-soft -mt-1">💡 날짜 변경: 입찰 카드를 <b>드래그해 다른 날짜 칸에 놓거나</b>, 카드 클릭 → <b>희망 편성일</b>을 바꿔 저장하면 이동됩니다.</div>
+          ${readOnly
+            ? html`<div class="text-[11px] text-ink-soft -mt-1">🔎 조회 전용 — 입찰 카드를 클릭하면 상세 정보를 볼 수 있습니다.</div>`
+            : html`<div class="text-[11px] text-ink-soft -mt-1">💡 날짜 변경: 입찰 카드를 <b>드래그해 다른 날짜 칸에 놓거나</b>, 카드 클릭 → <b>희망 편성일</b>을 바꿔 저장하면 이동됩니다.</div>`}
           ${days.length === 0 && html`<div class="text-sm text-slate-400 py-8 text-center">이 달에는 편성일이 없습니다. 위 “+ 편성일 추가”로 추가하세요.</div>`}
           ${days.map((day) => {
             const shownSlots = day.slots.filter((slot) => !isMain || slot.std || slot.manual || state.bids.some((b) => b.slotId === slot.id));
@@ -1265,6 +1272,7 @@
               onDragLeave=${(e) => { if (e.currentTarget === e.target) e.currentTarget.classList.remove('drop-active'); }}
               onDrop=${(e) => {
                 e.preventDefault(); e.currentTarget.classList.remove('drop-active');
+                if (readOnly) return;
                 const pl = drag.read(e);
                 if (!pl || pl.kind !== 'bidmove') return;
                 const bid = state.bids.find((x) => x.id === pl.id);
@@ -1276,24 +1284,26 @@
               <div class="flex items-center justify-between px-3 py-1.5 bg-slate-100">
                 <span class="flex items-center gap-2">
                   <span class="font-semibold text-[13px] text-ink">${fmtDay(day)}</span>
-                  ${fashion && html`<${AirTimeButton} day=${day} />`}
+                  ${fashion && (readOnly
+                    ? html`<span class="text-[11px] text-ink-soft">${day.airTime || ''}</span>`
+                    : html`<${AirTimeButton} day=${day} />`)}
                 </span>
-                <div class="flex items-center gap-2 text-[11px] text-ink-soft">
+                ${!readOnly && html`<div class="flex items-center gap-2 text-[11px] text-ink-soft">
                   ${!fashion && html`<button onClick=${() => setSlotModalDay(day.id)} class="hover:text-brand">+ 시간대</button>`}
                   ${!fashion && html`<button onClick=${() => store.addSlot(day.id, { order: true })} class="hover:text-brand">+ 순번</button>`}
                   <button onClick=${() => confirm(`${fmtDay(day)} 편성일을 삭제할까요? (입찰·편성 포함)`) && store.removeDay(day.id)}
                     class="hover:text-brand">편성일 삭제</button>
-                </div>
+                </div>`}
               </div>
               ${fashion ? html`
                 <div class="px-3 py-2.5">
                   <div class="flex flex-wrap gap-1.5 items-start">
-                    ${teamBids.filter((b) => b.dayId === day.id).map((b) => html`<${BidChip} key=${b.id} state=${state} b=${b}
-                        onEdit=${() => setModal({ dayId: day.id, bid: b })} />`)}
-                    <button onClick=${() => setModal({ dayId: day.id })}
+                    ${teamBids.filter((b) => b.dayId === day.id).map((b) => html`<${BidChip} key=${b.id} state=${state} b=${b} readOnly=${readOnly}
+                        onEdit=${() => (readOnly ? setDetailBid(b) : setModal({ dayId: day.id, bid: b }))} />`)}
+                    ${!readOnly && html`<button onClick=${() => setModal({ dayId: day.id })}
                       class="text-[12px] px-2 py-1 rounded border border-dashed border-slate-300 text-ink-soft hover:border-brand hover:text-brand self-start">
                       + 입찰
-                    </button>
+                    </button>`}
                   </div>
                 </div>`
               : html`
@@ -1305,19 +1315,21 @@
                     <div key=${slot.id} class="flex gap-3 px-3 py-2">
                       <div class="w-28 shrink-0 pt-0.5">
                         <div class="flex items-center gap-1">
-                          <${SlotTimeButton} slot=${slot} className="text-[13px] font-bold tabular-nums" />
-                          <button title="이 시간대 삭제" onClick=${() => confirm(`${slotName(slot)} 삭제할까요?`) && store.removeSlot(slot.id)}
-                            class="text-slate-300 hover:text-brand text-[11px] leading-none">✕</button>
+                          ${readOnly
+                            ? html`<span class="text-[13px] font-bold tabular-nums">${slotName(slot)}</span>`
+                            : html`<${SlotTimeButton} slot=${slot} className="text-[13px] font-bold tabular-nums" />
+                              <button title="이 시간대 삭제" onClick=${() => confirm(`${slotName(slot)} 삭제할까요?`) && store.removeSlot(slot.id)}
+                                class="text-slate-300 hover:text-brand text-[11px] leading-none">✕</button>`}
                         </div>
                         ${slot.start && slot.end && html`<div class="text-[11px] text-ink-soft">${U.slotDuration(slot)}분</div>`}
                       </div>
                       <div class="flex-1 flex flex-wrap gap-1.5 items-start">
-                        ${bids.map((b) => html`<${BidChip} key=${b.id} state=${state} b=${b}
-                            onEdit=${() => setModal({ dayId: day.id, slotId: slot.id, bid: b })} />`)}
-                        <button onClick=${() => setModal({ dayId: day.id, slotId: slot.id })}
+                        ${bids.map((b) => html`<${BidChip} key=${b.id} state=${state} b=${b} readOnly=${readOnly}
+                            onEdit=${() => (readOnly ? setDetailBid(b) : setModal({ dayId: day.id, slotId: slot.id, bid: b }))} />`)}
+                        ${!readOnly && html`<button onClick=${() => setModal({ dayId: day.id, slotId: slot.id })}
                           class="text-[12px] px-2 py-1 rounded border border-dashed border-slate-300 text-ink-soft hover:border-brand hover:text-brand self-start">
                           + 입찰
-                        </button>
+                        </button>`}
                       </div>
                     </div>`;
                 })}
@@ -1326,12 +1338,13 @@
           })}
         </div>
         ${modal && html`<${BidModal} state=${state} team=${team} schema=${schema} ctx=${modal} onClose=${() => setModal(null)} />`}
+        ${detailBid && html`<${BidDetailModal} state=${state} b=${detailBid} onClose=${() => setDetailBid(null)} />`}
         ${addDayOpen && html`<${AddDayModal} state=${state} onClose=${() => setAddDayOpen(false)} />`}
         ${slotModalDay && html`<${AddSlotModal} day=${state.days.find((d) => d.id === slotModalDay)} onClose=${() => setSlotModalDay(null)} />`}
       </div>`;
   }
 
-  function BidChip({ state, b, onEdit }) {
+  function BidChip({ state, b, onEdit, readOnly }) {
     const t = teamOf(state, b.teamId);
     const pr = b.product;
     const items = pr.items || [];
@@ -1341,7 +1354,7 @@
                  pr.sme && '중소', pr.special && '특약'].filter(Boolean).join(' / ');
     return html`
       <button onClick=${onEdit} title=${tip}
-        draggable=${true} onDragStart=${(e) => drag.start(e, 'bidmove', b.id)}
+        draggable=${!readOnly} onDragStart=${(e) => (readOnly ? undefined : drag.start(e, 'bidmove', b.id))}
         class=${`card-drag text-left rounded-md border bg-white px-2 py-1 hover:shadow-sm ${isGroup ? 'min-w-[220px]' : ''}`}
         style=${{ borderLeft: `4px solid ${t.color}` }}>
         <div class="flex items-center gap-1">
@@ -2097,15 +2110,17 @@
     const teamList = role === 'md'
       ? Array.from(new Set((teams || []).map((t) => t.name)))
       : ((pdTeams && pdTeams.length) ? pdTeams : (window.AUTH.pdTeams || []));
-    const needsTeam = role !== 'admin'; // 관리자는 비밀번호만 입력
+    const fixedTeam = r.fixedTeam || '';           // 편성팀 등: 소속 고정 → 이름만 입력
+    const needsTeam = role !== 'admin' && !fixedTeam;
+    const needsName = role !== 'admin';
     function submit(e) {
       e && e.preventDefault();
-      if (needsTeam) {
-        if (!team) { setErr('팀(소속)을 선택하세요.'); return; }
-        if (!name.trim()) { setErr('이름을 입력하세요.'); return; }
-      }
+      if (needsTeam && !team) { setErr('팀(소속)을 선택하세요.'); return; }
+      if (needsName && !name.trim()) { setErr('이름을 입력하세요.'); return; }
       if (pw !== r.password) { setErr('비밀번호가 올바르지 않습니다.'); return; }
-      onLogin(needsTeam ? { role, team, name: name.trim() } : { role, team: '', name: '관리자' });
+      onLogin(needsName
+        ? { role, team: fixedTeam || team, name: name.trim() }
+        : { role, team: '', name: '관리자' });
     }
     return html`
       <div class="min-h-screen grid place-items-center bg-slate-100 p-4">
@@ -2118,7 +2133,7 @@
             </div>
           </div>
           <div class="text-[12px] font-medium text-ink-soft mt-4 mb-1.5">역할 선택</div>
-          <div class="grid grid-cols-3 gap-2">
+          <div class="grid grid-cols-2 gap-2">
             ${Object.entries(roles).map(([key, cfg]) => html`
               <button type="button" key=${key} onClick=${() => { setRole(key); setTeam(''); setErr(''); }}
                 class=${`rounded-lg border px-2 py-2 text-center transition ${role === key ? 'border-transparent text-white shadow' : 'border-slate-300 bg-white text-ink hover:border-slate-400'}`}
@@ -2135,7 +2150,8 @@
                 <option value="">${role === 'md' ? '입찰 팀 선택' : 'PD 구분 선택'}</option>
                 ${teamList.map((t) => html`<option key=${t} value=${t}>${t}</option>`)}
               </select>
-            </label>
+            </label>`}
+            ${needsName && html`
             <label class="block">
               <div class="text-[12px] font-medium text-ink-soft mb-1">이름 <span class="text-brand">*</span></div>
               <input value=${name} onInput=${(e) => setName(e.target.value)} class=${inputCls}
@@ -2143,10 +2159,11 @@
             </label>`}
             <label class="block">
               <div class="text-[12px] font-medium text-ink-soft mb-1">${r.label} 공용 비밀번호 <span class="text-brand">*</span></div>
-              <input type="password" value=${pw} onInput=${(e) => setPw(e.target.value)} class=${inputCls} placeholder="비밀번호" autofocus=${!needsTeam} />
+              <input type="password" value=${pw} onInput=${(e) => setPw(e.target.value)} class=${inputCls} placeholder="비밀번호" autofocus=${!needsName} />
             </label>
           </div>
-          ${!needsTeam && html`<div class="mt-2 text-[12px] text-ink-soft">관리자는 비밀번호만 입력하면 입장합니다.</div>`}
+          ${!needsName && html`<div class="mt-2 text-[12px] text-ink-soft">관리자는 비밀번호만 입력하면 입장합니다.</div>`}
+          ${fixedTeam && html`<div class="mt-2 text-[12px] text-ink-soft">${r.label}은 조회 전용입니다 — 이름과 비밀번호만 입력하면 입장합니다.</div>`}
           ${err && html`<div class="mt-2 text-[12px] text-brand">${err}</div>`}
           <button type="submit" class="mt-4 w-full py-2 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark">입장</button>
           <div class="mt-3 text-[11px] text-slate-400 leading-relaxed">
@@ -2200,7 +2217,13 @@
     }, []);
     // 로그인 식별을 데이터 계층에 반영 → 이후 모든 변경이 이 이름으로 기록됨
     const displayName = (a) => `${a && a.team ? a.team + ' ' : ''}${(a && a.name) || ''}`.trim();
-    useEffect(() => { if (auth) store.setUser(displayName(auth)); }, [auth]);
+    useEffect(() => { if (auth) store.setUser(displayName(auth), auth.role); }, [auth]);
+    // 동시 접속자 목록 (Realtime Presence)
+    const [presence, setPresence] = useState([]);
+    useEffect(() => {
+      window.__PRESENCE_UPDATE = (list) => setPresence(list || []);
+      return () => { window.__PRESENCE_UPDATE = null; };
+    }, []);
     // (고정 편성시간대는 월 이동·프로그램 선택 시 자동 생성 — 로드 직후 자동저장은 제거:
     //  하이드레이트 전 옛 로컬 상태가 서버로 되돌아가는 것을 방지)
 
@@ -2268,7 +2291,7 @@
 
     function doLogin(a) {
       try { localStorage.setItem(window.AUTH.storageKey, JSON.stringify({ ...a, ts: Date.now() })); } catch (e) {}
-      store.setUser(displayName(a));
+      store.setUser(displayName(a), a.role);
       setTab(window.AUTH.roles[a.role].tabs[0]);
       setAuth(a);
     }
@@ -2316,6 +2339,8 @@
                 class=${tabCls(curTab === 'final')}>최종편성안</button>`}
               ${allowed.includes('finalview') && html`<button onClick=${() => guardTab('finalview')}
                 class=${tabCls(curTab === 'finalview')}>최종편성안 조회</button>`}
+              ${allowed.includes('finalpgm') && html`<button onClick=${() => guardTab('finalpgm')}
+                class=${tabCls(curTab === 'finalpgm')}>최종편성안</button>`}
             </nav>
             <div class="ml-auto flex items-center gap-2 flex-wrap justify-end">
               <span class="flex items-center gap-1 text-[12px] px-2 py-1 rounded-full whitespace-nowrap shrink-0"
@@ -2323,6 +2348,27 @@
                 <span class="w-1.5 h-1.5 rounded-full" style=${{ background: roleCfg.color }}></span>
                 <b>${roleCfg.label}</b><span class="opacity-80">· ${displayName(auth)}</span>
               </span>
+              ${(() => {
+                // 동시 접속자 아바타 (이름+역할 기준 중복 제거, 최대 5명 + 나머지 +N)
+                const seen = new Set(); const uniq = [];
+                presence.forEach((u) => {
+                  if (!u || !u.name) return;
+                  const k = (u.role || '') + '|' + u.name;
+                  if (!seen.has(k)) { seen.add(k); uniq.push(u); }
+                });
+                if (uniq.length === 0) return '';
+                const shown = uniq.slice(0, 5);
+                const extra = uniq.length - shown.length;
+                const initialOf = (n) => { const parts = String(n).trim().split(/\s+/); return (parts[parts.length - 1] || '?').charAt(0); };
+                const colorOf = (r) => (window.AUTH.roles[r] && window.AUTH.roles[r].color) || '#64748b';
+                return html`<span class="flex items-center -space-x-1.5 shrink-0"
+                  title=${`동시 접속 ${uniq.length}명: ` + uniq.map((u) => `${u.name}(${(window.AUTH.roles[u.role] || {}).label || '?'})`).join(', ')}>
+                  ${shown.map((u, i) => html`<span key=${i}
+                    class="w-6 h-6 rounded-full grid place-items-center text-[10px] font-bold text-white border-2 border-white shadow-sm"
+                    style=${{ background: colorOf(u.role) }}>${initialOf(u.name)}</span>`)}
+                  ${extra > 0 && html`<span class="w-6 h-6 rounded-full grid place-items-center text-[10px] font-bold bg-slate-400 text-white border-2 border-white shadow-sm">+${extra}</span>`}
+                </span>`;
+              })()}
               <div class="flex items-center rounded border border-slate-300 bg-white overflow-hidden shrink-0">
                 <button onClick=${() => store.undo()} disabled=${!store.canUndo()}
                   class="px-2 py-1.5 text-[13px] hover:bg-slate-100 disabled:opacity-30 disabled:cursor-default"
@@ -2353,7 +2399,8 @@
           ${curTab === 'schedule' ? html`<${ScheduleView} state=${state} onSaved=${() => setTab('final')} />`
             : curTab === 'final' ? html`<${FinalScheduleView} state=${state} />`
             : curTab === 'finalview' ? html`<${FinalScheduleView} state=${state} readOnly=${true} />`
-            : html`<${BidBoard} state=${state} />`}
+            : curTab === 'finalpgm' ? html`<${FinalScheduleView} state=${state} readOnly=${true} full=${true} />`
+            : html`<${BidBoard} state=${state} readOnly=${!!roleCfg.viewOnly} />`}
         </main>
 
         ${history && html`<${HistoryModal} state=${state} isAdmin=${roleCfg.isAdmin} onClose=${() => setHistory(false)} />`}

@@ -34,6 +34,17 @@ window.AUTH = {
       canManage: true,
       color: '#da291c',
     },
+    pgm: {
+      label: '편성팀',
+      desc: '입찰 · 최종편성안 조회',
+      password: 'ltpgm2026',
+      // 조회 전용: 최종편성안(PD와 동일한 전체 항목, 읽기) + MD 입찰보드(읽기)
+      tabs: ['finalpgm', 'bids'],
+      canManage: false,
+      viewOnly: true,     // 편집 불가(조회 전용)
+      fixedTeam: '편성팀', // 로그인 시 팀 선택 없이 이름만 입력
+      color: '#0d9488',
+    },
     admin: {
       label: '관리자',
       desc: '편성 + 관리 권한',

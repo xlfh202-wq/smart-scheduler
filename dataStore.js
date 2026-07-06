@@ -1674,6 +1674,39 @@
         }).subscribe();
     }
 
+    /* ----- 동시 접속자 표시 (Realtime Presence) ----- */
+    let presenceChannel = null, presenceReady = false, me = null;
+    function trackPresence() {
+      if (!presenceChannel || !presenceReady) return;
+      try {
+        if (me && me.name) presenceChannel.track(me);
+        else presenceChannel.untrack();
+      } catch (e) {}
+    }
+    function setupPresence() {
+      if (presenceChannel) return;
+      try {
+        presenceChannel = client.channel('online_users', { config: { presence: { key: uid() + uid() } } });
+        presenceChannel.on('presence', { event: 'sync' }, () => {
+          try {
+            const st = presenceChannel.presenceState();
+            const list = Object.values(st).flat().map((m) => ({ name: m.name, role: m.role }));
+            global.__PRESENCE_UPDATE && global.__PRESENCE_UPDATE(list);
+          } catch (e) {}
+        }).subscribe((status) => {
+          if (status === 'SUBSCRIBED') { presenceReady = true; trackPresence(); }
+        });
+      } catch (e) {}
+    }
+    // setUser 확장: 로그인 이름/역할을 presence로 공유 (로그아웃 시 목록에서 제거)
+    const origSetUser = store.setUser.bind(store);
+    store.setUser = (name, role) => {
+      origSetUser(name);
+      me = name ? { name, role: role || null } : null;
+      setupPresence();
+      trackPresence();
+    };
+
     (async () => {
       try {
         const { data, error } = await client.from('app_state')
