@@ -390,7 +390,8 @@
           </div>
           <div class="flex items-center gap-1 shrink-0 text-ink-soft">
             ${slot.start && slot.end && html`<button title="시간 분할" onClick=${() => setSplitOpen(true)} class="hover:text-brand text-xs px-1">⊟</button>`}
-            <button title="시간대 삭제" onClick=${() => confirm('이 시간대를 삭제할까요? 편성도 함께 삭제됩니다.') && store.removeSlot(slot.id)}
+            <button title="시간대 삭제" onClick=${() => { const n = state.placements.filter((x) => x.slotId === slot.id).length;
+              if (confirm(`이 시간대를 삭제할까요?${n ? `\n배정된 상품 ${n}개는 삭제되지 않고 입찰 풀(미편성)로 돌아갑니다.` : ''}`)) store.removeSlot(slot.id); }}
               class="hover:text-brand text-xs px-1">✕</button>
           </div>
         </div>
@@ -516,7 +517,12 @@
             <button onClick=${() => setQuickOpen(true)} class="font-semibold bg-white/20 hover:bg-white/30 px-1.5 py-0.5 rounded">+ 상품</button>
             <button onClick=${() => setAddOpen(true)} class="hover:underline">+ 시간대</button>
             <button onClick=${() => store.addSlot(day.id, { order: true })} class="hover:underline">+ 순번</button>
-            <button onClick=${() => confirm(`${fmtDay(day)} 편성일을 삭제할까요?`) && store.removeDay(day.id)}
+            <button onClick=${() => {
+                const nP = state.placements.filter((x) => day.slots.some((sl) => sl.id === x.slotId)).length;
+                const placedIds = new Set(state.placements.map((x) => x.sourceBidId).filter(Boolean));
+                const nB = state.bids.filter((b) => b.dayId === day.id && !placedIds.has(b.id)).length; // 미편성 입찰만(중복 집계 방지)
+                const n = nP + nB;
+              if (confirm(`${fmtDay(day)} 편성일을 삭제할까요?${n ? `\n이 날의 상품·입찰 ${n}건은 삭제되지 않고 입찰 풀로 돌아갑니다(희망일은 가까운 다른 날짜로 표시).` : ''}`)) store.removeDay(day.id); }}
               class="hover:underline opacity-80">삭제</button>
           </div>
         </div>
@@ -676,7 +682,9 @@
           ${bids.map((b) => {
             const t = teamOf(state, b.teamId);
             const placed = placedBidIds.has(b.id);
-            const slotInfo = U.slotLabel(b.slotId);
+            const slotInfo = b.slotId ? U.slotLabel(b.slotId)
+              : (() => { const d = state.days.find((x) => x.id === b.dayId);
+                  return d ? `${Number(d.date.slice(8))}일(${U.WEEKDAY_KO[d.weekday]}) 시간 미정` : '시간 미정'; })();
             const pr = b.product;
             const isPrev = dayMonth[b.dayId] === prevKey;
             return html`
@@ -1322,7 +1330,8 @@
                 ${!readOnly && html`<div class="flex items-center gap-2 text-[11px] text-ink-soft">
                   ${!fashion && html`<button onClick=${() => setSlotModalDay(day.id)} class="hover:text-brand">+ 시간대</button>`}
                   ${!fashion && html`<button onClick=${() => store.addSlot(day.id, { order: true })} class="hover:text-brand">+ 순번</button>`}
-                  <button onClick=${() => confirm(`${fmtDay(day)} 편성일을 삭제할까요? (입찰·편성 포함)`) && store.removeDay(day.id)}
+                  <button onClick=${() => { const n = state.bids.filter((b) => b.dayId === day.id).length;
+                    if (confirm(`${fmtDay(day)} 편성일을 삭제할까요?${n ? `\n이 날의 입찰 ${n}건은 삭제되지 않고 가까운 다른 날짜로 옮겨집니다.` : ''}`)) store.removeDay(day.id); }}
                     class="hover:text-brand">편성일 삭제</button>
                 </div>`}
               </div>
@@ -1349,7 +1358,8 @@
                           ${readOnly
                             ? html`<span class="text-[13px] font-bold tabular-nums">${slotName(slot)}</span>`
                             : html`<${SlotTimeButton} slot=${slot} className="text-[13px] font-bold tabular-nums" />
-                              <button title="이 시간대 삭제" onClick=${() => confirm(`${slotName(slot)} 삭제할까요?`) && store.removeSlot(slot.id)}
+                              <button title="이 시간대 삭제" onClick=${() => { const n = state.bids.filter((b) => b.slotId === slot.id).length;
+                                if (confirm(`${slotName(slot)} 삭제할까요?${n ? `\n이 시간대의 입찰 ${n}건은 유지됩니다(다른 시간대/시간 미정으로 표시).` : ''}`)) store.removeSlot(slot.id); }}
                                 class="text-slate-300 hover:text-brand text-[11px] leading-none">✕</button>`}
                         </div>
                         ${slot.start && slot.end && html`<div class="text-[11px] text-ink-soft">${U.slotDuration(slot)}분</div>`}
@@ -1364,6 +1374,18 @@
                       </div>
                     </div>`;
                 })}
+                ${(() => {
+                  // 슬롯이 삭제되어 시간 미정 상태가 된 입찰 — 잃어버리지 않게 별도 행으로 노출
+                  const un = teamBids.filter((b) => b.dayId === day.id && !day.slots.some((sl) => sl.id === b.slotId));
+                  if (!un.length) return '';
+                  return html`<div class="flex gap-3 px-3 py-2 bg-amber-50/60">
+                    <div class="w-28 shrink-0 pt-0.5 text-[12px] font-bold text-amber-700">시간 미정</div>
+                    <div class="flex-1 flex flex-wrap gap-1.5 items-start">
+                      ${un.map((b) => html`<${BidChip} key=${b.id} state=${state} b=${b} readOnly=${readOnly}
+                        onEdit=${() => (readOnly ? setDetailBid(b) : setModal({ dayId: day.id, slotId: day.slots[0] && day.slots[0].id, bid: b }))} />`)}
+                    </div>
+                  </div>`;
+                })()}
               </div>`}
             </div>`;
           })}

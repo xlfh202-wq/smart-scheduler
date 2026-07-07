@@ -1181,13 +1181,23 @@
       removeSlot(slotId) {
         const f = findSlot(slotId);
         if (!f) return;
-        const had = state.placements.filter((p) => p.slotId === slotId);
-        state.bids = state.bids.filter((b) => b.slotId !== slotId);
+        const day = f.day;
+        const placed = state.placements.filter((p) => p.slotId === slotId);
+        // 상품 보존: 수기 편성은 입찰로 변환해 풀로 복귀, 입찰 연결 편성은 편성만 해제(입찰이 풀에 남음)
+        placed.forEach((p) => {
+          if (!p.sourceBidId) {
+            const product = { name: p.productName, ...(p.detail || {}), durationMin: p.durationMin, items: p.items };
+            state.bids.push(stamp({ id: uid(), teamId: p.teamId, dayId: day.id, slotId: null, product, createdAt: nowISO() }));
+          }
+        });
         state.placements = state.placements.filter((p) => p.slotId !== slotId);
         const lbl = (f.slot.start && f.slot.end) ? `${f.slot.start}~${f.slot.end}` : (f.slot.label || '슬롯');
-        f.day.slots = f.day.slots.filter((s) => s.id !== slotId);
+        day.slots = day.slots.filter((s) => s.id !== slotId);
+        // 이 슬롯을 희망슬롯으로 가진 입찰은 같은 날의 남은 첫 슬롯으로 재지정(없으면 시간 미정)
+        const fb = day.slots[0] ? day.slots[0].id : null;
+        state.bids.forEach((b) => { if (b.slotId === slotId) b.slotId = fb; });
         log({ action: '슬롯삭제', from: lbl,
-              detail: had.length ? `편성 ${had.length}건 함께 삭제` : '' });
+              detail: placed.length ? `상품 ${placed.length}건 입찰 풀로 복귀` : '' });
         emit();
       },
       addDay(dateStr) {
@@ -1207,13 +1217,39 @@
         const day = state.days.find((d) => d.id === dayId);
         if (!day) return;
         const slotIds = new Set(day.slots.map((s) => s.id));
+        // 옮겨갈 가장 가까운 같은 프로그램의 다른 날짜 (상품 보존용)
+        const others = state.days.filter((d) => d.programId === day.programId && d.id !== dayId);
+        let target = null;
+        if (others.length) {
+          const t0 = new Date(day.date + 'T00:00:00').getTime();
+          target = others.reduce((best, d) => {
+            const diff = Math.abs(new Date(d.date + 'T00:00:00').getTime() - t0);
+            return (!best || diff < best.diff) ? { d, diff } : best;
+          }, null).d;
+        }
+        // 수기 편성(입찰 없음)은 입찰로 변환해 보존 (대체 날짜가 있을 때)
+        state.placements.filter((p) => slotIds.has(p.slotId)).forEach((p) => {
+          if (!p.sourceBidId && target) {
+            const product = { name: p.productName, ...(p.detail || {}), durationMin: p.durationMin, items: p.items };
+            state.bids.push(stamp({ id: uid(), teamId: p.teamId, dayId: target.id, slotId: null, product, createdAt: nowISO() }));
+          }
+        });
         state.placements = state.placements.filter((p) => !slotIds.has(p.slotId));
+        // 이 날을 희망일로 가진 입찰 → 가까운 날짜로 이동해 풀에 보존 (대체 날짜 없으면 함께 삭제)
+        let moved = 0;
+        if (target) {
+          const fb = target.slots[0] ? target.slots[0].id : null;
+          state.bids.forEach((b) => { if (b.dayId === dayId) { b.dayId = target.id; b.slotId = fb; moved++; } });
+        } else {
+          state.bids = state.bids.filter((b) => b.dayId !== dayId);
+        }
         state.days = state.days.filter((d) => d.id !== dayId);
         // 고정 스케줄 날짜였다면 재생성 방지용으로 숨김 목록에 기록
         state.hiddenDays = state.hiddenDays || [];
         const key = day.programId + '|' + day.date;
         if (!state.hiddenDays.includes(key)) state.hiddenDays.push(key);
-        log({ action: '편성일삭제', from: day.date });
+        log({ action: '편성일삭제', from: day.date,
+              detail: moved ? `상품 ${moved}건 입찰 풀로 복귀 (희망일 ${target.date}로 이동)` : '' });
         emit();
       },
 
