@@ -607,7 +607,7 @@
         </div>
         <${Field} label="팀명">
           <select value=${team} onChange=${(e) => setTeam(e.target.value)} class=${inputCls}>
-            ${teams.map((t) => html`<option key=${t.id} value=${t.id}>${t.name}</option>`)}
+            ${teamOptions(state)}
           </select>
         <//>
         <div class="text-[12px] text-ink-soft">${orderMode ? '부(1부·2부·3부)에 편성됩니다. 방송시간은 날짜 옆에서 수정하세요.' : '시간을 입력하면 해당 시간대(시작~시작+노출분)로 자동 반영됩니다.'} 구성·가격 등은 최종편성안에서 보강하세요.</div>
