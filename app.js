@@ -147,7 +147,7 @@
               <${Badge} color=${team.color}>${team.name}<//>
               ${items.length > 1 && html`<${Badge} color="#7c3aed" title="동시 노출 착장 수">동시 ${items.length}착장<//>`}
               ${det.isNew && html`<${Badge} color="#0891b2">신상품<//>`}
-              ${det.special && html`<${Badge} color="#da291c">특약<//>`}
+              ${det.special && html`<${Badge} color="#da291c">특약${det.specialNote ? ' ' + det.specialNote : ''}<//>`}
               ${p.moveCount > 0 && html`<${Badge} color="#da291c" title="편성 이동 횟수">↔ ${p.moveCount}회<//>`}
               ${p.durationMin && html`<${Badge}>${p.durationMin}분<//>`}
             </div>
@@ -1404,7 +1404,7 @@
     const isGroup = items.length > 1;
     const tip = [pr.note && '내용:' + pr.note, pr.issue && '이슈:' + pr.issue, pr.comp && '구성:' + pr.comp,
                  pr.price && '가격:' + pr.price, pr.margin && '마진:' + pr.margin,
-                 pr.sme && '중소', pr.special && '특약'].filter(Boolean).join(' / ');
+                 pr.sme && '중소', pr.special && ('특약' + (pr.specialNote ? ' ' + pr.specialNote : ''))].filter(Boolean).join(' / ');
     return html`
       <button onClick=${onEdit} title=${tip}
         draggable=${!readOnly} onDragStart=${(e) => (readOnly ? undefined : drag.start(e, 'bidmove', b.id))}
@@ -1423,7 +1423,7 @@
         <div class="mt-0.5 flex flex-wrap gap-1">
           ${pr.durationMin && html`<${Badge}>${pr.durationMin}분<//>`}
           ${pr.sme && html`<${Badge} color="#16a34a">중소<//>`}
-          ${pr.special && html`<${Badge} color="#da291c">특약<//>`}
+          ${pr.special && html`<${Badge} color="#da291c">특약${pr.specialNote ? ' ' + pr.specialNote : ''}<//>`}
           ${pr.groupCode && html`<${Badge} title="그룹코드">${pr.groupCode}<//>`}
         </div>
       </button>`;
@@ -1440,6 +1440,7 @@
       name: init.name || '', note: init.note || '', issue: init.issue || '',
       comp: init.comp || '', prep: init.prep || '', price: init.price || '', margin: init.margin || '',
       durationMin: init.durationMin || '', sme: !!init.sme, special: !!init.special, isNew: !!init.isNew,
+      specialNote: init.specialNote || '',
       groupCode: init.groupCode || '', recent: recent3(init.recent),
       items: (init.items || []).join('\n'), // 동시 묶음 상품 목록
     });
@@ -1460,6 +1461,39 @@
     const [end, setEnd] = useState((initSlot && initSlot.end) || '21:45');
     const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
     const setChk = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.checked }));
+    // 노출분 ↔ 시작/종료 시간 자동 연동
+    const [durStr, setDurStr] = useState(() => {
+      const st = (initSlot && initSlot.start) || '', en = (initSlot && initSlot.end) || '';
+      const d = (st && en) ? (U.toMin(en) - U.toMin(st) + 1440) % 1440 : 0;
+      return d > 0 ? String(d) : '';
+    });
+    const onDurChange = (e) => {
+      const v = e.target.value.replace(/[^\d]/g, '');
+      setDurStr(v);
+      const n = parseInt(v, 10);
+      if (/^\d{1,2}:\d{2}$/.test(start) && n > 0) setEnd(U.toHHMM((U.toMin(start) + n) % 1440)); // 노출분 입력 → 종료 자동
+    };
+    const onStartChange = (v) => {
+      setStart(v);
+      const n = parseInt(durStr, 10);
+      if (/^\d{1,2}:\d{2}$/.test(v) && n > 0) setEnd(U.toHHMM((U.toMin(v) + n) % 1440)); // 시작 변경 → 노출분 유지한 채 종료 이동
+    };
+    const onEndChange = (v) => {
+      setEnd(v);
+      if (/^\d{1,2}:\d{2}$/.test(start) && /^\d{1,2}:\d{2}$/.test(v)) {
+        const d = (U.toMin(v) - U.toMin(start) + 1440) % 1440;
+        if (d > 0) setDurStr(String(d));
+      }
+    };
+    // 준비물량: 금액(억)·수량(세트) 분리 입력, 저장 시 "N억 / N세트"로 합침 (기존 텍스트는 보존)
+    const prepStr0 = String(init.prep || '');
+    const pm0 = prepStr0.match(/([\d.,]+)\s*억/);
+    const pq0 = prepStr0.match(/([\d.,]+)\s*세트/);
+    const [prepAmt, setPrepAmt] = useState(pm0 ? pm0[1] : '');
+    const [prepQty, setPrepQty] = useState(pq0 ? pq0[1].replace(/,/g, '') : '');
+    const prepFallback = (!pm0 && !pq0) ? prepStr0 : '';
+    // 마진: 숫자만 입력하면 % 자동
+    const marginBlur = () => setF((st) => (/^\d+(\.\d+)?$/.test((st.margin || '').trim()) ? { ...st, margin: st.margin.trim() + '%' } : st));
 
     const monthDays = daysInView(state);
     const day = state.days.find((d) => d.id === dayId) || monthDays[0];
@@ -1473,9 +1507,16 @@
       if (!name) { alert('상품명을 입력하거나 동시 묶음 상품을 입력하세요.'); return; }
       // 수정 중 희망 편성일을 바꿨으면 → 해당 일자로 입찰 이동 (이후 시간/슬롯 갱신은 새 날짜 기준)
       if (b && dayId && dayId !== b.dayId) store.moveBidToDay(b.id, dayId);
+      const prep = [
+        prepAmt.trim() && prepAmt.trim() + '억',
+        prepQty.trim() && Number(prepQty.trim().replace(/,/g, '')).toLocaleString() + '세트',
+      ].filter(Boolean).join(' / ') || prepFallback;
       const product = {
-        name, note: f.note, issue: f.issue, comp: f.comp, prep: f.prep,
-        price: f.price, margin: f.margin, sme: f.sme, special: f.special, isNew: f.isNew,
+        name, note: f.note, issue: f.issue, comp: f.comp, prep,
+        // 마진: 숫자만 넣었으면 % 자동 부착 (blur 미발동 케이스 보정)
+        price: f.price, margin: /^\d+(\.\d+)?$/.test((f.margin || '').trim()) ? f.margin.trim() + '%' : f.margin,
+        sme: f.sme, special: f.special, isNew: f.isNew,
+        specialNote: f.special ? f.specialNote.trim() : '',
         groupCode: codes.map((c) => c.trim()).filter(Boolean).join(' / '), recent: f.recent.some(Boolean) ? f.recent : undefined,
         durationMin: (fashion || orderMode) ? (f.durationMin ? parseInt(f.durationMin, 10) : null) : durMin,
         items: items.length ? items : undefined,
@@ -1537,18 +1578,24 @@
                 <select value=${slotId} onChange=${(e) => setSlotId(e.target.value)} class=${inputCls}>
                   ${day.slots.map((s) => html`<option key=${s.id} value=${s.id}>${slotName(s)}</option>`)}
                 </select><//>`
-            : html`<${Field} label=${`방송 시간 (24시간) * — ${durMin}분`}>
-                <div class="flex items-center gap-1.5">
-                  <${TimeInput} value=${start} onChange=${setStart} />
+            : html`<${Field} label="방송 시간 (24시간) *">
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <div class="flex items-center rounded border border-slate-300 focus-within:border-brand px-2" title="노출분을 넣으면 종료시간이 자동 계산됩니다">
+                    <input value=${durStr} onInput=${onDurChange} inputmode="numeric" placeholder="노출분"
+                      class="w-14 py-1.5 text-[13px] tabular-nums text-right bg-transparent outline-none" />
+                    <span class="text-[12px] text-ink-soft pl-0.5">분</span>
+                  </div>
+                  <${TimeInput} value=${start} onChange=${onStartChange} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
                   <span class="text-ink-soft">~</span>
-                  <${TimeInput} value=${end} onChange=${setEnd} />
-                </div><//>`}
+                  <${TimeInput} value=${end} onChange=${onEndChange} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+                </div>
+                <div class="mt-1 text-[11px] text-ink-soft">노출분 입력 → 종료시간 자동 · 시작시간을 바꾸면 노출분(${durMin || '-'}분)에 맞춰 종료도 이동</div><//>`}
         </div>
         ${!fashion && !orderMode && bands.length > 0 && html`
           <div class="-mt-1 flex flex-wrap items-center gap-1">
             <span class="text-[11px] text-ink-soft">큰 띠:</span>
             ${bands.map((s) => html`<button type="button" key=${s.id}
-              onClick=${() => { setStart(s.start); setEnd(s.end); }}
+              onClick=${() => { setStart(s.start); setEnd(s.end); setDurStr(String((U.toMin(s.end) - U.toMin(s.start) + 1440) % 1440)); }}
               class="text-[11px] px-1.5 py-0.5 rounded border border-slate-300 hover:border-brand hover:text-brand tabular-nums">${s.start}~${s.end}</button>`)}
             <span class="text-[11px] text-slate-400">→ 시작/종료를 직접 조정 (예: 20:45~21:05 = 20분)</span>
           </div>`}
@@ -1556,9 +1603,22 @@
         <${Field} label="이슈사항 / 특이사항"><textarea value=${f.issue} onInput=${set('issue')} rows="2" class=${inputCls}></textarea><//>
         <div class="grid grid-cols-2 gap-3">
           <${Field} label="구성"><input value=${f.comp} onInput=${set('comp')} class=${inputCls} placeholder="예: 6개월분" /><//>
-          <${Field} label="준비물량"><input value=${f.prep} onInput=${set('prep')} class=${inputCls} placeholder="예: 5억 / 3,000세트" /><//>
+          <${Field} label="준비물량 (숫자만 — 억·세트 자동)">
+            <div class="flex items-center gap-1.5">
+              <div class="flex-1 flex items-center rounded border border-slate-300 focus-within:border-brand px-2">
+                <input value=${prepAmt} onInput=${(e) => setPrepAmt(e.target.value.replace(/[^\d.]/g, ''))} inputmode="decimal"
+                  placeholder=${prepFallback || '금액'} class="w-full py-1.5 text-[13px] tabular-nums text-right bg-transparent outline-none" />
+                <span class="text-[12px] text-ink-soft pl-0.5">억</span>
+              </div>
+              <div class="flex-1 flex items-center rounded border border-slate-300 focus-within:border-brand px-2">
+                <input value=${prepQty} onInput=${(e) => setPrepQty(e.target.value.replace(/[^\d]/g, ''))} inputmode="numeric"
+                  placeholder="수량" class="w-full py-1.5 text-[13px] tabular-nums text-right bg-transparent outline-none" />
+                <span class="text-[12px] text-ink-soft pl-0.5">세트</span>
+              </div>
+            </div>
+          <//>
           <${Field} label="가격"><input value=${f.price} onInput=${set('price')} class=${inputCls} placeholder="예: 179,000원" /><//>
-          <${Field} label="마진"><input value=${f.margin} onInput=${set('margin')} class=${inputCls} placeholder="예: 50T / 46%" /><//>
+          <${Field} label="마진 (숫자만 — % 자동)"><input value=${f.margin} onInput=${set('margin')} onBlur=${marginBlur} class=${inputCls} placeholder="예: 46" /><//>
           <${Field} label="최근 3회 달성률 (숫자만, % 자동)">
             <div class="flex items-center gap-1.5">
               ${[0, 1, 2].map((i) => html`
@@ -1576,6 +1636,8 @@
             <input type="checkbox" checked=${f.sme} onChange=${setChk('sme')} /> 중소기업 상품</label>
           <label class="flex items-center gap-1.5 text-[13px] cursor-pointer">
             <input type="checkbox" checked=${f.special} onChange=${setChk('special')} /> 특약 여부</label>
+          ${f.special && html`<input value=${f.specialNote} onInput=${set('specialNote')}
+            placeholder="특약 조건 예: 50T·100T (50=50%)" class="w-52 text-[12px] px-2 py-1 rounded border border-amber-300 bg-amber-50 outline-none focus:border-brand" />`}
           <label class="flex items-center gap-1.5 text-[13px] cursor-pointer">
             <input type="checkbox" checked=${f.isNew} onChange=${setChk('isNew')} /> 신상품 여부</label>
         </div>

@@ -448,8 +448,8 @@
     }
     function detailOf(pr) {
       return { note: pr.note, issue: pr.issue, comp: pr.comp, prep: pr.prep, price: pr.price,
-               margin: pr.margin, sme: pr.sme, special: pr.special, isNew: pr.isNew, groupCode: pr.groupCode,
-               recent: pr.recent };
+               margin: pr.margin, sme: pr.sme, special: pr.special, specialNote: pr.specialNote,
+               isNew: pr.isNew, groupCode: pr.groupCode, recent: pr.recent };
     }
     // 날짜 단위 입찰용 슬롯:
     //  · 패션 프로그램 → '1부' 순번 슬롯 (방송시간은 day.airTime 에 별도 표기, 부는 PD가 나눔)
