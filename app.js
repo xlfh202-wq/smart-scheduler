@@ -987,7 +987,7 @@
         if (table) table.style.width = 'auto';
         const thead = clone.querySelector('thead');
         if (thead) thead.style.position = 'static';
-        clone.querySelectorAll('th').forEach((c) => { c.style.padding = '5px 9px'; c.style.fontSize = '13.5px'; });
+        clone.querySelectorAll('th').forEach((c) => { c.style.padding = '5px 9px'; c.style.fontSize = '13.5px'; c.style.width = 'auto'; c.style.minWidth = '0'; c.style.whiteSpace = 'nowrap'; });
         clone.querySelectorAll('td').forEach((c) => {
           c.style.padding = '4px 9px'; c.style.lineHeight = '1.3'; c.style.fontSize = '14px';
           c.style.maxWidth = '260px'; // 긴 문장 칸은 적당히 줄바꿈해 폭 제한
@@ -1063,25 +1063,25 @@
           <div class="px-3 py-2 border-b-2 border-brand text-[13px] font-bold text-ink">
             ${prog.name} · ${year}년 ${month}월 최종편성안 <span class="font-normal text-ink-soft">(총 ${total}편성)</span>
           </div>
-          <table class=${`w-full ${slim ? 'min-w-[790px]' : 'min-w-[1510px]'} text-[12px] border-collapse`}>
+          <table class=${`w-full ${slim ? 'min-w-[830px]' : 'min-w-[1610px]'} text-[12px] border-collapse`}>
             <thead class="sticky top-0">
               <tr>
-                <th class=${th} style=${{ width: '70px' }}>방송일</th>
-                <th class=${th} style=${{ width: '36px' }}>요일</th>
-                <th class=${th} style=${{ width: '104px' }}>시간</th>
-                ${!slim && html`<th class=${th} style=${{ width: '58px' }}>상태</th>`}
+                <th class=${th} style=${{ minWidth: '70px' }}>방송일</th>
+                <th class=${th} style=${{ minWidth: '36px' }}>요일</th>
+                <th class=${th} style=${{ minWidth: '104px' }}>시간</th>
+                ${!slim && html`<th class=${th} style=${{ minWidth: '58px' }}>상태</th>`}
                 <th class=${th} style=${{ minWidth: '150px' }}>상품명</th>
-                <th class=${th} style=${{ width: '92px' }}>그룹코드</th>
+                <th class=${th} style=${{ minWidth: '92px' }}>그룹코드</th>
                 ${!slim && html`
                   <th class=${th} style=${{ minWidth: '170px' }}>내용 / 타이틀</th>
                   <th class=${th} style=${{ minWidth: '130px' }}>구성</th>
-                  <th class=${th} style=${{ width: '78px' }}>준비물량</th>
-                  <th class=${th} style=${{ width: '100px' }}>가격</th>
-                  <th class=${th} style=${{ width: '64px' }}>마진</th>
-                  <th class=${th} style=${{ width: '128px' }}>최근 3회 달성률</th>`}
-                <th class=${th} style=${{ width: '74px' }}>PD</th>
-                <th class=${th} style=${{ width: '74px' }}>쇼호스트</th>
-                <th class=${th} style=${{ width: '64px' }}>스튜디오</th>
+                  <th class=${th} style=${{ minWidth: '78px' }}>준비물량</th>
+                  <th class=${th} style=${{ minWidth: '100px' }}>가격</th>
+                  <th class=${th} style=${{ minWidth: '64px' }}>마진</th>
+                  <th class=${th} style=${{ minWidth: '128px' }}>최근 3회 달성률</th>`}
+                <th class=${th} style=${{ minWidth: '100px' }}>PD</th>
+                <th class=${th} style=${{ minWidth: '100px' }}>쇼호스트</th>
+                <th class=${th} style=${{ minWidth: '80px' }}>스튜디오</th>
                 ${!slim && html`<th class=${th} style=${{ minWidth: '140px' }}>비고 (PD)</th>`}
               </tr>
             </thead>
