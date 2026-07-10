@@ -461,14 +461,14 @@
         onDragOver=${(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave=${() => setOver(false)}
         onDrop=${onDrop}>
-        <div class=${`w-[96px] shrink-0 px-2 py-1.5 border-r border-slate-200 flex flex-col gap-0.5 ${isExt ? 'bg-slate-100/70' : 'bg-slate-50'}`}>
+        <div class=${`w-[104px] shrink-0 px-1.5 py-1.5 border-r border-slate-200 flex flex-col gap-0.5 ${isExt ? 'bg-slate-100/70' : 'bg-slate-50'}`}>
           ${isExt
             ? html`<span class="text-[12px] font-bold text-ink-soft leading-tight">확장<br/>${band.label}</span>`
             : html`${onEditBand
                 ? html`<button onClick=${(e) => { e.stopPropagation(); onEditBand(); }}
-                    class="text-[14px] font-extrabold text-ink tabular-nums leading-tight text-left hover:text-brand hover:underline decoration-dotted"
+                    class="text-[13.5px] font-extrabold text-ink tabular-nums leading-tight text-left whitespace-nowrap hover:text-brand hover:underline decoration-dotted"
                     title="클릭해 이 날짜의 시간띠 시간 조정">${band.start}~${band.end}</button>`
-                : html`<span class="text-[14px] font-extrabold text-ink tabular-nums leading-tight">${band.start}~${band.end}</span>`}
+                : html`<span class="text-[13.5px] font-extrabold text-ink tabular-nums leading-tight whitespace-nowrap">${band.start}~${band.end}</span>`}
               <span class="text-[11px] font-semibold text-ink-soft">${dur}분</span>`}
           ${compColor && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: compColor + '22', color: compColor }}>
             <span class="w-1.5 h-1.5 rounded-full shrink-0" style=${{ background: compColor }}></span>경쟁 ${compete}팀</span>`}
@@ -526,8 +526,8 @@
         onDragOver=${(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave=${() => setOver(false)}
         onDrop=${onDrop}>
-        <div class="w-[96px] shrink-0 px-2 py-1.5 bg-slate-50 border-r border-slate-200 flex flex-col gap-0.5">
-          <${SlotTimeButton} slot=${slot} className="text-[14px] font-extrabold text-ink tabular-nums leading-tight" />
+        <div class="w-[104px] shrink-0 px-1.5 py-1.5 bg-slate-50 border-r border-slate-200 flex flex-col gap-0.5">
+          <${SlotTimeButton} slot=${slot} className="text-[13.5px] font-extrabold text-ink tabular-nums leading-tight text-left whitespace-nowrap" />
           ${slot.start && slot.end && html`<span class="text-[11px] font-semibold text-ink-soft">${dur}분</span>`}
           ${compColor && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: compColor + '22', color: compColor }}>
             <span class="w-1.5 h-1.5 rounded-full shrink-0" style=${{ background: compColor }}></span>경쟁 ${compete}팀</span>`}
