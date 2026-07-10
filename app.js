@@ -995,9 +995,9 @@
             <div class="flex items-center gap-2 flex-wrap justify-end">
               ${draftN > 0 && html`<span class="text-[11px] font-semibold text-amber-800 bg-amber-100 border border-amber-300 rounded px-2 py-1 whitespace-nowrap shrink-0"
                 title="수정 내용은 '편성 저장'을 눌러야 서버(다른 사람 화면)에 반영됩니다">● 저장 안 된 변경 ${draftN}건</span>`}
-              <button onClick=${() => setMemoOpen(true)}
+              ${!simple && html`<button onClick=${() => setMemoOpen(true)}
                 class=${`text-xs px-2.5 py-1 rounded border whitespace-nowrap shrink-0 ${hasMemo ? 'border-amber-400 text-amber-700 bg-amber-50' : 'border-slate-300 bg-white hover:border-brand hover:text-brand'}`}
-                title="PD·쇼호스트 캐스팅 특이사항(휴가·불가일 등)">📌 캐스팅 메모${hasMemo ? ' ●' : ''}</button>
+                title="PD·쇼호스트 캐스팅 특이사항(휴가·불가일 등)">📌 캐스팅 메모${hasMemo ? ' ●' : ''}</button>`}
               <button onClick=${() => setAddDayOpen(true)}
                 class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0">+ 편성일 추가</button>
               <button onClick=${() => setSnapOpen(true)}
@@ -1146,6 +1146,7 @@
     const [imgColsOpen, setImgColsOpen] = useState(false);
     const [memoOpen, setMemoOpen] = useState(false); // 캐스팅 특이사항 메모 (PD·관리자)
     const hasMemo = !!(state.castingMemo && state.castingMemo[`${state.activeProgram}|${state.view.year}-${String(state.view.month).padStart(2, '0')}`]);
+    const [moveFor, setMoveFor] = useState(null); // 드래그 이동 대상 {pid, day} → 시간 지정 팝업
     const snapCount = (state.snapshots || []).filter((s) =>
       s.year === state.view.year && s.month === state.view.month && s.programId === state.activeProgram).length;
     const capRef = useRef(null);
@@ -1213,6 +1214,8 @@
           div.style.padding = '0';
           cf.parentNode.replaceChild(div, cf);
         });
+        // 화면 전용 요소(드래그 손잡이 등)는 이미지에서 제외
+        clone.querySelectorAll('.no-capture').forEach((el) => el.remove());
         // 선택한 항목만 남김 (방송일·요일은 항상 포함)
         if (picked) clone.querySelectorAll('[data-col]').forEach((cel) => {
           if (!picked.has(cel.getAttribute('data-col'))) cel.remove();
@@ -1260,6 +1263,18 @@
     const total = rows.filter((r) => r.p).length;
     const dayCount = {};
     rows.forEach((r) => { dayCount[r.day.date] = (dayCount[r.day.date] || 0) + 1; });
+    // PD·쇼호스트별 이 달 캐스팅 횟수 (콤마 등으로 여러 명 기입 시 각각 집계)
+    const castCounts = (field) => {
+      const map = new Map();
+      rows.forEach((r) => {
+        if (!r.p || !r.p[field]) return;
+        String(r.p[field]).split(/[,/·+&]/).map((s) => s.trim()).filter(Boolean)
+          .forEach((n) => map.set(n, (map.get(n) || 0) + 1));
+      });
+      return [...map.entries()].sort((a, b) => b[1] - a[1]);
+    };
+    const pdCounts = castCounts('pd');
+    const hostCounts = castCounts('host');
     const th = 'px-2 py-1.5 text-left font-semibold border border-slate-300 bg-brand text-white whitespace-nowrap';
     const td = 'px-2 py-1.5 border border-slate-200 align-top';
     const tdMerge = 'px-2 py-1.5 border border-slate-200 align-middle text-center bg-slate-50';
@@ -1304,6 +1319,19 @@
         </div>
         ${snapOpen && html`<${SnapshotsModal} state=${state} onClose=${() => setSnapOpen(false)} />`}
         ${memoOpen && html`<${CastingMemoModal} state=${state} onClose=${() => setMemoOpen(false)} />`}
+        ${moveFor && html`<${MoveTimeModal} state=${state} day=${moveFor.day} placementId=${moveFor.pid} onClose=${() => setMoveFor(null)} />`}
+        ${(pdCounts.length > 0 || hostCounts.length > 0) && html`
+          <div class="mb-3 bg-white rounded-lg shadow-sm border border-slate-200 px-3 py-2 flex flex-col gap-1.5"
+            title="이 달(${month}월) ${prog.name} 캐스팅 횟수 — PD·쇼호스트 열 기준 자동 집계">
+            ${pdCounts.length > 0 && html`<div class="flex flex-wrap items-center gap-1.5 text-[12px]">
+              <span class="font-semibold text-ink-soft w-[52px] shrink-0">PD</span>
+              ${pdCounts.map(([n, c]) => html`<span key=${n} class="px-1.5 py-0.5 rounded bg-slate-100 whitespace-nowrap">${n} <b class="text-brand tabular-nums">${c}</b></span>`)}
+            </div>`}
+            ${hostCounts.length > 0 && html`<div class="flex flex-wrap items-center gap-1.5 text-[12px]">
+              <span class="font-semibold text-ink-soft w-[52px] shrink-0">쇼호스트</span>
+              ${hostCounts.map(([n, c]) => html`<span key=${n} class="px-1.5 py-0.5 rounded bg-slate-100 whitespace-nowrap">${n} <b class="text-brand tabular-nums">${c}</b></span>`)}
+            </div>`}
+          </div>`}
         ${imgColsOpen && html`<${ImgColsModal} slim=${slim} onClose=${() => setImgColsOpen(false)} onSave=${(pk) => saveImage(pk)} />`}
         <div ref=${capRef} id="final-capture" class="bg-white rounded-lg shadow-sm overflow-x-auto">
           <div class="px-3 py-2 border-b-2 border-brand text-[13px] font-bold text-ink">
@@ -1341,7 +1369,14 @@
                 const wdColor = r.day.weekday === 6 ? 'text-blue-600' : r.day.weekday === 0 ? 'text-red-500' : 'text-ink';
                 const pend = p && p.pending;
                 return html`
-                  <tr key=${i} class=${`${r.firstOfDay ? 'border-t-2 border-t-slate-300' : ''} ${pend ? 'bg-amber-100' : 'hover:bg-amber-50'}`}>
+                  <tr key=${i} class=${`${r.firstOfDay ? 'border-t-2 border-t-slate-300' : ''} ${pend ? 'bg-amber-100' : 'hover:bg-amber-50'}`}
+                    onDragOver=${readOnly ? undefined : ((e) => e.preventDefault())}
+                    onDrop=${readOnly ? undefined : ((e) => {
+                      const pl = drag.read(e);
+                      if (!pl || pl.kind !== 'placement') return;
+                      e.preventDefault(); e.stopPropagation();
+                      setMoveFor({ pid: pl.id, day: r.day }); // 놓은 행의 날짜로 이동 → 시간 지정 팝업
+                    })}>
                     ${r.firstOfDay && html`
                       <td class=${`${tdMerge} font-semibold tabular-nums text-ink`} rowSpan=${dayCount[r.day.date]}>${m}/${dnum}${r.day.airTime ? html`<div class="text-[10px] font-normal text-ink-soft mt-0.5 whitespace-nowrap">${r.day.airTime}</div>` : ''}</td>
                       <td class=${`${tdMerge} font-semibold ${wdColor}`} rowSpan=${dayCount[r.day.date]}>${wd}</td>`}
@@ -1360,6 +1395,9 @@
                     <td class=${`${td} p-0`} data-col="product">
                       ${p ? html`<div>
                           <div class="flex items-center gap-1 pr-2">
+                            ${!readOnly && html`<span draggable=${true} onDragStart=${(e) => drag.start(e, 'placement', p.id)}
+                              class="no-capture cursor-grab text-slate-300 hover:text-brand pl-1 select-none shrink-0 text-[13px] leading-none"
+                              title="드래그해서 다른 날짜/행에 놓으면 시간 지정 팝업으로 이동">⠿</span>`}
                             ${Cell(p.productName, (val) => store.updatePlacementContent(p.id, { productName: val }), { color: 'font-semibold text-ink' })}
                             ${(p.items && p.items.length > 1) && html`<span class="shrink-0 text-[10px] text-violet-600">동시 ${p.items.length}착장</span>`}
                             ${det.isNew && html`<span class="shrink-0 text-[10px] text-cyan-600">新</span>`}
