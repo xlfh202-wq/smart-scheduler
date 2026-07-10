@@ -1147,6 +1147,10 @@
     const [memoOpen, setMemoOpen] = useState(false); // 캐스팅 특이사항 메모 (PD·관리자)
     const hasMemo = !!(state.castingMemo && state.castingMemo[`${state.activeProgram}|${state.view.year}-${String(state.view.month).padStart(2, '0')}`]);
     const [moveFor, setMoveFor] = useState(null); // 드래그 이동 대상 {pid, day} → 시간 지정 팝업
+    const [ctxMenu, setCtxMenu] = useState(null); // 우클릭 메뉴 {x, y, r(행)}
+    const [quickAddDay, setQuickAddDay] = useState(null); // 행 추가(시간·상품)
+    const [addSlotDay, setAddSlotDay] = useState(null);   // 시간대만 추가
+    const [slotAddFor, setSlotAddFor] = useState(null);   // 빈 시간대에 상품 추가
     const snapCount = (state.snapshots || []).filter((s) =>
       s.year === state.view.year && s.month === state.view.month && s.programId === state.activeProgram).length;
     const capRef = useRef(null);
@@ -1298,7 +1302,7 @@
         ${['pd', 'host', 'studio'].map((fld) => html`<datalist key=${fld} id=${'cast-' + fld + '-dl'}>${((castOpts && castOpts[fld]) || []).map((o) => html`<option key=${o} value=${o}></option>`)}</datalist>`)}
         <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
           <h2 class="text-base font-bold text-ink">${prog.name} · ${year}년 ${month}월 최종편성안
-            <span class="text-[12px] font-normal text-ink-soft">총 ${total}편성${readOnly ? ' · 조회 전용' : ' · 셀을 클릭해 직접 수정'}</span></h2>
+            <span class="text-[12px] font-normal text-ink-soft">총 ${total}편성${readOnly ? ' · 조회 전용' : ' · 셀 클릭=수정 · 행 우클릭=추가/삭제 · ⠿ 드래그=이동'}</span></h2>
           <div class="flex items-center gap-2">
             ${!readOnly && html`<button onClick=${() => setMemoOpen(true)}
               class=${`text-xs px-2.5 py-1 rounded border whitespace-nowrap shrink-0 ${hasMemo ? 'border-amber-400 text-amber-700 bg-amber-50' : 'border-slate-300 bg-white hover:border-brand hover:text-brand'}`}
@@ -1320,6 +1324,36 @@
         ${snapOpen && html`<${SnapshotsModal} state=${state} onClose=${() => setSnapOpen(false)} />`}
         ${memoOpen && html`<${CastingMemoModal} state=${state} onClose=${() => setMemoOpen(false)} />`}
         ${moveFor && html`<${MoveTimeModal} state=${state} day=${moveFor.day} placementId=${moveFor.pid} onClose=${() => setMoveFor(null)} />`}
+        ${quickAddDay && html`<${QuickAddModal} state=${state} day=${quickAddDay} onClose=${() => setQuickAddDay(null)} />`}
+        ${addSlotDay && html`<${AddSlotModal} day=${addSlotDay} onClose=${() => setAddSlotDay(null)} />`}
+        ${slotAddFor && html`<${SlotAddModal} state=${state} slot=${slotAddFor} onClose=${() => setSlotAddFor(null)} />`}
+        ${ctxMenu && (() => {
+          const r = ctxMenu.r; const p = r.p;
+          const close = () => setCtxMenu(null);
+          const item = (label, fn, danger) => html`
+            <button onClick=${() => { close(); fn(); }}
+              class=${`w-full text-left px-3 py-1.5 hover:bg-slate-100 ${danger ? 'text-rose-600' : 'text-ink'}`}>${label}</button>`;
+          const dnum = Number(r.day.date.slice(8));
+          return html`
+            <div class="fixed inset-0 z-50" onClick=${close} onContextMenu=${(e) => { e.preventDefault(); close(); }}>
+              <div class="absolute bg-white rounded-lg shadow-xl border border-slate-200 py-1 w-56 text-[13px]"
+                style=${{ left: Math.min(ctxMenu.x, window.innerWidth - 240) + 'px', top: Math.min(ctxMenu.y, window.innerHeight - 230) + 'px' }}
+                onClick=${(e) => e.stopPropagation()}>
+                <div class="px-3 py-1 text-[11px] text-ink-soft border-b border-slate-100">
+                  ${month}/${dnum}(${U.WEEKDAY_KO[r.day.weekday]}) ${slotName(r.slot)}${p ? ' · ' + p.productName : ''}</div>
+                ${item(`➕ ${month}/${dnum}에 행 추가 (시간·상품)`, () => setQuickAddDay(r.day))}
+                ${item('⏱ 시간대만 추가', () => setAddSlotDay(r.day))}
+                ${!p && item('📦 이 시간대에 상품 추가', () => setSlotAddFor(r.slot))}
+                ${p && item('🚫 상품 편성 제외 (입찰 풀로)', () => {
+                  if (confirm(`'${p.productName}'을(를) 편성에서 제외할까요?\n상품은 삭제되지 않고 입찰 풀(미편성)로 돌아갑니다.`)) store.removePlacement(p.id);
+                }, true)}
+                ${item('🗑 이 행(시간대) 삭제', () => {
+                  const n = state.placements.filter((x) => x.slotId === r.slot.id).length;
+                  if (confirm(`${slotName(r.slot)} 시간대를 삭제할까요?${n ? `\n배정된 상품 ${n}개는 삭제되지 않고 입찰 풀(미편성)로 돌아갑니다.` : ''}`)) store.removeSlot(r.slot.id);
+                }, true)}
+              </div>
+            </div>`;
+        })()}
         ${(pdCounts.length > 0 || hostCounts.length > 0) && html`
           <div class="mb-3 bg-white rounded-lg shadow-sm border border-slate-200 px-3 py-2 flex flex-col gap-1.5"
             title="이 달(${month}월) ${prog.name} 캐스팅 횟수 — PD·쇼호스트 열 기준 자동 집계">
@@ -1376,6 +1410,10 @@
                       if (!pl || pl.kind !== 'placement') return;
                       e.preventDefault(); e.stopPropagation();
                       setMoveFor({ pid: pl.id, day: r.day }); // 놓은 행의 날짜로 이동 → 시간 지정 팝업
+                    })}
+                    onContextMenu=${readOnly ? undefined : ((e) => {
+                      e.preventDefault(); // 우클릭 → 행 추가/삭제 메뉴
+                      setCtxMenu({ x: e.clientX, y: e.clientY, r });
                     })}>
                     ${r.firstOfDay && html`
                       <td class=${`${tdMerge} font-semibold tabular-nums text-ink`} rowSpan=${dayCount[r.day.date]}>${m}/${dnum}${r.day.airTime ? html`<div class="text-[10px] font-normal text-ink-soft mt-0.5 whitespace-nowrap">${r.day.airTime}</div>` : ''}</td>
