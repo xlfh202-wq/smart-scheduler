@@ -597,6 +597,8 @@
 
       // ----- 유틸 노출 -----
       util: { toMin, toHHMM, slotDuration, slotLabel, teamName, findSlot, WEEKDAY_KO, MAIN_PROGRAM },
+      // 프로그램 고정 편성 스케줄 조회 (PD 편성표 시간띠 UI용 — 기본+커스텀)
+      getSchedule(programId) { return progSchedule(programId); },
 
       /* ---------- 프로그램 ---------- */
       setActiveProgram(programId) {

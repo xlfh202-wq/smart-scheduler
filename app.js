@@ -128,7 +128,7 @@
   /* =====================================================================
    *  편성 카드 (PD 편성표 내부, 드래그 가능)
    * ===================================================================== */
-  function PlacementCard({ state, p }) {
+  function PlacementCard({ state, p, subTime }) {
     const team = teamOf(state, p.teamId);
     const [info, setInfo] = useState(false);
     const [startEdit, setStartEdit] = useState(false);
@@ -143,6 +143,7 @@
         <div class="flex items-start justify-between gap-0.5">
           <div class="min-w-0 flex-1">
             <div class="text-[12.5px] font-bold text-ink leading-snug break-words">${p.productName}</div>
+            ${subTime && html`<div class="text-[10px] font-semibold text-amber-700 tabular-nums" title="MD 입찰의 세부 시간 (고정 띠 안에 자동 귀속)">⏱ ${subTime}</div>`}
             <div class="mt-0.5 flex flex-wrap items-center gap-1">
               <${Badge} color=${team.color}>${team.name}<//>
               ${items.length > 1 && html`<${Badge} color="#7c3aed" title="동시 노출 착장 수">동시 ${items.length}착장<//>`}
@@ -354,6 +355,67 @@
   }
 
   /* =====================================================================
+   *  고정 시간띠 행 — MD가 잘게 쪼갠 시간대도 이 띠 아래에 자동 귀속 표시
+   * ===================================================================== */
+  function BandRow({ state, day, band, onQuickAdd, onExtBid, onExtMove }) {
+    const [over, setOver] = useState(false);
+    const isExt = !!band.ext;
+    const slots = band.slots || [];
+    const slotIds = new Set(slots.map((sl) => sl.id));
+    const placements = state.placements.filter((p) => slotIds.has(p.slotId))
+      .sort((a, b) => {
+        const sa = slots.find((sl) => sl.id === a.slotId), sb = slots.find((sl) => sl.id === b.slotId);
+        return U.toMin((sa && sa.start) || '00:00') - U.toMin((sb && sb.start) || '00:00');
+      });
+    const teamsIn = new Set(placements.map((p) => p.teamId));
+    const compete = teamsIn.size;
+    const compColor = compete >= 3 ? '#dc2626' : compete === 2 ? '#f59e0b' : null;
+    const dur = isExt ? 0 : (U.toMin(band.end) - U.toMin(band.start) + 1440) % 1440;
+    // 카드에 표시할 세부 시간 (띠와 완전히 같으면 생략)
+    const subTimeOf = (p) => {
+      const sl = slots.find((x) => x.id === p.slotId);
+      if (!sl || !sl.start) return '';
+      if (!isExt && sl.start === band.start && sl.end === band.end) return '';
+      return `${sl.start}~${sl.end}`;
+    };
+    function onDrop(e) {
+      e.preventDefault(); e.stopPropagation(); setOver(false);
+      const pl = drag.read(e);
+      if (!pl) return;
+      if (isExt) { // 확장 띠: 정확한 시간을 팝업으로 지정
+        if (pl.kind === 'bid' && onExtBid) onExtBid(pl.id);
+        else if (pl.kind === 'placement' && onExtMove) onExtMove(pl.id);
+        return;
+      }
+      // 고정 띠에 놓으면 띠 시간대로 편성 (PD 수기 조정은 카드 이동/수정으로)
+      if (pl.kind === 'bid') store.assignBidToDay(pl.id, day.id, { start: band.start, end: band.end });
+      else if (pl.kind === 'placement') store.movePlacementToSlotSpec(pl.id, day.id, { start: band.start, end: band.end });
+    }
+    return html`
+      <div class=${`flex rounded-lg border overflow-hidden ${isExt ? 'bg-slate-50/70' : 'bg-white'} ${over ? 'drop-active' : ''}`}
+        style=${compColor && !over ? { borderColor: compColor, boxShadow: `0 0 0 1px ${compColor}` } : (over ? {} : { borderColor: '#e2e8f0', borderStyle: isExt ? 'dashed' : 'solid' })}
+        onDragOver=${(e) => { e.preventDefault(); setOver(true); }}
+        onDragLeave=${() => setOver(false)}
+        onDrop=${onDrop}>
+        <div class=${`w-[96px] shrink-0 px-2 py-1.5 border-r border-slate-200 flex flex-col gap-0.5 ${isExt ? 'bg-slate-100/70' : 'bg-slate-50'}`}>
+          ${isExt
+            ? html`<span class="text-[12px] font-bold text-ink-soft leading-tight">확장<br/>${band.label}</span>`
+            : html`<span class="text-[14px] font-extrabold text-ink tabular-nums leading-tight">${band.start}~${band.end}</span>
+              <span class="text-[11px] font-semibold text-ink-soft">${dur}분</span>`}
+          ${compColor && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: compColor + '22', color: compColor }}>
+            <span class="w-1.5 h-1.5 rounded-full shrink-0" style=${{ background: compColor }}></span>경쟁 ${compete}팀</span>`}
+        </div>
+        <div class=${`flex-1 flex flex-wrap items-stretch content-start gap-1 p-1.5 min-h-[56px] ${placements.length === 0 ? 'cursor-copy' : ''}`}
+          onDoubleClick=${placements.length === 0 && !isExt && onQuickAdd ? (() => onQuickAdd(band.start)) : undefined}
+          title=${placements.length === 0 && !isExt ? '더블클릭하면 상품 추가' : ''}>
+          ${placements.length === 0
+            ? html`<div class="text-[11px] text-slate-300 self-center px-2 select-none">${isExt ? '확장 시간대 — 카드를 놓으면 시간 지정 팝업' : '입찰 카드를 끌어다 놓거나 더블클릭해 추가'}</div>`
+            : placements.map((p) => html`<${PlacementCard} key=${p.id} state=${state} p=${p} subTime=${subTimeOf(p)} />`)}
+        </div>
+      </div>`;
+  }
+
+  /* =====================================================================
    *  슬롯 셀 (드롭 타깃)
    * ===================================================================== */
   function SlotCell({ state, day, slot }) {
@@ -473,8 +535,36 @@
     const slotOrder = (sl) => sl.start ? U.toMin(sl.start)
       : 100000 + (parseInt(((sl.label || '').match(/\d+/) || [99])[0], 10) || 99);
     const sortedSlots = day.slots.slice().sort((x, y) => slotOrder(x) - slotOrder(y));
+    // ----- 고정 시간띠(밴드): 프로그램 스케줄 기반. MD가 쪼갠 시간도 자동으로 해당 띠에 귀속 -----
+    const sched = store.getSchedule ? store.getSchedule(day.programId) : null;
+    const schedEntry = !fashion && sched ? sched.find((sc) => sc.wd === day.weekday) : null;
+    const useBands = !!(schedEntry && schedEntry.slots && schedEntry.slots.length);
+    const [showExt, setShowExt] = useState(false);
+    let bands = [], extBefore = null, extAfter = null, labelSlots = [];
+    if (useBands) {
+      bands = schedEntry.slots.map(([bs, be]) => ({ start: bs, end: be, slots: [] }));
+      extBefore = { ext: 'before', label: `~${bands[0].start}`, slots: [] };
+      extAfter = { ext: 'after', label: `${bands[bands.length - 1].end}~`, slots: [] };
+      const firstStart = U.toMin(bands[0].start);
+      const rel = (m) => (m - firstStart + 1440) % 1440; // 첫 띠 시작 기준 상대분(자정 넘김 대응)
+      const lastEndR = (() => { let r = rel(U.toMin(bands[bands.length - 1].end)); return r === 0 ? 1440 : r; })();
+      day.slots.forEach((sl) => {
+        if (!sl.start) { labelSlots.push(sl); return; } // 순번/버킷 슬롯은 밴드 아래 별도 표시
+        const smR = rel(U.toMin(sl.start));
+        const hit = bands.find((bd) => {
+          let bsR = rel(U.toMin(bd.start)), beR = rel(U.toMin(bd.end));
+          if (beR <= bsR) beR += 1440;
+          return smR >= bsR && smR < beR;
+        });
+        if (hit) { hit.slots.push(sl); return; }
+        if (smR >= lastEndR && smR - lastEndR <= 720) extAfter.slots.push(sl);
+        else extBefore.slots.push(sl);
+      });
+      labelSlots.sort((x, y) => slotOrder(x) - slotOrder(y));
+    }
     const [addOpen, setAddOpen] = useState(false);
     const [quickOpen, setQuickOpen] = useState(false);
+    const [quickInit, setQuickInit] = useState('');
     const [dayOver, setDayOver] = useState(false);
     const [moveTimeFor, setMoveTimeFor] = useState(null); // 같은날짜 시간대 이동 팝업(라이프스타일)
     const [bidTimeFor, setBidTimeFor] = useState(null);   // 입찰카드 편성 시간 지정 팝업(라이프스타일)
@@ -514,7 +604,8 @@
             ${fashion && html`<${AirTimeButton} day=${day} />`}
           </div>
           <div class="flex items-center gap-2 text-[11px] text-ink-soft">
-            <button onClick=${() => setQuickOpen(true)} class="font-semibold text-brand bg-white border border-brand/40 hover:bg-brand hover:text-white px-1.5 py-0.5 rounded">+ 상품</button>
+            <button onClick=${() => { setQuickInit(''); setQuickOpen(true); }} class="font-semibold text-brand bg-white border border-brand/40 hover:bg-brand hover:text-white px-1.5 py-0.5 rounded">+ 상품</button>
+            ${useBands && html`<button onClick=${() => setShowExt(!showExt)} class="hover:text-brand" title="고정 시간띠 앞뒤의 확장 시간대 보기/숨기기">확장 ${showExt ? '▴' : '▾'}</button>`}
             <button onClick=${() => setAddOpen(true)} class="hover:text-brand">+ 시간대</button>
             <button onClick=${() => store.addSlot(day.id, { order: true })} class="hover:text-brand">+ 순번</button>
             <button onClick=${() => {
@@ -527,12 +618,20 @@
           </div>
         </div>
         <div class="p-1.5 flex flex-col gap-1">
-          ${sortedSlots.length === 0
+          ${useBands ? html`
+            ${(showExt || extBefore.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extBefore}
+              onExtBid=${setBidTimeFor} onExtMove=${setMoveTimeFor} />`}
+            ${bands.map((bd, bi) => html`<${BandRow} key=${bi} state=${state} day=${day} band=${bd}
+              onQuickAdd=${(st) => { setQuickInit(st); setQuickOpen(true); }} />`)}
+            ${(showExt || extAfter.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extAfter}
+              onExtBid=${setBidTimeFor} onExtMove=${setMoveTimeFor} />`}
+            ${labelSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} />`)}`
+          : (sortedSlots.length === 0
             ? html`<div class="text-[12px] text-slate-400 py-3 text-center">시간대가 없습니다. “+ 상품” 또는 “+ 시간대”로 추가하세요.</div>`
-            : sortedSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} />`)}
+            : sortedSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} />`))}
         </div>
         ${addOpen && html`<${AddSlotModal} day=${day} onClose=${() => setAddOpen(false)} />`}
-        ${quickOpen && html`<${QuickAddModal} state=${state} day=${day} onClose=${() => setQuickOpen(false)} />`}
+        ${quickOpen && html`<${QuickAddModal} state=${state} day=${day} initStart=${quickInit} onClose=${() => setQuickOpen(false)} />`}
         ${moveTimeFor && html`<${MoveTimeModal} state=${state} day=${day} placementId=${moveTimeFor} onClose=${() => setMoveTimeFor(null)} />`}
         ${bidTimeFor && html`<${BidTimeModal} state=${state} day=${day} bidId=${bidTimeFor} onClose=${() => setBidTimeFor(null)} />`}
       </div>`;
@@ -573,13 +672,13 @@
   }
 
   // 수기 상품 추가 — 날짜가 시간대형이면 시간 입력, 순번(1·2·3부)형이면 부 입력
-  function QuickAddModal({ state, day, onClose }) {
+  function QuickAddModal({ state, day, onClose, initStart }) {
     const teams = programTeams(state);
     // 순번형: 패션 프로그램이거나, 이 날짜에 순번 슬롯(1부 등)이 있으면
     const orderMode = programSchema(state) === 'fashion' || day.slots.some((s) => s.label && !s.start);
     const [name, setName] = useState('');
     const [dur, setDur] = useState('');
-    const [start, setStart] = useState('');
+    const [start, setStart] = useState(initStart || '');
     const [part, setPart] = useState('1부');
     const [team, setTeam] = useState(teams[0] ? teams[0].id : 'etc');
     function save() {
@@ -906,6 +1005,45 @@
   }
 
   /* =====================================================================
+   *  이미지 저장 — 포함할 항목 선택 (선택한 열만 PNG로)
+   * ===================================================================== */
+  function ImgColsModal({ slim, onClose, onSave }) {
+    const ALL = [
+      ['time', '시간'], ['dur', '노출분'], ['status', '상태'], ['product', '상품명'], ['group', '그룹코드'],
+      ['note', '내용/이슈'], ['comp', '구성'], ['prep', '준비물량'], ['price', '가격'], ['margin', '마진'],
+      ['recent', '최근 달성률'], ['pd', 'PD'], ['host', '쇼호스트'], ['studio', '스튜디오'], ['memo', '비고(PD)'],
+    ].filter(([k]) => !slim || ['time', 'dur', 'product', 'group', 'pd', 'host', 'studio'].includes(k));
+    const [sel, setSel] = useState(() => {
+      try {
+        const raw = localStorage.getItem('img-cols-v1');
+        if (raw) { const arr = JSON.parse(raw); const st = new Set(arr.filter((k) => ALL.some(([kk]) => kk === k))); if (st.size) return st; }
+      } catch (e) {}
+      return new Set(ALL.map(([k]) => k));
+    });
+    const toggle = (k) => setSel((prev) => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+    function go() {
+      if (sel.size === 0) { alert('한 개 이상 선택하세요.'); return; }
+      try { localStorage.setItem('img-cols-v1', JSON.stringify([...sel])); } catch (e) {}
+      onSave(new Set(sel));
+      onClose();
+    }
+    return html`
+      <${Modal} title="이미지 저장 — 포함할 항목 선택" onClose=${onClose} onSave=${go}
+        extra=${html`<div class="flex gap-2 mr-auto">
+          <button onClick=${() => setSel(new Set(ALL.map(([k]) => k)))} class="text-[12px] text-ink-soft hover:text-brand">전체 선택</button>
+          <button onClick=${() => setSel(new Set(['time', 'dur', 'product', 'pd', 'host'].filter((k) => ALL.some(([kk]) => kk === k))))}
+            class="text-[12px] text-ink-soft hover:text-brand">기본 (시간·상품·캐스팅)</button>
+        </div>`}>
+        <div class="text-[12px] text-ink-soft -mt-1">방송일·요일은 항상 포함됩니다. 체크한 항목만 이미지(PNG)에 담깁니다. (선택은 기억됩니다)</div>
+        <div class="grid grid-cols-3 gap-2">
+          ${ALL.map(([k, label]) => html`
+            <label key=${k} class=${`flex items-center gap-1.5 text-[13px] cursor-pointer border rounded px-2 py-1.5 ${sel.has(k) ? 'bg-brand-light/50 border-brand/40' : 'border-slate-200'}`}>
+              <input type="checkbox" checked=${sel.has(k)} onChange=${() => toggle(k)} /> ${label}</label>`)}
+        </div>
+      <//>`;
+  }
+
+  /* =====================================================================
    *  최종편성안 (엑셀 레이아웃 표 · 직접 편집 가능)
    * ===================================================================== */
   function FinalScheduleView({ state, readOnly, full }) {
@@ -913,6 +1051,7 @@
     const slim = readOnly && !full;
     const prog = activeProgramObj(state);
     const [snapOpen, setSnapOpen] = useState(false);
+    const [imgColsOpen, setImgColsOpen] = useState(false);
     const snapCount = (state.snapshots || []).filter((s) =>
       s.year === state.view.year && s.month === state.view.month && s.programId === state.activeProgram).length;
     const capRef = useRef(null);
@@ -959,7 +1098,7 @@
       window.XLSX.utils.book_append_sheet(wb, ws, `${year}년${month}월`);
       window.XLSX.writeFile(wb, `${prog.name}_${year}-${String(month).padStart(2, '0')}_최종편성안.xlsx`);
     }
-    async function saveImage() {
+    async function saveImage(picked) {
       const el = capRef.current;
       if (!window.html2canvas || !el) { alert('이미지 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.'); return; }
       setSaving(true);
@@ -979,6 +1118,10 @@
           div.style.fontSize = '14px';
           div.style.padding = '0';
           cf.parentNode.replaceChild(div, cf);
+        });
+        // 선택한 항목만 남김 (방송일·요일은 항상 포함)
+        if (picked) clone.querySelectorAll('[data-col]').forEach((cel) => {
+          if (!picked.has(cel.getAttribute('data-col'))) cel.remove();
         });
         // 표를 내용 폭으로(불필요한 가로 여백 제거) + 글자 키움 + 행 여백 축소
         clone.style.width = 'max-content';
@@ -1053,12 +1196,14 @@
               title="이 프로그램·월의 저장본(편성 저장 이력) 목록">저장본 ${snapCount}</button>`}
             <button onClick=${saveExcel}
               class="text-xs px-2.5 py-1 rounded border border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50 whitespace-nowrap shrink-0">📊 엑셀 저장 (XLSX)</button>
-            <button onClick=${saveImage} disabled=${saving}
-              class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand disabled:opacity-50 whitespace-nowrap shrink-0">
+            <button onClick=${() => setImgColsOpen(true)} disabled=${saving}
+              class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand disabled:opacity-50 whitespace-nowrap shrink-0"
+              title="포함할 항목을 선택해 이미지로 저장">
               ${saving ? '이미지 생성 중…' : '🖼 이미지 저장 (PNG)'}</button>
           </div>
         </div>
         ${snapOpen && html`<${SnapshotsModal} state=${state} onClose=${() => setSnapOpen(false)} />`}
+        ${imgColsOpen && html`<${ImgColsModal} slim=${slim} onClose=${() => setImgColsOpen(false)} onSave=${(pk) => saveImage(pk)} />`}
         <div ref=${capRef} id="final-capture" class="bg-white rounded-lg shadow-sm overflow-x-auto">
           <div class="px-3 py-2 border-b-2 border-brand text-[13px] font-bold text-ink">
             ${prog.name} · ${year}년 ${month}월 최종편성안 <span class="font-normal text-ink-soft">(총 ${total}편성)</span>
@@ -1068,21 +1213,21 @@
               <tr>
                 <th class=${th} style=${{ minWidth: '70px' }}>방송일</th>
                 <th class=${th} style=${{ minWidth: '36px' }}>요일</th>
-                <th class=${th} style=${{ minWidth: '104px' }}>시간</th>
-                ${!slim && html`<th class=${th} style=${{ minWidth: '58px' }}>상태</th>`}
-                <th class=${th} style=${{ minWidth: '150px' }}>상품명</th>
-                <th class=${th} style=${{ minWidth: '92px' }}>그룹코드</th>
+                <th class=${th} style=${{ minWidth: '104px' }} data-col="time">시간</th>
+                ${!slim && html`<th class=${th} style=${{ minWidth: '58px' }} data-col="status">상태</th>`}
+                <th class=${th} style=${{ minWidth: '150px' }} data-col="product">상품명</th>
+                <th class=${th} style=${{ minWidth: '92px' }} data-col="group">그룹코드</th>
                 ${!slim && html`
-                  <th class=${th} style=${{ minWidth: '170px' }}>내용 / 타이틀</th>
-                  <th class=${th} style=${{ minWidth: '130px' }}>구성</th>
-                  <th class=${th} style=${{ minWidth: '78px' }}>준비물량</th>
-                  <th class=${th} style=${{ minWidth: '100px' }}>가격</th>
-                  <th class=${th} style=${{ minWidth: '64px' }}>마진</th>
-                  <th class=${th} style=${{ minWidth: '128px' }}>최근 3회 달성률</th>`}
-                <th class=${th} style=${{ minWidth: '100px' }}>PD</th>
-                <th class=${th} style=${{ minWidth: '100px' }}>쇼호스트</th>
-                <th class=${th} style=${{ minWidth: '80px' }}>스튜디오</th>
-                ${!slim && html`<th class=${th} style=${{ minWidth: '140px' }}>비고 (PD)</th>`}
+                  <th class=${th} style=${{ minWidth: '170px' }} data-col="note">내용 / 타이틀</th>
+                  <th class=${th} style=${{ minWidth: '130px' }} data-col="comp">구성</th>
+                  <th class=${th} style=${{ minWidth: '78px' }} data-col="prep">준비물량</th>
+                  <th class=${th} style=${{ minWidth: '100px' }} data-col="price">가격</th>
+                  <th class=${th} style=${{ minWidth: '64px' }} data-col="margin">마진</th>
+                  <th class=${th} style=${{ minWidth: '128px' }} data-col="recent">최근 3회 달성률</th>`}
+                <th class=${th} style=${{ minWidth: '100px' }} data-col="pd">PD</th>
+                <th class=${th} style=${{ minWidth: '100px' }} data-col="host">쇼호스트</th>
+                <th class=${th} style=${{ minWidth: '80px' }} data-col="studio">스튜디오</th>
+                ${!slim && html`<th class=${th} style=${{ minWidth: '140px' }} data-col="memo">비고 (PD)</th>`}
               </tr>
             </thead>
             <tbody>
@@ -1099,18 +1244,18 @@
                     ${r.firstOfDay && html`
                       <td class=${`${tdMerge} font-semibold tabular-nums text-ink`} rowSpan=${dayCount[r.day.date]}>${m}/${dnum}${r.day.airTime ? html`<div class="text-[10px] font-normal text-ink-soft mt-0.5 whitespace-nowrap">${r.day.airTime}</div>` : ''}</td>
                       <td class=${`${tdMerge} font-semibold ${wdColor}`} rowSpan=${dayCount[r.day.date]}>${wd}</td>`}
-                    <td class=${`${td} tabular-nums font-medium ${r.compete ? 'text-amber-700' : ''}`}>
+                    <td class=${`${td} tabular-nums font-medium ${r.compete ? 'text-amber-700' : ''}`} data-col="time">
                       ${slotName(r.slot)} ${r.compete && html`<span class="text-[10px] text-amber-600">●경쟁</span>`}
-                      ${r.slot.start && r.slot.end && html`<div class="text-[11px] text-ink-soft font-normal">${U.slotDuration(r.slot)}분</div>`}
+                      ${r.slot.start && r.slot.end && html`<div class="text-[11px] text-ink-soft font-normal" data-col="dur">${U.slotDuration(r.slot)}분</div>`}
                     </td>
-                    ${!slim && html`<td class=${`${td} text-center`}>
+                    ${!slim && html`<td class=${`${td} text-center`} data-col="status">
                       ${p ? (readOnly
                         ? (pend ? html`<${Badge} color="#d97706">미정<//>` : html`<span class="text-[11px] text-emerald-600">확정</span>`)
                         : html`<label class="flex items-center justify-center gap-1 text-[11px] cursor-pointer ${pend ? 'text-amber-700 font-semibold' : 'text-ink-soft'}">
                             <input type="checkbox" checked=${!!pend} onChange=${(e) => store.updatePlacementContent(p.id, { pending: e.target.checked })} /> 미정</label>`)
                         : ''}
                     </td>`}
-                    <td class=${`${td} p-0`}>
+                    <td class=${`${td} p-0`} data-col="product">
                       ${p ? html`<div>
                           <div class="flex items-center gap-1 pr-2">
                             ${Cell(p.productName, (val) => store.updatePlacementContent(p.id, { productName: val }), { color: 'font-semibold text-ink' })}
@@ -1123,20 +1268,20 @@
                         </div>`
                         : html`<span class="px-2 text-slate-300">—</span>`}
                     </td>
-                    <td class=${`${td} p-0`}>${p ? Cell(det.groupCode, (val) => store.updatePlacementContent(p.id, { detail: { groupCode: val } }), { ph: '그룹코드', color: 'tabular-nums' }) : ''}</td>
+                    <td class=${`${td} p-0`} data-col="group">${p ? Cell(det.groupCode, (val) => store.updatePlacementContent(p.id, { detail: { groupCode: val } }), { ph: '그룹코드', color: 'tabular-nums' }) : ''}</td>
                     ${!slim && html`
-                    <td class=${`${td} p-0`}>${p ? html`${Cell(det.note, (val) => store.updatePlacementContent(p.id, { detail: { note: val } }), { ph: '내용/타이틀…' })}
+                    <td class=${`${td} p-0`} data-col="note">${p ? html`${Cell(det.note, (val) => store.updatePlacementContent(p.id, { detail: { note: val } }), { ph: '내용/타이틀…' })}
                       <div class="border-t border-dashed border-rose-200">${Cell(det.issue, (val) => store.updatePlacementContent(p.id, { detail: { issue: val } }), { ph: '이슈/특이사항…', color: 'text-rose-500' })}</div>` : ''}</td>
-                    <td class=${`${td} p-0`}>${p ? Cell(det.comp, (val) => store.updatePlacementContent(p.id, { detail: { comp: val } }), { ph: '구성…' }) : ''}</td>
-                    <td class=${`${td} p-0`}>${p ? Cell(det.prep, (val) => store.updatePlacementContent(p.id, { detail: { prep: val } }), { ph: '00억…', color: 'tabular-nums' }) : ''}</td>
-                    <td class=${`${td} p-0`}>${p ? Cell(det.price, (val) => store.updatePlacementContent(p.id, { detail: { price: val } }), { ph: '가격…', color: 'tabular-nums' }) : ''}</td>
-                    <td class=${`${td} p-0`}>${p ? Cell(det.margin, (val) => store.updatePlacementContent(p.id, { detail: { margin: val } }), { ph: '마진…', color: 'tabular-nums' }) : ''}</td>
-                    <td class=${`${td} p-0`}>${p ? html`<${Recent3Cell} value=${det.recent} readOnly=${readOnly}
+                    <td class=${`${td} p-0`} data-col="comp">${p ? Cell(det.comp, (val) => store.updatePlacementContent(p.id, { detail: { comp: val } }), { ph: '구성…' }) : ''}</td>
+                    <td class=${`${td} p-0`} data-col="prep">${p ? Cell(det.prep, (val) => store.updatePlacementContent(p.id, { detail: { prep: val } }), { ph: '00억…', color: 'tabular-nums' }) : ''}</td>
+                    <td class=${`${td} p-0`} data-col="price">${p ? Cell(det.price, (val) => store.updatePlacementContent(p.id, { detail: { price: val } }), { ph: '가격…', color: 'tabular-nums' }) : ''}</td>
+                    <td class=${`${td} p-0`} data-col="margin">${p ? Cell(det.margin, (val) => store.updatePlacementContent(p.id, { detail: { margin: val } }), { ph: '마진…', color: 'tabular-nums' }) : ''}</td>
+                    <td class=${`${td} p-0`} data-col="recent">${p ? html`<${Recent3Cell} value=${det.recent} readOnly=${readOnly}
                       onCommit=${(val) => store.updatePlacementContent(p.id, { detail: { recent: val } })} />` : ''}</td>`}
-                    <td class=${`${td} p-0`}>${p ? castCell(p, 'pd') : ''}</td>
-                    <td class=${`${td} p-0`}>${p ? castCell(p, 'host') : ''}</td>
-                    <td class=${`${td} p-0`}>${p ? castCell(p, 'studio') : ''}</td>
-                    ${!slim && html`<td class=${`${td} p-0`}>${p ? Cell(p.memo, (val) => store.updatePlacementContent(p.id, { memo: val }), { ph: 'PD 코멘트…', color: 'text-violet-700' }) : ''}</td>`}
+                    <td class=${`${td} p-0`} data-col="pd">${p ? castCell(p, 'pd') : ''}</td>
+                    <td class=${`${td} p-0`} data-col="host">${p ? castCell(p, 'host') : ''}</td>
+                    <td class=${`${td} p-0`} data-col="studio">${p ? castCell(p, 'studio') : ''}</td>
+                    ${!slim && html`<td class=${`${td} p-0`} data-col="memo">${p ? Cell(p.memo, (val) => store.updatePlacementContent(p.id, { memo: val }), { ph: 'PD 코멘트…', color: 'text-violet-700' }) : ''}</td>`}
                   </tr>`;
               })}
             </tbody>
