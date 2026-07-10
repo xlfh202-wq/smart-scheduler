@@ -30,7 +30,8 @@ window.AUTH = {
       password: 'ltpd2026',
       // 첫 항목이 입장 시 기본 화면 (nav 버튼 순서는 별도 고정)
       // → PD 입장 기본 화면: 최종편성안
-      // board = 입찰 보드(상품명·팀명·노출분 간결 조정) / schedule = PD 캐스팅(기존 편성표)
+      // board = 입찰 보드(상품명·팀명·노출분 간결 조정)
+      // schedule = 상세 편성표(구 PD 캐스팅) — 내비에서 숨김, 최종편성안 우측 ⚙ 버튼으로 진입
       tabs: ['final', 'board', 'schedule', 'bids'],
       canManage: true,
       color: '#da291c',

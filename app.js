@@ -144,8 +144,8 @@
         style=${{ borderLeft: `4px solid ${team.color}` }}>
         <div class="flex items-start justify-between gap-0.5">
           <div class="min-w-0 flex-1">
-            <div class=${`${simple ? 'text-[13.5px]' : 'text-[12.5px]'} font-bold text-ink leading-snug break-words`}>${p.productName}</div>
-            ${subTime && (subSlot
+            <div class=${`${simple ? 'text-[14px]' : 'text-[12.5px]'} font-bold text-ink leading-snug break-words`}>${p.productName}</div>
+            ${!simple && subTime && (subSlot
               ? html`<button onClick=${(e) => { e.stopPropagation(); setSubEdit(true); }}
                   class="text-[10px] font-semibold text-amber-700 tabular-nums hover:underline decoration-dotted"
                   title="MD 입찰의 세부 시간 — 클릭해 시간 조정">⏱ ${subTime}</button>`
@@ -986,7 +986,7 @@
         <${BidPool} state=${state} />
         <div class="flex-1 overflow-y-auto p-2 sm:p-4">
           <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
-            <h2 class="text-base font-bold text-ink">${year}년 ${month}월 ${simple ? '입찰 보드' : '편성표 · 캐스팅'}
+            <h2 class="text-base font-bold text-ink">${year}년 ${month}월 ${simple ? '입찰 보드' : '편성표 (상세)'}
               <span class="text-[12px] font-normal text-ink-soft">방송일 ${days.length}일 · 편성 ${placedCount}건 · +${shiftMonth(state.view, 1).month}월 첫주 포함</span>
               ${lastSnap
                 ? html`<span class="text-[11px] font-normal text-emerald-600 ml-1">· 마지막 저장 ${fmtTs(lastSnap.ts)}</span>`
@@ -1007,7 +1007,7 @@
             </div>
           </div>
           ${simple && html`<div class="mb-2 text-[12px] text-ink-soft bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5">
-            상품명·팀명·노출분만 간결하게 표시합니다. 드래그로 <b>순서·시간띠를 조정</b>하고 “편성 저장”을 누르면 <b>PD 캐스팅</b> 탭으로 이동해 PD·쇼호스트·스튜디오를 입력합니다.</div>`}
+            상품명·팀명·노출분만 간결하게 표시합니다. 드래그로 <b>순서·시간띠를 조정</b>하고 “편성 저장”을 누르면 <b>최종편성안</b>으로 이동해 PD·쇼호스트·스튜디오와 상세를 입력합니다.</div>`}
           <div class="space-y-4">
             ${days.length === 0 && html`<div class="text-sm text-slate-400 py-10 text-center">이 달에는 편성일이 없습니다. “+ 편성일 추가”로 추가하세요.</div>`}
             ${groupByWeek(days).map(([wk, days]) => html`
@@ -1022,7 +1022,7 @@
         ${snapOpen && html`<${SnapshotsModal} state=${state} onClose=${() => setSnapOpen(false)} />`}
         ${addDayOpen && html`<${AddDayModal} state=${state} onClose=${() => setAddDayOpen(false)} />`}
         ${memoOpen && html`<${CastingMemoModal} state=${state} onClose=${() => setMemoOpen(false)} />`}
-        ${saveOpen && html`<${SaveSnapshotModal} year=${year} month=${month} count=${placedCount} next=${simple ? 'PD 캐스팅' : '최종편성안'} onSave=${doSave} onClose=${() => setSaveOpen(false)} />`}
+        ${saveOpen && html`<${SaveSnapshotModal} year=${year} month=${month} count=${placedCount} onSave=${doSave} onClose=${() => setSaveOpen(false)} />`}
       </div>`;
   }
 
@@ -1138,12 +1138,14 @@
   /* =====================================================================
    *  최종편성안 (엑셀 레이아웃 표 · 직접 편집 가능)
    * ===================================================================== */
-  function FinalScheduleView({ state, readOnly, full }) {
+  function FinalScheduleView({ state, readOnly, full, onOpenSchedule }) {
     // slim: MD 조회용(민감 열 숨김). full+readOnly: 편성팀 — PD와 동일한 전체 열, 편집만 불가
     const slim = readOnly && !full;
     const prog = activeProgramObj(state);
     const [snapOpen, setSnapOpen] = useState(false);
     const [imgColsOpen, setImgColsOpen] = useState(false);
+    const [memoOpen, setMemoOpen] = useState(false); // 캐스팅 특이사항 메모 (PD·관리자)
+    const hasMemo = !!(state.castingMemo && state.castingMemo[`${state.activeProgram}|${state.view.year}-${String(state.view.month).padStart(2, '0')}`]);
     const snapCount = (state.snapshots || []).filter((s) =>
       s.year === state.view.year && s.month === state.view.month && s.programId === state.activeProgram).length;
     const capRef = useRef(null);
@@ -1283,6 +1285,9 @@
           <h2 class="text-base font-bold text-ink">${prog.name} · ${year}년 ${month}월 최종편성안
             <span class="text-[12px] font-normal text-ink-soft">총 ${total}편성${readOnly ? ' · 조회 전용' : ' · 셀을 클릭해 직접 수정'}</span></h2>
           <div class="flex items-center gap-2">
+            ${!readOnly && html`<button onClick=${() => setMemoOpen(true)}
+              class=${`text-xs px-2.5 py-1 rounded border whitespace-nowrap shrink-0 ${hasMemo ? 'border-amber-400 text-amber-700 bg-amber-50' : 'border-slate-300 bg-white hover:border-brand hover:text-brand'}`}
+              title="PD·쇼호스트 캐스팅 특이사항(휴가·불가일 등) — 월·프로그램별 메모">📌 캐스팅 메모${hasMemo ? ' ●' : ''}</button>`}
             ${!readOnly && html`<button onClick=${() => setSnapOpen(true)}
               class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0"
               title="이 프로그램·월의 저장본(편성 저장 이력) 목록">저장본 ${snapCount}</button>`}
@@ -1292,9 +1297,13 @@
               class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand disabled:opacity-50 whitespace-nowrap shrink-0"
               title="포함할 항목을 선택해 이미지로 저장">
               ${saving ? '이미지 생성 중…' : '🖼 이미지 저장 (PNG)'}</button>
+            ${onOpenSchedule && html`<button onClick=${onOpenSchedule}
+              class="text-[12px] text-slate-300 hover:text-brand px-1 shrink-0"
+              title="상세 편성표(구 PD 캐스팅 화면) 열기 — 시간띠·카드 상세 편집">⚙</button>`}
           </div>
         </div>
         ${snapOpen && html`<${SnapshotsModal} state=${state} onClose=${() => setSnapOpen(false)} />`}
+        ${memoOpen && html`<${CastingMemoModal} state=${state} onClose=${() => setMemoOpen(false)} />`}
         ${imgColsOpen && html`<${ImgColsModal} slim=${slim} onClose=${() => setImgColsOpen(false)} onSave=${(pk) => saveImage(pk)} />`}
         <div ref=${capRef} id="final-capture" class="bg-white rounded-lg shadow-sm overflow-x-auto">
           <div class="px-3 py-2 border-b-2 border-brand text-[13px] font-bold text-ink">
@@ -2693,8 +2702,8 @@
                 class=${tabCls(curTab === 'bids')}>MD 입찰</button>`}
               ${allowed.includes('board') && html`<button onClick=${() => guardTab('board')}
                 class=${tabCls(curTab === 'board')}>입찰 보드</button>`}
-              ${allowed.includes('schedule') && html`<button onClick=${() => guardTab('schedule')}
-                class=${tabCls(curTab === 'schedule')}>PD 캐스팅</button>`}
+              ${/* PD 캐스팅(상세 편성표) 탭은 내비에서 숨김 — 최종편성안 우측 하단 '편성표' 버튼으로 진입 가능 */''}
+              ${curTab === 'schedule' && html`<button class=${tabCls(true)}>편성표 (상세)</button>`}
               ${allowed.includes('final') && html`<button onClick=${() => guardTab('final')}
                 class=${tabCls(curTab === 'final')}>최종편성안</button>`}
               ${allowed.includes('finalview') && html`<button onClick=${() => guardTab('finalview')}
@@ -2756,9 +2765,9 @@
         <${ProgramTabs} state=${state} isAdmin=${!!roleCfg.isAdmin} />
 
         <main class="flex-1 min-h-0 flex flex-col border-t border-slate-300">
-          ${curTab === 'board' ? html`<${ScheduleView} state=${state} simple=${true} onSaved=${() => setTab('schedule')} />`
+          ${curTab === 'board' ? html`<${ScheduleView} state=${state} simple=${true} onSaved=${() => setTab('final')} />`
             : curTab === 'schedule' ? html`<${ScheduleView} state=${state} onSaved=${() => setTab('final')} />`
-            : curTab === 'final' ? html`<${FinalScheduleView} state=${state} />`
+            : curTab === 'final' ? html`<${FinalScheduleView} state=${state} onOpenSchedule=${allowed.includes('schedule') ? (() => guardTab('schedule')) : undefined} />`
             : curTab === 'finalview' ? html`<${FinalScheduleView} state=${state} readOnly=${true} />`
             : curTab === 'finalpgm' ? html`<${FinalScheduleView} state=${state} readOnly=${true} full=${true} />`
             : html`<${BidBoard} state=${state} readOnly=${!!roleCfg.viewOnly} />`}
