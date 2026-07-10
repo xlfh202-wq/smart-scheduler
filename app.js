@@ -1162,7 +1162,7 @@
       // MD(조회 전용)는 민감 항목(구성·준비물량·가격·마진·달성률·비고) 제외한 축약본으로 출력
       const header = slim
         ? ['방송일', '요일', '시간', '상품명', '그룹코드', 'PD', '쇼호스트', '스튜디오']
-        : ['방송일', '요일', '시간', '상태', '상품명', '그룹코드', '내용/타이틀', '구성', '준비물량', '가격', '마진', '최근달성률', 'PD', '쇼호스트', '스튜디오', '비고(PD)'];
+        : ['방송일', '요일', '시간', '상태', '상품명', '그룹코드', 'PD', '쇼호스트', '스튜디오', '내용/타이틀', '구성', '준비물량', '가격', '마진', '최근달성률', '비고(PD)'];
       const aoa = [header]; const merges = []; let ri = 1;
       rows.forEach((r) => {
         const p = r.p; const det = (p && p.detail) || {};
@@ -1177,10 +1177,11 @@
           : [
             r.firstOfDay ? `${mm}/${dnum}` : '', r.firstOfDay ? U.WEEKDAY_KO[r.day.weekday] : '',
             slotName(r.slot) + (r.slot.start && r.slot.end ? ` (${U.slotDuration(r.slot)}분)` : ''), p ? (p.pending ? '미정' : '확정') : '',
-            p ? ((p.productName || '') + items) : '', p ? (det.groupCode || '') : '', p ? (det.note || '') : '', p ? (det.comp || '') : '',
+            p ? ((p.productName || '') + items) : '', p ? (det.groupCode || '') : '',
+            p ? (p.pd || '') : '', p ? (p.host || '') : '', p ? (p.studio || '') : '',
+            p ? (det.note || '') : '', p ? (det.comp || '') : '',
             p ? (det.prep || '') : '', p ? (det.price || '') : '', p ? (det.margin || '') : '',
-            p ? recentText(det.recent) : '', p ? (p.pd || '') : '', p ? (p.host || '') : '',
-            p ? (p.studio || '') : '', p ? (p.memo || '') : '',
+            p ? recentText(det.recent) : '', p ? (p.memo || '') : '',
           ]);
         if (r.firstOfDay) {
           const span = dayCount[r.day.date];
@@ -1192,7 +1193,7 @@
       ws['!merges'] = merges;
       ws['!cols'] = slim
         ? [{ wch: 7 }, { wch: 5 }, { wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }]
-        : [{ wch: 7 }, { wch: 5 }, { wch: 12 }, { wch: 6 }, { wch: 26 }, { wch: 12 }, { wch: 24 }, { wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 22 }];
+        : [{ wch: 7 }, { wch: 5 }, { wch: 12 }, { wch: 6 }, { wch: 26 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 24 }, { wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 22 }];
       const wb = window.XLSX.utils.book_new();
       window.XLSX.utils.book_append_sheet(wb, ws, `${year}년${month}월`);
       window.XLSX.writeFile(wb, `${prog.name}_${year}-${String(month).padStart(2, '0')}_최종편성안.xlsx`);
@@ -1380,17 +1381,17 @@
                 ${!slim && html`<th class=${th} style=${{ minWidth: '58px' }} data-col="status">상태</th>`}
                 <th class=${th} style=${{ minWidth: '150px' }} data-col="product">상품명</th>
                 <th class=${th} style=${{ minWidth: '92px' }} data-col="group">그룹코드</th>
+                <th class=${th} style=${{ minWidth: '100px' }} data-col="pd">PD</th>
+                <th class=${th} style=${{ minWidth: '100px' }} data-col="host">쇼호스트</th>
+                <th class=${th} style=${{ minWidth: '80px' }} data-col="studio">스튜디오</th>
                 ${!slim && html`
                   <th class=${th} style=${{ minWidth: '170px' }} data-col="note">내용 / 타이틀</th>
                   <th class=${th} style=${{ minWidth: '130px' }} data-col="comp">구성</th>
                   <th class=${th} style=${{ minWidth: '78px' }} data-col="prep">준비물량</th>
                   <th class=${th} style=${{ minWidth: '100px' }} data-col="price">가격</th>
                   <th class=${th} style=${{ minWidth: '64px' }} data-col="margin">마진</th>
-                  <th class=${th} style=${{ minWidth: '128px' }} data-col="recent">최근 3회 달성률</th>`}
-                <th class=${th} style=${{ minWidth: '100px' }} data-col="pd">PD</th>
-                <th class=${th} style=${{ minWidth: '100px' }} data-col="host">쇼호스트</th>
-                <th class=${th} style=${{ minWidth: '80px' }} data-col="studio">스튜디오</th>
-                ${!slim && html`<th class=${th} style=${{ minWidth: '140px' }} data-col="memo">비고 (PD)</th>`}
+                  <th class=${th} style=${{ minWidth: '128px' }} data-col="recent">최근 3회 달성률</th>
+                  <th class=${th} style=${{ minWidth: '140px' }} data-col="memo">비고 (PD)</th>`}
               </tr>
             </thead>
             <tbody>
@@ -1447,6 +1448,9 @@
                         : html`<span class="px-2 text-slate-300">—</span>`}
                     </td>
                     <td class=${`${td} p-0`} data-col="group">${p ? Cell(det.groupCode, (val) => store.updatePlacementContent(p.id, { detail: { groupCode: val } }), { ph: '그룹코드', color: 'tabular-nums' }) : ''}</td>
+                    <td class=${`${td} p-0`} data-col="pd">${p ? castCell(p, 'pd') : ''}</td>
+                    <td class=${`${td} p-0`} data-col="host">${p ? castCell(p, 'host') : ''}</td>
+                    <td class=${`${td} p-0`} data-col="studio">${p ? castCell(p, 'studio') : ''}</td>
                     ${!slim && html`
                     <td class=${`${td} p-0`} data-col="note">${p ? html`${Cell(det.note, (val) => store.updatePlacementContent(p.id, { detail: { note: val } }), { ph: '내용/타이틀…' })}
                       <div class="border-t border-dashed border-rose-200">${Cell(det.issue, (val) => store.updatePlacementContent(p.id, { detail: { issue: val } }), { ph: '이슈/특이사항…', color: 'text-rose-500' })}</div>` : ''}</td>
@@ -1455,11 +1459,8 @@
                     <td class=${`${td} p-0`} data-col="price">${p ? Cell(det.price, (val) => store.updatePlacementContent(p.id, { detail: { price: val } }), { ph: '가격…', color: 'tabular-nums' }) : ''}</td>
                     <td class=${`${td} p-0`} data-col="margin">${p ? Cell(det.margin, (val) => store.updatePlacementContent(p.id, { detail: { margin: val } }), { ph: '마진…', color: 'tabular-nums' }) : ''}</td>
                     <td class=${`${td} p-0`} data-col="recent">${p ? html`<${Recent3Cell} value=${det.recent} readOnly=${readOnly}
-                      onCommit=${(val) => store.updatePlacementContent(p.id, { detail: { recent: val } })} />` : ''}</td>`}
-                    <td class=${`${td} p-0`} data-col="pd">${p ? castCell(p, 'pd') : ''}</td>
-                    <td class=${`${td} p-0`} data-col="host">${p ? castCell(p, 'host') : ''}</td>
-                    <td class=${`${td} p-0`} data-col="studio">${p ? castCell(p, 'studio') : ''}</td>
-                    ${!slim && html`<td class=${`${td} p-0`} data-col="memo">${p ? Cell(p.memo, (val) => store.updatePlacementContent(p.id, { memo: val }), { ph: 'PD 코멘트…', color: 'text-violet-700' }) : ''}</td>`}
+                      onCommit=${(val) => store.updatePlacementContent(p.id, { detail: { recent: val } })} />` : ''}</td>
+                    <td class=${`${td} p-0`} data-col="memo">${p ? Cell(p.memo, (val) => store.updatePlacementContent(p.id, { memo: val }), { ph: 'PD 코멘트…', color: 'text-violet-700' }) : ''}</td>`}
                   </tr>`;
               })}
             </tbody>
