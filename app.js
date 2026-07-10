@@ -138,11 +138,11 @@
       <div draggable=${true}
         onDragStart=${(e) => drag.start(e, 'placement', p.id)}
         onClick=${() => { setStartEdit(false); setInfo(true); }} title="클릭하면 상세 정보 · ✎ 로 바로 수정"
-        class="card-drag group relative rounded-md border bg-white px-2 py-1.5 shadow-sm hover:shadow hover:border-brand transition"
+        class="card-drag group relative w-[152px] rounded-md border border-slate-200 bg-white px-1.5 py-1 shadow-sm hover:shadow hover:border-brand transition"
         style=${{ borderLeft: `4px solid ${team.color}` }}>
-        <div class="flex items-start justify-between gap-1">
-          <div class="min-w-0">
-            <div class="text-[13px] font-semibold text-ink leading-tight truncate">${p.productName}</div>
+        <div class="flex items-start justify-between gap-0.5">
+          <div class="min-w-0 flex-1">
+            <div class="text-[12.5px] font-bold text-ink leading-snug break-words">${p.productName}</div>
             <div class="mt-0.5 flex flex-wrap items-center gap-1">
               <${Badge} color=${team.color}>${team.name}<//>
               ${items.length > 1 && html`<${Badge} color="#7c3aed" title="동시 노출 착장 수">동시 ${items.length}착장<//>`}
@@ -376,29 +376,27 @@
     }
 
     return html`
-      <div class=${`flex flex-col rounded-lg border bg-slate-50/60 ${over ? 'drop-active' : ''}`}
+      <div class=${`flex rounded-lg border bg-white overflow-hidden ${over ? 'drop-active' : ''}`}
         style=${compColor && !over ? { borderColor: compColor, boxShadow: `0 0 0 1px ${compColor}` } : (over ? {} : { borderColor: '#e2e8f0' })}
         onDragOver=${(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave=${() => setOver(false)}
         onDrop=${onDrop}>
-        <div class="flex items-center justify-between gap-1 px-2 py-1 border-b border-slate-200 bg-white rounded-t-lg">
-          <div class="flex items-center gap-x-1.5 gap-y-0.5 flex-wrap min-w-0">
-            <${SlotTimeButton} slot=${slot} className="text-[13px] font-bold text-ink tabular-nums whitespace-nowrap" />
-            ${slot.start && slot.end && html`<span class="text-[11px] text-ink-soft whitespace-nowrap">${dur}분</span>`}
-            ${compColor && html`<span class="inline-flex items-center gap-1 text-[11px] font-bold px-1.5 rounded whitespace-nowrap" style=${{ background: compColor + '22', color: compColor }}>
-              <span class="w-1.5 h-1.5 rounded-full shrink-0" style=${{ background: compColor }}></span>경쟁 ${compete}팀</span>`}
-          </div>
-          <div class="flex items-center gap-1 shrink-0 text-ink-soft">
-            ${slot.start && slot.end && html`<button title="시간 분할" onClick=${() => setSplitOpen(true)} class="hover:text-brand text-xs px-1">⊟</button>`}
+        <div class="w-[96px] shrink-0 px-2 py-1.5 bg-slate-50 border-r border-slate-200 flex flex-col gap-0.5">
+          <${SlotTimeButton} slot=${slot} className="text-[14px] font-extrabold text-ink tabular-nums leading-tight" />
+          ${slot.start && slot.end && html`<span class="text-[11px] font-semibold text-ink-soft">${dur}분</span>`}
+          ${compColor && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: compColor + '22', color: compColor }}>
+            <span class="w-1.5 h-1.5 rounded-full shrink-0" style=${{ background: compColor }}></span>경쟁 ${compete}팀</span>`}
+          <div class="mt-auto flex items-center gap-0.5 text-ink-soft">
+            ${slot.start && slot.end && html`<button title="시간 분할" onClick=${() => setSplitOpen(true)} class="hover:text-brand text-xs px-0.5">⊟</button>`}
             <button title="시간대 삭제" onClick=${() => { const n = state.placements.filter((x) => x.slotId === slot.id).length;
               if (confirm(`이 시간대를 삭제할까요?${n ? `\n배정된 상품 ${n}개는 삭제되지 않고 입찰 풀(미편성)로 돌아갑니다.` : ''}`)) store.removeSlot(slot.id); }}
-              class="hover:text-brand text-xs px-1">✕</button>
+              class="hover:text-brand text-xs px-0.5">✕</button>
           </div>
         </div>
-        <div class=${`flex flex-col gap-1.5 p-1.5 min-h-[52px] ${placements.length === 0 ? 'cursor-copy' : ''}`}
+        <div class=${`flex-1 flex flex-wrap items-stretch content-start gap-1 p-1.5 min-h-[56px] ${placements.length === 0 ? 'cursor-copy' : ''}`}
           onDoubleClick=${placements.length === 0 ? (() => setAddOpen(true)) : undefined} title=${placements.length === 0 ? '더블클릭하면 상품 추가' : ''}>
           ${placements.length === 0
-            ? html`<div class="text-[11px] text-slate-400 text-center py-2 select-none hover:text-brand">입찰 카드를 끌어다 놓거나 더블클릭해 추가</div>`
+            ? html`<div class="text-[11px] text-slate-400 self-center px-2 select-none hover:text-brand">입찰 카드를 끌어다 놓거나 더블클릭해 추가</div>`
             : placements.map((p) => html`<${PlacementCard} key=${p.id} state=${state} p=${p} />`)}
         </div>
         ${splitOpen && html`<${SplitModal} slot=${slot} dur=${dur} onClose=${() => setSplitOpen(false)} />`}
@@ -470,9 +468,11 @@
   }
 
   function DayBlock({ state, day }) {
-    const isThu = day.weekday === 4, isSat = day.weekday === 6;
-    const accent = isThu ? '#da291c' : isSat ? '#2563eb' : '#7c3aed';
     const fashion = programSchema(state) === 'fashion';
+    // 슬롯 정렬: 시간대는 시작시간순, 순번(1부…)은 번호순으로 뒤에
+    const slotOrder = (sl) => sl.start ? U.toMin(sl.start)
+      : 100000 + (parseInt(((sl.label || '').match(/\d+/) || [99])[0], 10) || 99);
+    const sortedSlots = day.slots.slice().sort((x, y) => slotOrder(x) - slotOrder(y));
     const [addOpen, setAddOpen] = useState(false);
     const [quickOpen, setQuickOpen] = useState(false);
     const [dayOver, setDayOver] = useState(false);
@@ -508,28 +508,28 @@
         onDragOver=${(e) => { e.preventDefault(); setDayOver(true); }}
         onDragLeave=${(e) => { if (e.currentTarget === e.target) setDayOver(false); }}
         onDrop=${onDayDrop}>
-        <div class="flex items-center justify-between px-3 py-2 text-white" style=${{ background: accent }}>
+        <div class="flex items-center justify-between px-3 py-1.5 bg-slate-100 border-b border-slate-200">
           <div class="flex items-center gap-2">
-            <div class="font-bold text-sm">${fmtDay(day)}</div>
-            ${fashion && html`<${AirTimeButton} day=${day} dark=${true} />`}
+            <div class="font-extrabold text-[15px] text-ink">${fmtDay(day)}</div>
+            ${fashion && html`<${AirTimeButton} day=${day} />`}
           </div>
-          <div class="flex items-center gap-2 text-[11px]">
-            <button onClick=${() => setQuickOpen(true)} class="font-semibold bg-white/20 hover:bg-white/30 px-1.5 py-0.5 rounded">+ 상품</button>
-            <button onClick=${() => setAddOpen(true)} class="hover:underline">+ 시간대</button>
-            <button onClick=${() => store.addSlot(day.id, { order: true })} class="hover:underline">+ 순번</button>
+          <div class="flex items-center gap-2 text-[11px] text-ink-soft">
+            <button onClick=${() => setQuickOpen(true)} class="font-semibold text-brand bg-white border border-brand/40 hover:bg-brand hover:text-white px-1.5 py-0.5 rounded">+ 상품</button>
+            <button onClick=${() => setAddOpen(true)} class="hover:text-brand">+ 시간대</button>
+            <button onClick=${() => store.addSlot(day.id, { order: true })} class="hover:text-brand">+ 순번</button>
             <button onClick=${() => {
                 const nP = state.placements.filter((x) => day.slots.some((sl) => sl.id === x.slotId)).length;
                 const placedIds = new Set(state.placements.map((x) => x.sourceBidId).filter(Boolean));
                 const nB = state.bids.filter((b) => b.dayId === day.id && !placedIds.has(b.id)).length; // 미편성 입찰만(중복 집계 방지)
                 const n = nP + nB;
               if (confirm(`${fmtDay(day)} 편성일을 삭제할까요?${n ? `\n이 날의 상품·입찰 ${n}건은 삭제되지 않고 입찰 풀로 돌아갑니다(희망일은 가까운 다른 날짜로 표시).` : ''}`)) store.removeDay(day.id); }}
-              class="hover:underline opacity-80">삭제</button>
+              class="hover:text-brand">삭제</button>
           </div>
         </div>
-        <div class="p-2 grid gap-2" style=${{ gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))' }}>
-          ${day.slots.length === 0
-            ? html`<div class="text-[12px] text-slate-400 py-3 text-center col-span-full">시간대가 없습니다. “+ 상품” 또는 “+ 시간대”로 추가하세요.</div>`
-            : day.slots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} />`)}
+        <div class="p-1.5 flex flex-col gap-1">
+          ${sortedSlots.length === 0
+            ? html`<div class="text-[12px] text-slate-400 py-3 text-center">시간대가 없습니다. “+ 상품” 또는 “+ 시간대”로 추가하세요.</div>`
+            : sortedSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} />`)}
         </div>
         ${addOpen && html`<${AddSlotModal} day=${day} onClose=${() => setAddOpen(false)} />`}
         ${quickOpen && html`<${QuickAddModal} state=${state} day=${day} onClose=${() => setQuickOpen(false)} />`}
@@ -933,12 +933,12 @@
         aoa.push(slim
           ? [
             r.firstOfDay ? `${mm}/${dnum}` : '', r.firstOfDay ? U.WEEKDAY_KO[r.day.weekday] : '',
-            slotName(r.slot), p ? ((p.productName || '') + items) : '', p ? (det.groupCode || '') : '',
+            slotName(r.slot) + (r.slot.start && r.slot.end ? ` (${U.slotDuration(r.slot)}분)` : ''), p ? ((p.productName || '') + items) : '', p ? (det.groupCode || '') : '',
             p ? (p.pd || '') : '', p ? (p.host || '') : '', p ? (p.studio || '') : '',
           ]
           : [
             r.firstOfDay ? `${mm}/${dnum}` : '', r.firstOfDay ? U.WEEKDAY_KO[r.day.weekday] : '',
-            slotName(r.slot), p ? (p.pending ? '미정' : '확정') : '',
+            slotName(r.slot) + (r.slot.start && r.slot.end ? ` (${U.slotDuration(r.slot)}분)` : ''), p ? (p.pending ? '미정' : '확정') : '',
             p ? ((p.productName || '') + items) : '', p ? (det.groupCode || '') : '', p ? (det.note || '') : '', p ? (det.comp || '') : '',
             p ? (det.prep || '') : '', p ? (det.price || '') : '', p ? (det.margin || '') : '',
             p ? recentText(det.recent) : '', p ? (p.pd || '') : '', p ? (p.host || '') : '',
@@ -1101,6 +1101,7 @@
                       <td class=${`${tdMerge} font-semibold ${wdColor}`} rowSpan=${dayCount[r.day.date]}>${wd}</td>`}
                     <td class=${`${td} tabular-nums font-medium ${r.compete ? 'text-amber-700' : ''}`}>
                       ${slotName(r.slot)} ${r.compete && html`<span class="text-[10px] text-amber-600">●경쟁</span>`}
+                      ${r.slot.start && r.slot.end && html`<div class="text-[11px] text-ink-soft font-normal">${U.slotDuration(r.slot)}분</div>`}
                     </td>
                     ${!slim && html`<td class=${`${td} text-center`}>
                       ${p ? (readOnly
