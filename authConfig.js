@@ -30,7 +30,8 @@ window.AUTH = {
       password: 'ltpd2026',
       // 첫 항목이 입장 시 기본 화면 (nav 버튼 순서는 별도 고정)
       // → PD 입장 기본 화면: 최종편성안
-      tabs: ['final', 'schedule', 'bids'],
+      // board = 입찰 보드(상품명·팀명·노출분 간결 조정) / schedule = PD 캐스팅(기존 편성표)
+      tabs: ['final', 'board', 'schedule', 'bids'],
       canManage: true,
       color: '#da291c',
     },
@@ -50,7 +51,7 @@ window.AUTH = {
       desc: '편성 + 관리 권한',
       password: 'ltpdadmin',
       // → 관리자 입장 기본 화면: 최종편성안
-      tabs: ['final', 'schedule', 'bids'],
+      tabs: ['final', 'board', 'schedule', 'bids'],
       canManage: true,
       isAdmin: true, // 데이터가 날아갈 수 있는 기능(이력 초기화·백업 복원) 권한
       color: '#7c3aed',

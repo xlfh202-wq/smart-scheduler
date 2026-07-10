@@ -537,6 +537,7 @@
       // ----- 편성표 초안(draft) 모드 API -----
       beginHold() { holdSync = true; draftDirty = 0; pendingHydrate = null; serverBase = JSON.stringify(state); },
       endHold() { holdSync = false; },
+      isHolding() { return holdSync; },
       draftCount() { return holdSync ? draftDirty : 0; },
       // '편성 저장': 보류 중 변경을 서버에 일괄 반영
       flushDraft() {
@@ -1127,6 +1128,17 @@
         emit();
       },
 
+      // 같은 시간띠 안에서 카드 순서 변경 (dragId 카드를 beforeId 카드 앞으로)
+      reorderPlacement(dragId, beforeId) {
+        const i = state.placements.findIndex((p) => p.id === dragId);
+        if (i < 0 || dragId === beforeId) return;
+        const [p] = state.placements.splice(i, 1);
+        const j = state.placements.findIndex((x) => x.id === beforeId);
+        state.placements.splice(j < 0 ? state.placements.length : j, 0, p);
+        log({ action: '순서변경', productName: p.productName, teamName: teamName(p.teamId), detail: '시간띠 내 순서 변경' });
+        emit();
+      },
+
       /* ---------- 슬롯/요일 편집 ---------- */
       // 슬롯 시간 직접 수정 (입찰보드·편성표 인라인)
       updateSlotTime(slotId, { start, end }) {
@@ -1145,6 +1157,33 @@
         const old = f.slot.label || '';
         f.slot.label = label;
         log({ action: '슬롯명수정', from: old, to: label });
+        emit();
+      },
+      // 고정 시간띠(밴드) 시간 조정 — 해당 날짜에만 적용. 띠 시간 그대로 편성된 슬롯도 함께 이동.
+      updateDayBand(dayId, idx, { start, end }) {
+        const day = state.days.find((d) => d.id === dayId);
+        if (!day) return;
+        const sched = progSchedule(day.programId);
+        const entry = sched && sched.find((sc) => sc.wd === day.weekday);
+        const base = (day.bands && day.bands.length) ? day.bands.map((b) => b.slice())
+          : ((entry && entry.slots) || []).map((b) => b.slice());
+        if (!base[idx]) return;
+        const [oldS, oldE] = base[idx];
+        base[idx] = [start, end];
+        day.bands = base;
+        day.slots.forEach((sl) => {
+          if (sl.start === oldS && sl.end === oldE) { sl.start = start; sl.end = end; }
+        });
+        day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
+        log({ action: '시간띠조정', from: `${oldS}~${oldE}`, to: `${start}~${end}`, detail: `${day.date} 시간띠 조정(이 날짜만)` });
+        emit();
+      },
+      // 시간띠 조정을 기본(프로그램 고정 스케줄)으로 되돌리기
+      resetDayBands(dayId) {
+        const day = state.days.find((d) => d.id === dayId);
+        if (!day || !day.bands) return;
+        delete day.bands;
+        log({ action: '시간띠조정', to: '기본 시간으로 복원', detail: `${day.date} 시간띠 기본값 복원` });
         emit();
       },
       splitSlot(slotId, firstMinutes) {

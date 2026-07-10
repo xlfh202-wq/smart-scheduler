@@ -128,31 +128,37 @@
   /* =====================================================================
    *  편성 카드 (PD 편성표 내부, 드래그 가능)
    * ===================================================================== */
-  function PlacementCard({ state, p, subTime }) {
+  function PlacementCard({ state, p, subTime, subSlot, simple }) {
     const team = teamOf(state, p.teamId);
     const [info, setInfo] = useState(false);
     const [startEdit, setStartEdit] = useState(false);
+    const [subEdit, setSubEdit] = useState(false);   // 세부 시간(⏱) 클릭 → 시간 조정
+    const [castOpen, setCastOpen] = useState(false); // 🎤 빠른 캐스팅 입력
     const det = p.detail || {};
     const items = p.items || [];
     return html`
       <div draggable=${true}
         onDragStart=${(e) => drag.start(e, 'placement', p.id)}
         onClick=${() => { setStartEdit(false); setInfo(true); }} title="클릭하면 상세 정보 · ✎ 로 바로 수정"
-        class="card-drag group relative w-[152px] rounded-md border border-slate-200 bg-white px-1.5 py-1 shadow-sm hover:shadow hover:border-brand transition"
+        class=${`card-drag group relative ${simple ? 'w-[168px]' : 'w-[152px]'} rounded-md border border-slate-200 bg-white px-1.5 py-1 shadow-sm hover:shadow hover:border-brand transition`}
         style=${{ borderLeft: `4px solid ${team.color}` }}>
         <div class="flex items-start justify-between gap-0.5">
           <div class="min-w-0 flex-1">
-            <div class="text-[12.5px] font-bold text-ink leading-snug break-words">${p.productName}</div>
-            ${subTime && html`<div class="text-[10px] font-semibold text-amber-700 tabular-nums" title="MD 입찰의 세부 시간 (고정 띠 안에 자동 귀속)">⏱ ${subTime}</div>`}
+            <div class=${`${simple ? 'text-[13.5px]' : 'text-[12.5px]'} font-bold text-ink leading-snug break-words`}>${p.productName}</div>
+            ${subTime && (subSlot
+              ? html`<button onClick=${(e) => { e.stopPropagation(); setSubEdit(true); }}
+                  class="text-[10px] font-semibold text-amber-700 tabular-nums hover:underline decoration-dotted"
+                  title="MD 입찰의 세부 시간 — 클릭해 시간 조정">⏱ ${subTime}</button>`
+              : html`<div class="text-[10px] font-semibold text-amber-700 tabular-nums" title="MD 입찰의 세부 시간 (고정 띠 안에 자동 귀속)">⏱ ${subTime}</div>`)}
             <div class="mt-0.5 flex flex-wrap items-center gap-1">
               <${Badge} color=${team.color}>${team.name}<//>
-              ${items.length > 1 && html`<${Badge} color="#7c3aed" title="동시 노출 착장 수">동시 ${items.length}착장<//>`}
-              ${det.isNew && html`<${Badge} color="#0891b2">신상품<//>`}
-              ${det.special && html`<${Badge} color="#da291c">특약${det.specialNote ? ' ' + det.specialNote : ''}<//>`}
-              ${p.moveCount > 0 && html`<${Badge} color="#da291c" title="편성 이동 횟수">↔ ${p.moveCount}회<//>`}
+              ${!simple && items.length > 1 && html`<${Badge} color="#7c3aed" title="동시 노출 착장 수">동시 ${items.length}착장<//>`}
+              ${!simple && det.isNew && html`<${Badge} color="#0891b2">신상품<//>`}
+              ${!simple && det.special && html`<${Badge} color="#da291c">특약${det.specialNote ? ' ' + det.specialNote : ''}<//>`}
+              ${!simple && p.moveCount > 0 && html`<${Badge} color="#da291c" title="편성 이동 횟수">↔ ${p.moveCount}회<//>`}
               ${p.durationMin && html`<${Badge}>${p.durationMin}분<//>`}
             </div>
-            ${(p.pd || p.host || p.studio) && html`
+            ${!simple && (p.pd || p.host || p.studio) && html`
               <div class="mt-1 text-[11px] text-ink-soft leading-tight">
                 ${p.pd && html`<span>PD ${p.pd}</span>`}
                 ${p.host && html`<span class="ml-1.5">MC ${p.host}</span>`}
@@ -162,12 +168,39 @@
           <div class="flex flex-col items-center gap-1 opacity-0 group-hover:opacity-100 transition">
             <button title="수정" onClick=${(e) => { e.stopPropagation(); setStartEdit(true); setInfo(true); }}
               class="text-ink-soft hover:text-brand text-xs leading-none p-0.5">✎</button>
+            ${!simple && html`<button title="캐스팅 입력 (PD·쇼호스트·스튜디오)" onClick=${(e) => { e.stopPropagation(); setCastOpen(true); }}
+              class="text-ink-soft hover:text-brand text-xs leading-none p-0.5">🎤</button>`}
             <button title="편성 제외" onClick=${(e) => { e.stopPropagation(); store.removePlacement(p.id); }}
               class="text-ink-soft hover:text-brand text-xs leading-none p-0.5">✕</button>
           </div>
         </div>
         ${info && html`<${PlacementDetailModal} state=${state} p=${p} startEdit=${startEdit} onClose=${(e) => { e && e.stopPropagation && e.stopPropagation(); setInfo(false); }} />`}
+        ${subEdit && subSlot && html`<${EditSlotTimeModal} slot=${subSlot} onClose=${() => setSubEdit(false)} />`}
+        ${castOpen && html`<${CastQuickModal} p=${p} onClose=${() => setCastOpen(false)} />`}
       </div>`;
+  }
+
+  /* =====================================================================
+   *  빠른 캐스팅 입력 (PD 캐스팅 탭 — 카드의 🎤 버튼)
+   * ===================================================================== */
+  function CastQuickModal({ p, onClose }) {
+    const castOpts = (window.AUTH.casting && window.AUTH.casting[p.programId]) || null;
+    const [pd, setPd] = useState(p.pd || '');
+    const [host, setHost] = useState(p.host || '');
+    const [studio, setStudio] = useState(p.studio || '');
+    function save() { store.updatePlacementMeta(p.id, { pd, host, studio }); onClose(); }
+    const fld = (field, val, setVal, ph) => html`
+      <input value=${val} onInput=${(e) => setVal(e.target.value)} list=${castOpts && castOpts[field] ? 'cq-' + field + '-dl' : undefined} class=${inputCls} placeholder=${ph} />
+      ${castOpts && castOpts[field] ? html`<datalist id=${'cq-' + field + '-dl'}>${castOpts[field].map((o) => html`<option key=${o} value=${o}></option>`)}</datalist>` : ''}`;
+    return html`
+      <${Modal} title=${`캐스팅 · ${p.productName}`} onClose=${onClose} onSave=${save}>
+        <div class="grid grid-cols-3 gap-3">
+          <${Field} label="담당 PD">${fld('pd', pd, setPd, 'PD')}<//>
+          <${Field} label="쇼호스트">${fld('host', host, setHost, 'MC')}<//>
+          <${Field} label="스튜디오">${fld('studio', studio, setStudio, 'ST')}<//>
+        </div>
+        <div class="text-[12px] text-ink-soft">최종편성안의 PD·쇼호스트·스튜디오 열에 바로 반영됩니다.</div>
+      <//>`;
   }
 
   /* =====================================================================
@@ -355,9 +388,40 @@
   }
 
   /* =====================================================================
+   *  시간띠(밴드) 시간 조정 — 해당 날짜에만 적용, 최종편성안에도 그대로 반영
+   * ===================================================================== */
+  function BandTimeModal({ day, idx, start, end, hasOverride, onClose }) {
+    const [s, setS] = useState(start);
+    const [e, setE] = useState(end);
+    const dur = (s && e) ? (U.toMin(e) - U.toMin(s) + 1440) % 1440 : 0;
+    function save() {
+      if (!/^\d{1,2}:\d{2}$/.test(s) || !/^\d{1,2}:\d{2}$/.test(e)) { alert('시작/종료 시간을 입력하세요.'); return; }
+      if (dur <= 0) { alert('종료가 시작보다 늦어야 합니다.'); return; }
+      store.updateDayBand(day.id, idx, { start: s, end: e });
+      onClose();
+    }
+    return html`
+      <${Modal} title=${`${fmtDay(day)} · 시간띠 조정`} onClose=${onClose} onSave=${save}
+        extra=${hasOverride ? html`<button onClick=${() => { if (confirm('이 날짜의 시간띠를 프로그램 기본 시간으로 되돌릴까요?\n(띠 시간 그대로 편성된 상품의 시간은 유지됩니다)')) { store.resetDayBands(day.id); onClose(); } }}
+          class="text-[12px] text-ink-soft hover:text-brand mr-auto">기본 시간으로 복원</button>` : undefined}>
+        <${Field} label=${`띠 시간 (24시간) * — ${dur}분`}>
+          <div class="flex items-center gap-1.5">
+            <${TimeInput} value=${s} onChange=${setS} />
+            <span class="text-ink-soft">~</span>
+            <${TimeInput} value=${e} onChange=${setE} />
+          </div>
+        <//>
+        <div class="text-[12px] text-ink-soft leading-relaxed">
+          <b>${fmtDay(day)} 하루에만</b> 적용됩니다 (다른 주 같은 요일은 그대로).<br/>
+          띠 시간(${start}~${end}) 그대로 편성된 상품은 새 시간으로 함께 이동하고, 최종편성안에도 반영됩니다.
+        </div>
+      <//>`;
+  }
+
+  /* =====================================================================
    *  고정 시간띠 행 — MD가 잘게 쪼갠 시간대도 이 띠 아래에 자동 귀속 표시
    * ===================================================================== */
-  function BandRow({ state, day, band, onQuickAdd, onExtBid, onExtMove }) {
+  function BandRow({ state, day, band, onQuickAdd, onExtBid, onExtMove, onEditBand, simple }) {
     const [over, setOver] = useState(false);
     const isExt = !!band.ext;
     const slots = band.slots || [];
@@ -400,7 +464,11 @@
         <div class=${`w-[96px] shrink-0 px-2 py-1.5 border-r border-slate-200 flex flex-col gap-0.5 ${isExt ? 'bg-slate-100/70' : 'bg-slate-50'}`}>
           ${isExt
             ? html`<span class="text-[12px] font-bold text-ink-soft leading-tight">확장<br/>${band.label}</span>`
-            : html`<span class="text-[14px] font-extrabold text-ink tabular-nums leading-tight">${band.start}~${band.end}</span>
+            : html`${onEditBand
+                ? html`<button onClick=${(e) => { e.stopPropagation(); onEditBand(); }}
+                    class="text-[14px] font-extrabold text-ink tabular-nums leading-tight text-left hover:text-brand hover:underline decoration-dotted"
+                    title="클릭해 이 날짜의 시간띠 시간 조정">${band.start}~${band.end}</button>`
+                : html`<span class="text-[14px] font-extrabold text-ink tabular-nums leading-tight">${band.start}~${band.end}</span>`}
               <span class="text-[11px] font-semibold text-ink-soft">${dur}분</span>`}
           ${compColor && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: compColor + '22', color: compColor }}>
             <span class="w-1.5 h-1.5 rounded-full shrink-0" style=${{ background: compColor }}></span>경쟁 ${compete}팀</span>`}
@@ -410,7 +478,22 @@
           title=${placements.length === 0 && !isExt ? '더블클릭하면 상품 추가' : ''}>
           ${placements.length === 0
             ? html`<div class="text-[11px] text-slate-300 self-center px-2 select-none">${isExt ? '확장 시간대 — 카드를 놓으면 시간 지정 팝업' : '입찰 카드를 끌어다 놓거나 더블클릭해 추가'}</div>`
-            : placements.map((p) => html`<${PlacementCard} key=${p.id} state=${state} p=${p} subTime=${subTimeOf(p)} />`)}
+            : placements.map((p) => html`
+              <div key=${p.id} onDrop=${(e) => {
+                  // 같은 띠·같은 시간 카드 위에 놓으면 → 그 카드 앞으로 순서 변경
+                  // (시간이 다르면 시간순 정렬이 우선이므로 기존 띠 드롭 동작에 맡김)
+                  const pl = drag.read(e);
+                  if (!pl || pl.kind !== 'placement' || pl.id === p.id) return;
+                  const dragged = state.placements.find((x) => x.id === pl.id);
+                  if (!dragged || !slotIds.has(dragged.slotId)) return;
+                  const sa = slots.find((x) => x.id === dragged.slotId), sb = slots.find((x) => x.id === p.slotId);
+                  if (!sa || !sb || (sa.start || '') !== (sb.start || '')) return;
+                  e.preventDefault(); e.stopPropagation(); setOver(false);
+                  store.reorderPlacement(pl.id, p.id);
+                }}>
+                <${PlacementCard} state=${state} p=${p} subTime=${subTimeOf(p)}
+                  subSlot=${slots.find((x) => x.id === p.slotId)} simple=${simple} />
+              </div>`)}
         </div>
       </div>`;
   }
@@ -418,7 +501,7 @@
   /* =====================================================================
    *  슬롯 셀 (드롭 타깃)
    * ===================================================================== */
-  function SlotCell({ state, day, slot }) {
+  function SlotCell({ state, day, slot, simple }) {
     const [over, setOver] = useState(false);
     const [splitOpen, setSplitOpen] = useState(false);
     const [addOpen, setAddOpen] = useState(false);
@@ -459,7 +542,7 @@
           onDoubleClick=${placements.length === 0 ? (() => setAddOpen(true)) : undefined} title=${placements.length === 0 ? '더블클릭하면 상품 추가' : ''}>
           ${placements.length === 0
             ? html`<div class="text-[11px] text-slate-400 self-center px-2 select-none hover:text-brand">입찰 카드를 끌어다 놓거나 더블클릭해 추가</div>`
-            : placements.map((p) => html`<${PlacementCard} key=${p.id} state=${state} p=${p} />`)}
+            : placements.map((p) => html`<${PlacementCard} key=${p.id} state=${state} p=${p} simple=${simple} />`)}
         </div>
         ${splitOpen && html`<${SplitModal} slot=${slot} dur=${dur} onClose=${() => setSplitOpen(false)} />`}
         ${addOpen && html`<${SlotAddModal} state=${state} slot=${slot} onClose=${() => setAddOpen(false)} />`}
@@ -529,20 +612,24 @@
       <//>`}`;
   }
 
-  function DayBlock({ state, day }) {
+  function DayBlock({ state, day, simple }) {
     const fashion = programSchema(state) === 'fashion';
     // 슬롯 정렬: 시간대는 시작시간순, 순번(1부…)은 번호순으로 뒤에
     const slotOrder = (sl) => sl.start ? U.toMin(sl.start)
       : 100000 + (parseInt(((sl.label || '').match(/\d+/) || [99])[0], 10) || 99);
     const sortedSlots = day.slots.slice().sort((x, y) => slotOrder(x) - slotOrder(y));
-    // ----- 고정 시간띠(밴드): 프로그램 스케줄 기반. MD가 쪼갠 시간도 자동으로 해당 띠에 귀속 -----
+    // ----- 고정 시간띠(밴드): 프로그램 스케줄 기반 + 날짜별 조정(day.bands) 우선. MD가 쪼갠 시간도 자동 귀속 -----
     const sched = store.getSchedule ? store.getSchedule(day.programId) : null;
     const schedEntry = !fashion && sched ? sched.find((sc) => sc.wd === day.weekday) : null;
-    const useBands = !!(schedEntry && schedEntry.slots && schedEntry.slots.length);
+    const bandDefs = !fashion
+      ? ((day.bands && day.bands.length) ? day.bands : (schedEntry && schedEntry.slots))
+      : null;
+    const useBands = !!(bandDefs && bandDefs.length);
     const [showExt, setShowExt] = useState(false);
+    const [bandEdit, setBandEdit] = useState(null); // {idx,start,end} — 시간띠 조정 팝업
     let bands = [], extBefore = null, extAfter = null, labelSlots = [];
     if (useBands) {
-      bands = schedEntry.slots.map(([bs, be]) => ({ start: bs, end: be, slots: [] }));
+      bands = bandDefs.map(([bs, be]) => ({ start: bs, end: be, slots: [] }));
       extBefore = { ext: 'before', label: `~${bands[0].start}`, slots: [] };
       extAfter = { ext: 'after', label: `${bands[bands.length - 1].end}~`, slots: [] };
       const firstStart = U.toMin(bands[0].start);
@@ -619,18 +706,21 @@
         </div>
         <div class="p-1.5 flex flex-col gap-1">
           ${useBands ? html`
-            ${(showExt || extBefore.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extBefore}
+            ${(showExt || extBefore.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extBefore} simple=${simple}
               onExtBid=${setBidTimeFor} onExtMove=${setMoveTimeFor} />`}
-            ${bands.map((bd, bi) => html`<${BandRow} key=${bi} state=${state} day=${day} band=${bd}
-              onQuickAdd=${(st) => { setQuickInit(st); setQuickOpen(true); }} />`)}
-            ${(showExt || extAfter.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extAfter}
+            ${bands.map((bd, bi) => html`<${BandRow} key=${bi} state=${state} day=${day} band=${bd} simple=${simple}
+              onQuickAdd=${(st) => { setQuickInit(st); setQuickOpen(true); }}
+              onEditBand=${() => setBandEdit({ idx: bi, start: bd.start, end: bd.end })} />`)}
+            ${(showExt || extAfter.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extAfter} simple=${simple}
               onExtBid=${setBidTimeFor} onExtMove=${setMoveTimeFor} />`}
-            ${labelSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} />`)}`
+            ${labelSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} simple=${simple} />`)}`
           : (sortedSlots.length === 0
             ? html`<div class="text-[12px] text-slate-400 py-3 text-center">시간대가 없습니다. “+ 상품” 또는 “+ 시간대”로 추가하세요.</div>`
-            : sortedSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} />`))}
+            : sortedSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} simple=${simple} />`))}
         </div>
         ${addOpen && html`<${AddSlotModal} day=${day} onClose=${() => setAddOpen(false)} />`}
+        ${bandEdit && html`<${BandTimeModal} day=${day} idx=${bandEdit.idx} start=${bandEdit.start} end=${bandEdit.end}
+          hasOverride=${!!(day.bands && day.bands.length)} onClose=${() => setBandEdit(null)} />`}
         ${quickOpen && html`<${QuickAddModal} state=${state} day=${day} initStart=${quickInit} onClose=${() => setQuickOpen(false)} />`}
         ${moveTimeFor && html`<${MoveTimeModal} state=${state} day=${day} placementId=${moveTimeFor} onClose=${() => setMoveTimeFor(null)} />`}
         ${bidTimeFor && html`<${BidTimeModal} state=${state} day=${day} bidId=${bidTimeFor} onClose=${() => setBidTimeFor(null)} />`}
@@ -872,7 +962,7 @@
   /* =====================================================================
    *  PD 편성표 뷰
    * ===================================================================== */
-  function ScheduleView({ state, onSaved }) {
+  function ScheduleView({ state, onSaved, simple }) {
     const [snapOpen, setSnapOpen] = useState(false);
     const [addDayOpen, setAddDayOpen] = useState(false);
     const [memoOpen, setMemoOpen] = useState(false);
@@ -896,7 +986,7 @@
         <${BidPool} state=${state} />
         <div class="flex-1 overflow-y-auto p-2 sm:p-4">
           <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
-            <h2 class="text-base font-bold text-ink">${year}년 ${month}월 편성표
+            <h2 class="text-base font-bold text-ink">${year}년 ${month}월 ${simple ? '입찰 보드' : '편성표 · 캐스팅'}
               <span class="text-[12px] font-normal text-ink-soft">방송일 ${days.length}일 · 편성 ${placedCount}건 · +${shiftMonth(state.view, 1).month}월 첫주 포함</span>
               ${lastSnap
                 ? html`<span class="text-[11px] font-normal text-emerald-600 ml-1">· 마지막 저장 ${fmtTs(lastSnap.ts)}</span>`
@@ -916,13 +1006,15 @@
                 class=${`text-xs font-semibold px-3 py-1 rounded bg-brand text-white hover:bg-brand-dark whitespace-nowrap shrink-0 ${draftN > 0 ? 'ring-2 ring-amber-400 ring-offset-1' : ''}`}>편성 저장${draftN > 0 ? ` (${draftN})` : ''}</button>
             </div>
           </div>
+          ${simple && html`<div class="mb-2 text-[12px] text-ink-soft bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5">
+            상품명·팀명·노출분만 간결하게 표시합니다. 드래그로 <b>순서·시간띠를 조정</b>하고 “편성 저장”을 누르면 <b>PD 캐스팅</b> 탭으로 이동해 PD·쇼호스트·스튜디오를 입력합니다.</div>`}
           <div class="space-y-4">
             ${days.length === 0 && html`<div class="text-sm text-slate-400 py-10 text-center">이 달에는 편성일이 없습니다. “+ 편성일 추가”로 추가하세요.</div>`}
             ${groupByWeek(days).map(([wk, days]) => html`
               <div key=${wk} class="flex flex-wrap gap-3 items-start">
                 ${days.map((d) => html`
                   <div class="w-full sm:flex-1 sm:min-w-[280px]">
-                    <${DayBlock} state=${state} day=${d} />
+                    <${DayBlock} state=${state} day=${d} simple=${simple} />
                   </div>`)}
               </div>`)}
           </div>
@@ -930,15 +1022,15 @@
         ${snapOpen && html`<${SnapshotsModal} state=${state} onClose=${() => setSnapOpen(false)} />`}
         ${addDayOpen && html`<${AddDayModal} state=${state} onClose=${() => setAddDayOpen(false)} />`}
         ${memoOpen && html`<${CastingMemoModal} state=${state} onClose=${() => setMemoOpen(false)} />`}
-        ${saveOpen && html`<${SaveSnapshotModal} year=${year} month=${month} count=${placedCount} onSave=${doSave} onClose=${() => setSaveOpen(false)} />`}
+        ${saveOpen && html`<${SaveSnapshotModal} year=${year} month=${month} count=${placedCount} next=${simple ? 'PD 캐스팅' : '최종편성안'} onSave=${doSave} onClose=${() => setSaveOpen(false)} />`}
       </div>`;
   }
 
-  function SaveSnapshotModal({ year, month, count, onSave, onClose }) {
+  function SaveSnapshotModal({ year, month, count, next, onSave, onClose }) {
     const [label, setLabel] = useState('');
     return html`
       <${Modal} title=${`${year}년 ${month}월 편성안 저장`} onClose=${onClose} onSave=${() => onSave(label)}>
-        <div class="text-[13px] text-ink">편성 <b>${count}건</b>을 저장하고 <b>최종편성안</b>으로 이동합니다.</div>
+        <div class="text-[13px] text-ink">편성 <b>${count}건</b>을 저장하고 <b>${next || '최종편성안'}</b>으로 이동합니다.</div>
         <${Field} label="메모 (선택)">
           <input value=${label} onInput=${(e) => setLabel(e.target.value)} class=${inputCls} placeholder="예: 7월 확정안 v1" autofocus />
         <//>
@@ -1245,7 +1337,8 @@
                       <td class=${`${tdMerge} font-semibold tabular-nums text-ink`} rowSpan=${dayCount[r.day.date]}>${m}/${dnum}${r.day.airTime ? html`<div class="text-[10px] font-normal text-ink-soft mt-0.5 whitespace-nowrap">${r.day.airTime}</div>` : ''}</td>
                       <td class=${`${tdMerge} font-semibold ${wdColor}`} rowSpan=${dayCount[r.day.date]}>${wd}</td>`}
                     <td class=${`${td} tabular-nums font-medium ${r.compete ? 'text-amber-700' : ''}`} data-col="time">
-                      ${slotName(r.slot)} ${r.compete && html`<span class="text-[10px] text-amber-600">●경쟁</span>`}
+                      ${readOnly ? slotName(r.slot) : html`<${SlotTimeButton} slot=${r.slot} className="tabular-nums font-medium text-left" />`}
+                      ${r.compete && html`<span class="text-[10px] text-amber-600">●경쟁</span>`}
                       ${r.slot.start && r.slot.end && html`<div class="text-[11px] text-ink-soft font-normal" data-col="dur">${U.slotDuration(r.slot)}분</div>`}
                     </td>
                     ${!slim && html`<td class=${`${td} text-center`} data-col="status">
@@ -2534,11 +2627,13 @@
     const allowed = roleCfg ? roleCfg.tabs : [];
     const curTab = roleCfg ? (allowed.includes(tab) ? tab : allowed[0]) : null;
 
-    // 편성표 초안 모드: PD 편성표에 있는 동안 수정은 로컬 보류 → '편성 저장'으로 일괄 반영
+    // 편성표 초안 모드: 입찰 보드·PD 캐스팅에 있는 동안 수정은 로컬 보류 → '편성 저장'으로 일괄 반영
+    // (두 탭 사이 이동은 초안을 그대로 유지 — beginHold를 다시 호출하면 초안 카운트가 초기화되므로 유지 중엔 재호출 금지)
+    const draftTab = (t) => t === 'schedule' || t === 'board';
     const [leaveTo, setLeaveTo] = useState(null); // 저장 안 된 채 이동 시 확인 팝업 대상 탭
     useEffect(() => {
       if (!store.beginHold) return;
-      if (curTab === 'schedule') store.beginHold();
+      if (draftTab(curTab)) { if (!store.isHolding || !store.isHolding()) store.beginHold(); }
       else store.endHold();
     }, [curTab]);
     // 새로고침/창닫기 시 브라우저 경고 (저장 안 된 초안)
@@ -2548,7 +2643,7 @@
       return () => window.removeEventListener('beforeunload', h);
     }, []);
     function guardTab(next) {
-      if (curTab === 'schedule' && next !== 'schedule' && store.draftCount && store.draftCount() > 0) { setLeaveTo(next); return; }
+      if (draftTab(curTab) && !draftTab(next) && store.draftCount && store.draftCount() > 0) { setLeaveTo(next); return; }
       setTab(next);
     }
 
@@ -2595,9 +2690,11 @@
             <div class="shrink-0"><${MonthNav} view=${state.view} /></div>
             <nav class="flex items-center gap-1 shrink-0">
               ${allowed.includes('bids') && html`<button onClick=${() => guardTab('bids')}
-                class=${tabCls(curTab === 'bids')}>MD 입찰보드</button>`}
+                class=${tabCls(curTab === 'bids')}>MD 입찰</button>`}
+              ${allowed.includes('board') && html`<button onClick=${() => guardTab('board')}
+                class=${tabCls(curTab === 'board')}>입찰 보드</button>`}
               ${allowed.includes('schedule') && html`<button onClick=${() => guardTab('schedule')}
-                class=${tabCls(curTab === 'schedule')}>PD 편성표</button>`}
+                class=${tabCls(curTab === 'schedule')}>PD 캐스팅</button>`}
               ${allowed.includes('final') && html`<button onClick=${() => guardTab('final')}
                 class=${tabCls(curTab === 'final')}>최종편성안</button>`}
               ${allowed.includes('finalview') && html`<button onClick=${() => guardTab('finalview')}
@@ -2659,7 +2756,8 @@
         <${ProgramTabs} state=${state} isAdmin=${!!roleCfg.isAdmin} />
 
         <main class="flex-1 min-h-0 flex flex-col border-t border-slate-300">
-          ${curTab === 'schedule' ? html`<${ScheduleView} state=${state} onSaved=${() => setTab('final')} />`
+          ${curTab === 'board' ? html`<${ScheduleView} state=${state} simple=${true} onSaved=${() => setTab('schedule')} />`
+            : curTab === 'schedule' ? html`<${ScheduleView} state=${state} onSaved=${() => setTab('final')} />`
             : curTab === 'final' ? html`<${FinalScheduleView} state=${state} />`
             : curTab === 'finalview' ? html`<${FinalScheduleView} state=${state} readOnly=${true} />`
             : curTab === 'finalpgm' ? html`<${FinalScheduleView} state=${state} readOnly=${true} full=${true} />`
