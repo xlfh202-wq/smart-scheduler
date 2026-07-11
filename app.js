@@ -1217,6 +1217,14 @@
           div.style.lineHeight = '1.3';
           div.style.fontSize = '14px';
           div.style.padding = '0';
+          // textarea/input에서 온 overflow-hidden·고정폭·고정높이 제거 → 내용 전체가 보이도록
+          div.style.overflow = 'visible';
+          div.style.height = 'auto';
+          div.style.minHeight = '0';
+          div.style.maxHeight = 'none';
+          div.style.width = 'auto';
+          div.style.maxWidth = '100%';
+          div.style.wordBreak = 'break-word';
           cf.parentNode.replaceChild(div, cf);
         });
         // 화면 전용 요소(드래그 손잡이 등)는 이미지에서 제외
@@ -1904,15 +1912,21 @@
                   ${day.slots.map((s) => html`<option key=${s.id} value=${s.id}>${slotName(s)}</option>`)}
                 </select><//>`
             : html`<${Field} label="방송 시간 (24시간) *">
-                <div class="flex items-center gap-1.5 flex-wrap">
-                  <div class="flex items-center rounded border border-slate-300 focus-within:border-brand px-2" title="노출분을 넣으면 종료시간이 자동 계산됩니다">
-                    <input value=${durStr} onInput=${onDurChange} inputmode="numeric" placeholder="노출분"
-                      class="w-14 py-1.5 text-[13px] tabular-nums text-right bg-transparent outline-none" />
-                    <span class="text-[12px] text-ink-soft pl-0.5">분</span>
+                <div class="flex flex-col gap-1.5">
+                  <div class="flex items-center gap-2">
+                    <span class="text-[12px] text-ink-soft w-10 shrink-0">노출분</span>
+                    <div class="flex items-center rounded border border-slate-300 focus-within:border-brand px-2" title="노출분을 넣으면 종료시간이 자동 계산됩니다">
+                      <input value=${durStr} onInput=${onDurChange} inputmode="numeric" placeholder="예: 40"
+                        class="w-16 py-1.5 text-[13px] tabular-nums text-right bg-transparent outline-none" />
+                      <span class="text-[12px] text-ink-soft pl-0.5">분</span>
+                    </div>
                   </div>
-                  <${TimeInput} value=${start} onChange=${onStartChange} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
-                  <span class="text-ink-soft">~</span>
-                  <${TimeInput} value=${end} onChange=${onEndChange} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+                  <div class="flex items-center gap-2">
+                    <span class="text-[12px] text-ink-soft w-10 shrink-0">시간</span>
+                    <${TimeInput} value=${start} onChange=${onStartChange} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+                    <span class="text-ink-soft shrink-0">~</span>
+                    <${TimeInput} value=${end} onChange=${onEndChange} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+                  </div>
                 </div>
                 <div class="mt-1 text-[11px] text-ink-soft">노출분 입력 → 종료시간 자동 · 시작시간을 바꾸면 노출분(${durMin || '-'}분)에 맞춰 종료도 이동</div><//>`}
         </div>
