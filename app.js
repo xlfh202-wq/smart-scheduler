@@ -51,6 +51,13 @@
   const activeProgramObj = (state) =>
     (state.programs || []).find((p) => p.id === state.activeProgram) || { name: '', color: '#da291c' };
 
+  // 프로그램별 캐스팅(PD·쇼호스트·스튜디오) 추천 목록 — state.casting(관리자 편집) 우선, 없으면 AUTH.casting 폴백
+  const castingOf = (state, pid) => {
+    const c = (state.casting && state.casting[pid]) || (window.AUTH.casting && window.AUTH.casting[pid]) || null;
+    if (!c) return null;
+    return { pd: c.pd || [], host: c.host || [], studio: c.studio || [] };
+  };
+
   // 프로그램별 입찰팀 / 작성항목 스키마 (window.PROGRAM_CONFIG)
   const PCONF = () => (typeof window !== 'undefined' && window.PROGRAM_CONFIG) || { teams: [], programs: {} };
   const programCfg = (state) => PCONF().programs[state.activeProgram] || null;
@@ -176,15 +183,15 @@
         </div>
         ${info && html`<${PlacementDetailModal} state=${state} p=${p} startEdit=${startEdit} onClose=${(e) => { e && e.stopPropagation && e.stopPropagation(); setInfo(false); }} />`}
         ${subEdit && subSlot && html`<${EditSlotTimeModal} slot=${subSlot} onClose=${() => setSubEdit(false)} />`}
-        ${castOpen && html`<${CastQuickModal} p=${p} onClose=${() => setCastOpen(false)} />`}
+        ${castOpen && html`<${CastQuickModal} state=${state} p=${p} onClose=${() => setCastOpen(false)} />`}
       </div>`;
   }
 
   /* =====================================================================
    *  빠른 캐스팅 입력 (PD 캐스팅 탭 — 카드의 🎤 버튼)
    * ===================================================================== */
-  function CastQuickModal({ p, onClose }) {
-    const castOpts = (window.AUTH.casting && window.AUTH.casting[p.programId]) || null;
+  function CastQuickModal({ state, p, onClose }) {
+    const castOpts = castingOf(state, p.programId);
     const [pd, setPd] = useState(p.pd || '');
     const [host, setHost] = useState(p.host || '');
     const [studio, setStudio] = useState(p.studio || '');
@@ -278,7 +285,7 @@
   function PlacementEditForm({ state, p, onClose, onBack }) {
     const teams = programTeams(state);
     const det = p.detail || {};
-    const castOpts = (window.AUTH.casting && window.AUTH.casting[p.programId]) || null;
+    const castOpts = castingOf(state, p.programId);
     const [name, setName] = useState(p.productName || '');
     const [team, setTeam] = useState(p.teamId || (teams[0] && teams[0].id) || 'etc');
     const [dur, setDur] = useState(p.durationMin || '');
@@ -1156,7 +1163,7 @@
     const capRef = useRef(null);
     const [saving, setSaving] = useState(false);
     const { year, month } = state.view;
-    const castOpts = (window.AUTH.casting && window.AUTH.casting[state.activeProgram]) || null;
+    const castOpts = castingOf(state, state.activeProgram);
     function saveExcel() {
       if (!window.XLSX) { alert('엑셀 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.'); return; }
       // MD(조회 전용)는 민감 항목(구성·준비물량·가격·마진·달성률·비고) 제외한 축약본으로 출력
@@ -1984,6 +1991,83 @@
   }
 
   /* =====================================================================
+   *  캐스팅 관리 (관리자) — 프로그램별 PD·쇼호스트·스튜디오 추천 목록 편집
+   *  → PD 캐스팅 입력 시 추천값으로 사용됨
+   * ===================================================================== */
+  function CastingManagerModal({ state, onClose }) {
+    const programs = state.programs || [];
+    const [pid, setPid] = useState(state.activeProgram || (programs[0] && programs[0].id) || '');
+    const cur = castingOf(state, pid) || { pd: [], host: [], studio: [] };
+    // 로컬 편집 상태 (프로그램 바뀌면 리셋)
+    const [pd, setPd] = useState(cur.pd.slice());
+    const [host, setHost] = useState(cur.host.slice());
+    const [studio, setStudio] = useState(cur.studio.slice());
+    useEffect(() => {
+      const c = castingOf(state, pid) || { pd: [], host: [], studio: [] };
+      setPd(c.pd.slice()); setHost(c.host.slice()); setStudio(c.studio.slice());
+    }, [pid]);
+    function save() {
+      store.setCasting(pid, { pd, host, studio });
+      onClose();
+    }
+    // 재사용 리스트 편집기: 항목 인라인 수정 + 삭제 + 추가
+    const ListEditor = ({ label, color, items, setItems, ph }) => {
+      const [add, setAdd] = useState('');
+      const doAdd = () => { const v = add.trim(); if (!v) return; if (!items.includes(v)) setItems([...items, v]); setAdd(''); };
+      return html`
+        <div class="rounded-lg border border-slate-200 p-2.5">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-[13px] font-bold" style=${{ color }}>${label}</span>
+            <span class="text-[11px] text-ink-soft">${items.length}명</span>
+          </div>
+          <div class="flex flex-col gap-1 max-h-40 overflow-y-auto">
+            ${items.length === 0 && html`<div class="text-[12px] text-slate-400 py-1">등록된 항목이 없습니다.</div>`}
+            ${items.map((it, i) => html`
+              <div key=${i} class="flex items-center gap-1">
+                <input value=${it} onInput=${(e) => setItems(items.map((x, j) => (j === i ? e.target.value : x)))}
+                  class="flex-1 px-2 py-1 text-[13px] rounded border border-slate-300 focus:border-brand outline-none" />
+                <button onClick=${() => setItems(items.filter((_, j) => j !== i))}
+                  title="삭제" class="text-ink-soft hover:text-brand px-1.5 py-1 text-xs shrink-0">✕</button>
+              </div>`)}
+          </div>
+          <div class="flex items-center gap-1 mt-1.5">
+            <input value=${add} onInput=${(e) => setAdd(e.target.value)} placeholder=${ph}
+              onKeyDown=${(e) => { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } }}
+              class="flex-1 px-2 py-1 text-[13px] rounded border border-slate-300 focus:border-brand outline-none" />
+            <button onClick=${doAdd} class="text-[12px] font-semibold px-2.5 py-1 rounded bg-brand text-white hover:bg-brand-dark shrink-0">+ 추가</button>
+          </div>
+        </div>`;
+    };
+    return html`
+      <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick=${onClose}>
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col" onClick=${(e) => e.stopPropagation()}>
+          <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200">
+            <h3 class="font-bold text-ink">🎤 캐스팅 관리 <span class="text-[12px] font-normal text-ink-soft">— 프로그램별 PD·쇼호스트·스튜디오</span></h3>
+            <button onClick=${onClose} class="text-ink-soft hover:text-brand text-lg leading-none">✕</button>
+          </div>
+          <div class="px-4 py-3 overflow-y-auto">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="text-[13px] font-semibold text-ink">프로그램</span>
+              <select value=${pid} onChange=${(e) => setPid(e.target.value)} class="text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none">
+                ${programs.map((pg) => html`<option key=${pg.id} value=${pg.id}>${pg.name}</option>`)}
+              </select>
+            </div>
+            <div class="text-[12px] text-ink-soft mb-3">여기서 관리하는 목록이 <b>PD 캐스팅 입력 시 추천값</b>으로 나타납니다. (직접 입력도 가능) 변경 후 <b>저장</b>을 누르세요.</div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              ${ListEditor({ label: '담당 PD', color: '#da291c', items: pd, setItems: setPd, ph: 'PD 이름' })}
+              ${ListEditor({ label: '쇼호스트', color: '#0891b2', items: host, setItems: setHost, ph: '쇼호스트 이름' })}
+              ${ListEditor({ label: '스튜디오', color: '#7c3aed', items: studio, setItems: setStudio, ph: '예: 250' })}
+            </div>
+          </div>
+          <div class="flex items-center justify-end gap-2 px-4 py-3 border-t border-slate-200">
+            <button onClick=${onClose} class="text-[13px] px-3 py-1.5 rounded border border-slate-300 hover:bg-slate-50">취소</button>
+            <button onClick=${save} class="text-[13px] font-semibold px-4 py-1.5 rounded bg-brand text-white hover:bg-brand-dark">저장</button>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  /* =====================================================================
    *  팀 관리 (관리자) — 조직개편 대응: 추가 / 이름·부문 수정 / 삭제
    * ===================================================================== */
   function TeamManagerModal({ state, onClose }) {
@@ -2579,7 +2663,8 @@
         : { role, team: '', name: '관리자' });
     }
     return html`
-      <div class="min-h-screen grid place-items-center bg-slate-100 p-4">
+      <div class="min-h-screen flex flex-col bg-slate-100">
+        <div class="flex-1 grid place-items-center p-4">
         <form onSubmit=${submit} class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
           <div class="flex items-center gap-2 mb-1">
             <div class="w-9 h-9 rounded-lg bg-brand text-white grid place-items-center font-black text-[11px] leading-none">PGM</div>
@@ -2626,6 +2711,8 @@
             팀·이름은 필수이며, 모든 수정 내역(변경 이력 · 카드 “마지막 수정”)에 자동 기록됩니다. 비밀번호 입력 후 Enter로도 입장됩니다.
           </div>
         </form>
+        </div>
+        <${MakerFooter} />
       </div>`;
   }
 
@@ -2651,6 +2738,18 @@
   }
 
   /* =====================================================================
+   *  제작자 고지 푸터 (전 화면 하단 고정)
+   * ===================================================================== */
+  function MakerFooter() {
+    return html`
+      <footer class="shrink-0 border-t border-slate-200 bg-white px-4 py-1.5 text-[11px] text-ink-soft flex items-center justify-center gap-x-2 gap-y-0.5 flex-wrap text-center">
+        <span>제작 · 문의: <b class="text-ink">방송제작부문 식품PD팀 강성현</b></span>
+        <span class="text-slate-300 hidden sm:inline">·</span>
+        <span>수정·개선 요청은 제작자에게 연락 바랍니다</span>
+      </footer>`;
+  }
+
+  /* =====================================================================
    *  앱 루트
    * ===================================================================== */
   function App() {
@@ -2665,6 +2764,7 @@
     const [history, setHistory] = useState(false);
     const [backup, setBackup] = useState(false);
     const [teamMgr, setTeamMgr] = useState(false);
+    const [castMgr, setCastMgr] = useState(false);
     const [sbStatus, setSbStatus] = useState(
       (window.SUPABASE && window.SUPABASE.enabled) ? 'connecting' : null);
     useEffect(() => {
@@ -2844,6 +2944,9 @@
               ${roleCfg.isAdmin && html`<button onClick=${() => setTeamMgr(true)}
                 class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0"
                 title="입찰팀 추가/수정/삭제 (조직개편)">🏷 팀 관리</button>`}
+              ${roleCfg.isAdmin && html`<button onClick=${() => setCastMgr(true)}
+                class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0"
+                title="프로그램별 PD·쇼호스트·스튜디오 목록 관리 (캐스팅 추천값)">🎤 캐스팅 관리</button>`}
               ${roleCfg.canManage && html`<button onClick=${() => setBackup(true)}
                 class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0"
                 title="자동 백업 목록 / 특정 시점으로 복원">백업/복원</button>`}
@@ -2867,10 +2970,12 @@
         ${history && html`<${HistoryModal} state=${state} isAdmin=${roleCfg.isAdmin} onClose=${() => setHistory(false)} />`}
         ${backup && html`<${BackupModal} isAdmin=${roleCfg.isAdmin} onClose=${() => setBackup(false)} />`}
         ${teamMgr && html`<${TeamManagerModal} state=${state} onClose=${() => setTeamMgr(false)} />`}
+        ${castMgr && html`<${CastingManagerModal} state=${state} onClose=${() => setCastMgr(false)} />`}
         ${leaveTo && html`<${LeaveGuardModal} count=${store.draftCount ? store.draftCount() : 0}
           onSave=${() => { store.flushDraft(); setTab(leaveTo); setLeaveTo(null); }}
           onDiscard=${() => { store.discardDraft(); setTab(leaveTo); setLeaveTo(null); }}
           onStay=${() => setLeaveTo(null)} />`}
+        <${MakerFooter} />
       </div>`;
   }
   const tabCls = (active) =>

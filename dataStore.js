@@ -55,10 +55,28 @@
     }
     return s;
   }
+  // 프로그램별 캐스팅(PD·쇼호스트·스튜디오) 목록 기본값 보강 — 최초 1회만 AUTH.casting에서 이관.
+  // 이후 관리자가 추가/수정/삭제 → state.casting 에 저장(서버 공유).
+  function ensureCasting(s) {
+    if (!s) return s;
+    if (!s.casting) s.casting = {};
+    if (!s.castingSeed) {
+      const src = (typeof window !== 'undefined' && window.AUTH && window.AUTH.casting) || {};
+      Object.keys(src).forEach((pid) => {
+        if (!s.casting[pid]) {
+          const c = src[pid] || {};
+          s.casting[pid] = { pd: (c.pd || []).slice(), host: (c.host || []).slice(), studio: (c.studio || []).slice() };
+        }
+      });
+      s.castingSeed = true;
+    }
+    return s;
+  }
   // 이름 기준 병합(같은 이름이면 기존 팀 재사용 → 기존 입찰 데이터 매핑 유지), 없으면 추가. 1회만.
   function ensureTeams2026(s) {
     ensureDivisions(s);
     ensurePdTeams(s);
+    ensureCasting(s);
     if (!s || s.teamsSeed2026) return s;
     s.teams = s.teams || [];
     const byName = new Map(s.teams.map((t) => [t.name, t]));
@@ -1570,6 +1588,23 @@
         state.pdTeams = (state.pdTeams || []).filter((d) => d !== name);
         log({ action: 'PD팀삭제', detail: name });
         emit();
+      },
+
+      /* ---------- 프로그램별 캐스팅(PD·쇼호스트·스튜디오) 관리 (관리자) ----------
+       * PD 캐스팅 입력 시 추천 목록으로 사용. 프로그램별로 관리자가 추가/수정/삭제. */
+      setCasting(programId, obj) {
+        ensureCasting(state);
+        const clean = (a) => Array.from(new Set((a || []).map((s) => (s || '').trim()).filter(Boolean)));
+        state.casting[programId] = {
+          pd: clean(obj.pd), host: clean(obj.host), studio: clean(obj.studio),
+        };
+        const pn = ((state.programs || []).find((p) => p.id === programId) || {}).name || programId;
+        log({ action: '캐스팅수정', detail: `${pn} 캐스팅 목록 수정 (PD ${state.casting[programId].pd.length} · 쇼호스트 ${state.casting[programId].host.length})` });
+        emit();
+      },
+      castingOf(programId) {
+        ensureCasting(state);
+        return state.casting[programId] || { pd: [], host: [], studio: [] };
       },
 
       /* ---------- 전체 초기화 ---------- */
