@@ -2015,26 +2015,26 @@
       const [add, setAdd] = useState('');
       const doAdd = () => { const v = add.trim(); if (!v) return; if (!items.includes(v)) setItems([...items, v]); setAdd(''); };
       return html`
-        <div class="rounded-lg border border-slate-200 p-2.5">
+        <div class="rounded-lg border border-slate-200 p-2.5 min-w-0">
           <div class="flex items-center justify-between mb-1.5">
             <span class="text-[13px] font-bold" style=${{ color }}>${label}</span>
-            <span class="text-[11px] text-ink-soft">${items.length}명</span>
+            <span class="text-[11px] text-ink-soft shrink-0">${items.length}명</span>
           </div>
           <div class="flex flex-col gap-1 max-h-40 overflow-y-auto">
             ${items.length === 0 && html`<div class="text-[12px] text-slate-400 py-1">등록된 항목이 없습니다.</div>`}
             ${items.map((it, i) => html`
               <div key=${i} class="flex items-center gap-1">
                 <input value=${it} onInput=${(e) => setItems(items.map((x, j) => (j === i ? e.target.value : x)))}
-                  class="flex-1 px-2 py-1 text-[13px] rounded border border-slate-300 focus:border-brand outline-none" />
+                  class="flex-1 min-w-0 px-2 py-1 text-[13px] rounded border border-slate-300 focus:border-brand outline-none" />
                 <button onClick=${() => setItems(items.filter((_, j) => j !== i))}
-                  title="삭제" class="text-ink-soft hover:text-brand px-1.5 py-1 text-xs shrink-0">✕</button>
+                  title="삭제" class="text-ink-soft hover:text-brand px-1 py-1 text-xs shrink-0">✕</button>
               </div>`)}
           </div>
           <div class="flex items-center gap-1 mt-1.5">
             <input value=${add} onInput=${(e) => setAdd(e.target.value)} placeholder=${ph}
               onKeyDown=${(e) => { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } }}
-              class="flex-1 px-2 py-1 text-[13px] rounded border border-slate-300 focus:border-brand outline-none" />
-            <button onClick=${doAdd} class="text-[12px] font-semibold px-2.5 py-1 rounded bg-brand text-white hover:bg-brand-dark shrink-0">+ 추가</button>
+              class="flex-1 min-w-0 px-2 py-1 text-[13px] rounded border border-slate-300 focus:border-brand outline-none" />
+            <button onClick=${doAdd} class="text-[12px] font-semibold px-2 py-1 rounded bg-brand text-white hover:bg-brand-dark shrink-0 whitespace-nowrap">추가</button>
           </div>
         </div>`;
     };
@@ -2175,7 +2175,7 @@
           </div>
           <div class="flex items-center gap-2">
             <input value=${newPdTeam} onInput=${(e) => setNewPdTeam(e.target.value)} onKeyDown=${(e) => { if (e.key === 'Enter') addPd(); }}
-              class="flex-1 ${inputCls}" placeholder="예: 리빙PD팀" />
+              class="flex-1 min-w-0 ${inputCls}" placeholder="예: 리빙PD팀" />
             <button onClick=${addPd} class="shrink-0 text-[13px] px-3 py-1.5 rounded bg-brand text-white hover:bg-brand-dark">+ PD팀</button>
           </div>
         </div>
@@ -2193,7 +2193,7 @@
                   <div key=${t.id} class="flex items-center gap-2 text-[13px] border border-slate-100 rounded px-2 py-1">
                     <input type="color" value=${t.color || '#64748b'} onInput=${(e) => store.updateTeam(t.id, { color: e.target.value })}
                       class="w-6 h-6 rounded cursor-pointer border border-slate-200 shrink-0" title="색상" />
-                    <span class="flex-1 font-medium text-ink truncate">${t.name}</span>
+                    <span class="flex-1 min-w-0 font-medium text-ink truncate">${t.name}</span>
                     ${(() => { const u = usage[t.id]; const n = u ? u.b + u.p : 0;
                       return html`<span class=${`text-[11px] px-1.5 rounded shrink-0 ${n ? 'bg-slate-100 text-ink-soft' : 'bg-emerald-50 text-emerald-600'}`} title="입찰+편성 사용 건수">${n ? n + '건' : '미사용'}</span>`; })()}
                     <select value=${t.div || ''} onChange=${(e) => store.updateTeam(t.id, { div: e.target.value })} class=${divSelCls} title="부문 이동">
