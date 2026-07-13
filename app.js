@@ -1601,14 +1601,17 @@
   /* =====================================================================
    *  MD 입찰 보드
    * ===================================================================== */
-  function BidBoard({ state, readOnly }) {
+  function BidBoard({ state, readOnly, lockTeam }) {
     const teams = state.teams || []; // MD 입찰은 전체 팀 대상(부문별 그룹 표시)
     const [detailBid, setDetailBid] = useState(null); // 조회 전용: 칩 클릭 → 읽기 상세
     const schema = programSchema(state);
     const fashion = schema === 'fashion';
     const isMain = state.activeProgram === U.MAIN_PROGRAM;
     const [teamSel, setTeamSel] = useState(null);
-    const team = (teamSel && teams.some((t) => t.id === teamSel)) ? teamSel : (teams[0] && teams[0].id);
+    // MD 로그인: 자기 팀으로 고정 (팀 선택 없이 내 팀 입찰만 표시) — 팀명이 목록에 없으면 기존 방식 유지
+    const lockedTeam = lockTeam ? teams.find((t) => t.name === lockTeam) : null;
+    const team = lockedTeam ? lockedTeam.id
+      : ((teamSel && teams.some((t) => t.id === teamSel)) ? teamSel : (teams[0] && teams[0].id));
     const [modal, setModal] = useState(null); // {dayId, slotId, bid?}
     const [addDayOpen, setAddDayOpen] = useState(false);
     const [slotModalDay, setSlotModalDay] = useState(null);
@@ -1621,7 +1624,12 @@
         <div class="sticky top-0 z-10 bg-white border-b border-slate-200 px-4 py-2">
           <div class="flex items-baseline gap-2 flex-wrap">
             <span class="text-sm font-bold text-ink mr-1 shrink-0">${activeProgramObj(state).name} · 입찰팀</span>
-            ${teamsGrouped(state).map(([div, ts]) => html`
+            ${lockedTeam
+              ? html`<span class="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full text-white"
+                  style=${{ background: lockedTeam.color }} title="로그인한 팀의 입찰만 표시됩니다">
+                  <${TeamDot} color="#fff" /> ${lockedTeam.name}</span>
+                <span class="text-[11px] text-ink-soft">내 팀 입찰만 표시</span>`
+              : teamsGrouped(state).map(([div, ts]) => html`
               <span key=${div} class="inline-flex items-center gap-1 flex-wrap">
                 <span class="text-[11px] font-semibold text-slate-400 ml-1">${div}</span>
                 ${ts.map((t) => html`
@@ -2964,7 +2972,8 @@
             : curTab === 'final' ? html`<${FinalScheduleView} state=${state} onOpenSchedule=${allowed.includes('schedule') ? (() => guardTab('schedule')) : undefined} />`
             : curTab === 'finalview' ? html`<${FinalScheduleView} state=${state} readOnly=${true} />`
             : curTab === 'finalpgm' ? html`<${FinalScheduleView} state=${state} readOnly=${true} full=${true} />`
-            : html`<${BidBoard} state=${state} readOnly=${!!roleCfg.viewOnly} />`}
+            : html`<${BidBoard} state=${state} readOnly=${!!roleCfg.viewOnly}
+                lockTeam=${auth.role === 'md' ? (auth.team || '') : ''} />`}
         </main>
 
         ${history && html`<${HistoryModal} state=${state} isAdmin=${roleCfg.isAdmin} onClose=${() => setHistory(false)} />`}
