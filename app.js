@@ -1606,7 +1606,6 @@
     const [detailBid, setDetailBid] = useState(null); // 조회 전용: 칩 클릭 → 읽기 상세
     const schema = programSchema(state);
     const fashion = schema === 'fashion';
-    const isMain = state.activeProgram === U.MAIN_PROGRAM;
     const [teamSel, setTeamSel] = useState(null);
     // MD 로그인: 자기 팀으로 고정 (팀 선택 없이 내 팀 입찰만 표시) — 팀명이 목록에 없으면 기존 방식 유지
     const lockedTeam = lockTeam ? teams.find((t) => t.name === lockTeam) : null;
@@ -1652,7 +1651,21 @@
             : html`<div class="text-[11px] text-ink-soft -mt-1">💡 날짜 변경: 입찰 카드를 <b>드래그해 다른 날짜 칸에 놓거나</b>, 카드 클릭 → <b>희망 편성일</b>을 바꿔 저장하면 이동됩니다.</div>`}
           ${days.length === 0 && html`<div class="text-sm text-slate-400 py-8 text-center">이 달에는 편성일이 없습니다. 위 “+ 편성일 추가”로 추가하세요.</div>`}
           ${days.map((day) => {
-            const shownSlots = day.slots.filter((slot) => !isMain || slot.std || slot.manual || state.bids.some((b) => b.slotId === slot.id));
+            // 시간대 표시를 팀별로 분리: 고정 띠(std)·수기 추가(manual)·순번(label)은 공통으로 보이고,
+            // 잘게 쪼갠 시간대는 "지금 보는 팀의 입찰이 있는 것"만 표시 — 다른 팀이 쪼갠 시간이 내 화면을 어지럽히지 않음
+            const baseSlots = day.slots.filter((slot) => slot.std || slot.manual || slot.label || teamBids.some((b) => b.slotId === slot.id));
+            // 프로그램 고정 스케줄 띠는 항상 기준으로 표시: 실제 슬롯이 없어도(다른 팀이 쪼개 흡수된 경우) 가상 띠 행으로 노출
+            const schedB = store.getSchedule ? store.getSchedule(day.programId) : null;
+            const entryB = !fashion && schedB ? schedB.find((sc) => sc.wd === day.weekday) : null;
+            const bandDefs = (day.bands && day.bands.length) ? day.bands : ((entryB && entryB.slots) || null);
+            let rowSlots = bandDefs ? baseSlots.slice() : (baseSlots.length ? baseSlots : day.slots);
+            if (bandDefs) bandDefs.forEach(([bs, be]) => {
+              if (!day.slots.some((s) => s.start === bs && s.end === be))
+                rowSlots.push({ id: 'virt_' + day.id + '_' + bs, start: bs, end: be, virtual: true });
+            });
+            const slotOrd = (sl) => sl.start ? U.toMin(sl.start)
+              : 100000 + (parseInt(((sl.label || '').match(/\d+/) || [99])[0], 10) || 99);
+            const shownSlots = rowSlots.sort((x, y) => slotOrd(x) - slotOrd(y));
             return html`
             <div key=${day.id} class="rounded-xl border border-slate-200 bg-white overflow-hidden"
               onDragOver=${(e) => { e.preventDefault(); e.currentTarget.classList.add('drop-active'); }}
@@ -1703,7 +1716,7 @@
                     <div key=${slot.id} class="flex gap-3 px-3 py-2">
                       <div class="w-28 shrink-0 pt-0.5">
                         <div class="flex items-center gap-1">
-                          ${readOnly
+                          ${(readOnly || slot.virtual)
                             ? html`<span class="text-[13px] font-bold tabular-nums">${slotName(slot)}</span>`
                             : html`<${SlotTimeButton} slot=${slot} className="text-[13px] font-bold tabular-nums" />
                               <button title="이 시간대 삭제" onClick=${() => { const n = state.bids.filter((b) => b.slotId === slot.id).length;
@@ -1715,7 +1728,9 @@
                       <div class="flex-1 flex flex-wrap gap-1.5 items-start">
                         ${bids.map((b) => html`<${BidChip} key=${b.id} state=${state} b=${b} readOnly=${readOnly}
                             onEdit=${() => (readOnly ? setDetailBid(b) : setModal({ dayId: day.id, slotId: slot.id, bid: b }))} />`)}
-                        ${!readOnly && html`<button onClick=${() => setModal({ dayId: day.id, slotId: slot.id })}
+                        ${!readOnly && html`<button onClick=${() => setModal(slot.virtual
+                            ? { dayId: day.id, start: slot.start, end: slot.end }
+                            : { dayId: day.id, slotId: slot.id })}
                           class="text-[12px] px-2 py-1 rounded border border-dashed border-slate-300 text-ink-soft hover:border-brand hover:text-brand self-start">
                           + 입찰
                         </button>`}
@@ -1805,13 +1820,13 @@
     const orderMode = !!(initSlot && initSlot.label && !initSlot.start);
     const [slotId, setSlotId] = useState(ctx.slotId);
     const [dayId, setDayId] = useState(ctx.dayId);
-    const [start, setStart] = useState((initSlot && initSlot.start) || '20:45');
-    const [end, setEnd] = useState((initSlot && initSlot.end) || '21:45');
+    const [start, setStart] = useState((initSlot && initSlot.start) || ctx.start || '20:45');
+    const [end, setEnd] = useState((initSlot && initSlot.end) || ctx.end || '21:45');
     const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
     const setChk = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.checked }));
     // 노출분 ↔ 시작/종료 시간 자동 연동
     const [durStr, setDurStr] = useState(() => {
-      const st = (initSlot && initSlot.start) || '', en = (initSlot && initSlot.end) || '';
+      const st = (initSlot && initSlot.start) || ctx.start || '', en = (initSlot && initSlot.end) || ctx.end || '';
       const d = (st && en) ? (U.toMin(en) - U.toMin(st) + 1440) % 1440 : 0;
       return d > 0 ? String(d) : '';
     });
@@ -1846,7 +1861,14 @@
     const monthDays = daysInView(state);
     const day = state.days.find((d) => d.id === dayId) || monthDays[0];
     const durMin = (start && end) ? (U.toMin(end) - U.toMin(start) + 1440) % 1440 : 0;
-    const bands = (day ? day.slots : []).filter((s) => s.start && s.end);
+    // 큰 띠 빠른 선택: 프로그램 고정 스케줄 기준 (다른 팀이 쪼갠 시간대가 아니라 항상 원래 띠를 제시)
+    const bands = (() => {
+      const sc = store.getSchedule ? store.getSchedule(day && day.programId) : null;
+      const e2 = sc && day ? sc.find((x) => x.wd === day.weekday) : null;
+      const defs = (day && day.bands && day.bands.length) ? day.bands : (e2 && e2.slots);
+      if (defs && defs.length) return defs.map(([s2, e3]) => ({ id: 'band_' + s2, start: s2, end: e3 }));
+      return (day ? day.slots : []).filter((s) => s.start && s.end);
+    })();
 
     function save() {
       const items = f.items.split('\n').map((s) => s.trim()).filter(Boolean);
