@@ -3111,12 +3111,22 @@
   function App() {
     const state = useStore();
     const [auth, setAuth] = useState(loadAuth);
-    // 접속 시 기본 탭 = 로그인한 역할의 첫 탭 (MD→입찰보드, PD/관리자→최종편성안)
+    // 접속 시 기본 탭 = 역할 첫 탭 · 같은 탭에서 새로고침이면 보던 탭 유지 (sessionStorage)
     const [tab, setTab] = useState(() => {
       const a = loadAuth();
       const r = a && window.AUTH.roles[a.role];
+      try {
+        const nav = JSON.parse(sessionStorage.getItem('scheduler-nav-v1') || 'null');
+        if (nav && nav.tab && r && r.tabs.includes(nav.tab)) return nav.tab;
+      } catch (e) {}
       return r ? r.tabs[0] : 'schedule';
     }); // schedule | bids | final
+    useEffect(() => { // 새로고침 시 보던 탭 복원용 저장
+      try {
+        const prev = JSON.parse(sessionStorage.getItem('scheduler-nav-v1') || '{}');
+        sessionStorage.setItem('scheduler-nav-v1', JSON.stringify({ ...prev, tab }));
+      } catch (e) {}
+    }, [tab]);
     const [history, setHistory] = useState(false);
     const [backup, setBackup] = useState(false);
     const [teamMgr, setTeamMgr] = useState(false);

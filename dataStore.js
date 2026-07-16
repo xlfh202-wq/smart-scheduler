@@ -301,10 +301,30 @@
     let suppressDirty = false; // 월/프로그램 이동 등 자동 생성은 변경 건수로 세지 않음
     let backupAPI = null;   // Supabase 백업/복원 구현 (connectSupabase 에서 주입)
     let hydratedOnce = false; // 첫 서버 로드 이후에는 화면 이동(탭·월)을 로컬 유지
-    // 접속(첫 로드) 시 항상 초기 화면 = 최유라쇼 + 현재 월 (오늘 기준)
+    // 접속(첫 로드) 시 초기 화면 = 최유라쇼 + 현재 월 (오늘 기준)
     function defaultView() {
       const d = new Date();
       return { year: d.getFullYear(), month: d.getMonth() + 1 };
+    }
+    // 같은 탭에서의 새로고침은 보던 화면(프로그램·월)을 유지 — sessionStorage(탭 닫으면 사라짐)
+    // 새 탭/새 접속이면 저장이 없으므로 초기 화면으로 시작 (기존 '접속 시 초기화면' 규칙 유지)
+    const NAV_KEY = 'scheduler-nav-v1';
+    function savedNav() {
+      try { const raw = sessionStorage.getItem(NAV_KEY); return raw ? JSON.parse(raw) : null; } catch (e) { return null; }
+    }
+    function saveNav() {
+      try {
+        const prev = savedNav() || {};
+        sessionStorage.setItem(NAV_KEY, JSON.stringify({ ...prev, pid: state.activeProgram, view: state.view }));
+      } catch (e) {}
+    }
+    function initialNav(programs) {
+      const nav = savedNav();
+      const pidOk = nav && nav.pid && (!programs || programs.some((p) => p.id === nav.pid));
+      return {
+        pid: pidOk ? nav.pid : MAIN_PROGRAM,
+        view: (nav && nav.view && nav.view.year) ? nav.view : defaultView(),
+      };
     }
     // 화면 이동(activeProgram·view)은 클라이언트별 로컬 — 다른 접속자 변경이 내 화면을 바꾸지 않도록
     function keepLocalNav(newState, prev) {
@@ -313,9 +333,10 @@
         if (prev.activeProgram) newState.activeProgram = prev.activeProgram;
         if (prev.view) newState.view = prev.view;
       } else {
-        // 첫 접속: 서버에 저장된 화면 위치를 따르지 않고 항상 초기 화면으로 시작
-        newState.activeProgram = MAIN_PROGRAM;
-        newState.view = defaultView();
+        // 첫 로드: 새로고침이면 보던 화면 복원, 새 접속이면 초기 화면
+        const nav = initialNav(newState.programs);
+        newState.activeProgram = nav.pid;
+        newState.view = nav.view;
       }
       hydratedOnce = true;
       return newState;
@@ -348,9 +369,12 @@
       });
     }
     let state = load();
-    // 접속 시 초기 화면 강제 (localStorage에 남은 이전 위치를 따르지 않음)
-    state.activeProgram = MAIN_PROGRAM;
-    state.view = defaultView();
+    // 첫 화면: 새로고침(같은 탭)이면 보던 화면 복원, 새 접속이면 초기 화면(최유라쇼+이번 달)
+    {
+      const nav0 = initialNav(state.programs);
+      state.activeProgram = nav0.pid;
+      state.view = nav0.view;
+    }
     const subs = new Set();
 
     function load() {
@@ -657,6 +681,7 @@
       /* ---------- 프로그램 ---------- */
       setActiveProgram(programId) {
         state.activeProgram = programId;
+        saveNav(); // 새로고침 시 보던 화면 복원용
         this.ensureMonth(state.view.year, state.view.month, programId);
         // 다음 달 첫째주도 함께 보므로 다음 달 방송일도 미리 생성
         const nm = nextMonthOf(state.view.year, state.view.month);
@@ -704,6 +729,7 @@
         const nm = nextMonthOf(year, month);
         this.ensureScheduleAll(nm.year, nm.month);
         state.view = { year, month };
+        saveNav(); // 새로고침 시 보던 화면 복원용
         suppressDirty = true; try { emit(); } finally { suppressDirty = false; } // 이동은 초안 변경으로 세지 않음
       },
       shiftView(delta) {
