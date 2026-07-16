@@ -362,6 +362,29 @@
     const [label, setLabel] = useState(slot.label || '');
     const [mode, setMode] = useState(isOrder ? 'order' : 'time');
     const dur = (mode === 'time' && s && e) ? (U.toMin(e) - U.toMin(s) + 1440) % 1440 : 0;
+    // 노출분 ↔ 시작/종료 자동 연동 (입찰 등록 팝업과 동일)
+    const [durStr, setDurStr] = useState(() => {
+      const d = (slot.start && slot.end) ? (U.toMin(slot.end) - U.toMin(slot.start) + 1440) % 1440 : 0;
+      return d > 0 ? String(d) : '';
+    });
+    const onDurChange = (ev) => {
+      const v = ev.target.value.replace(/[^\d]/g, '');
+      setDurStr(v);
+      const n = parseInt(v, 10);
+      if (/^\d{1,2}:\d{2}$/.test(s) && n > 0) setE(U.toHHMM((U.toMin(s) + n) % 1440)); // 노출분 → 종료 자동
+    };
+    const onStartChange = (v) => {
+      setS(v);
+      const n = parseInt(durStr, 10);
+      if (/^\d{1,2}:\d{2}$/.test(v) && n > 0) setE(U.toHHMM((U.toMin(v) + n) % 1440)); // 시작 이동 → 노출분 유지
+    };
+    const onEndChange = (v) => {
+      setE(v);
+      if (/^\d{1,2}:\d{2}$/.test(s) && /^\d{1,2}:\d{2}$/.test(v)) {
+        const d = (U.toMin(v) - U.toMin(s) + 1440) % 1440;
+        if (d > 0) setDurStr(String(d)); // 종료 수정 → 노출분 재계산
+      }
+    };
     function save() {
       if (mode === 'time') {
         if (!/^\d{1,2}:\d{2}$/.test(s) || !/^\d{1,2}:\d{2}$/.test(e)) { alert('시작/종료 시간을 입력하세요.'); return; }
@@ -383,12 +406,23 @@
         </div>
         ${mode === 'time'
           ? html`<${Field} label=${`방송 시간 (24시간) * — ${dur}분`}>
-              <div class="flex items-center gap-1.5">
-                <${TimeInput} value=${s} onChange=${setS} />
-                <span class="text-ink-soft">~</span>
-                <${TimeInput} value=${e} onChange=${setE} />
+              <div class="flex flex-col gap-1.5">
+                <div class="flex items-center gap-2">
+                  <span class="text-[12px] text-ink-soft w-10 shrink-0">노출분</span>
+                  <div class="flex items-center rounded border border-slate-300 focus-within:border-brand px-2" title="노출분을 넣으면 종료시간이 자동 계산됩니다">
+                    <input value=${durStr} onInput=${onDurChange} inputmode="numeric" placeholder="예: 35"
+                      class="w-16 py-1.5 text-[13px] tabular-nums text-right bg-transparent outline-none" />
+                    <span class="text-[12px] text-ink-soft pl-0.5">분</span>
+                  </div>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span class="text-[12px] text-ink-soft w-10 shrink-0">시간</span>
+                  <${TimeInput} value=${s} onChange=${onStartChange} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+                  <span class="text-ink-soft shrink-0">~</span>
+                  <${TimeInput} value=${e} onChange=${onEndChange} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+                </div>
               </div>
-              <div class="text-[11px] text-ink-soft mt-1">24시간제 (예: 20:45~21:05 = 20분)</div>
+              <div class="text-[11px] text-ink-soft mt-1">노출분 입력 → 종료시간 자동 · 시작을 바꾸면 노출분(${dur || '-'}분)에 맞춰 종료도 이동</div>
             <//>`
           : html`<${Field} label="순번명 *"><input value=${label} onInput=${(ev) => setLabel(ev.target.value)} class=${inputCls} placeholder="예: 1부" /><//>`}
       <//>`;
@@ -401,6 +435,29 @@
     const [s, setS] = useState(start);
     const [e, setE] = useState(end);
     const dur = (s && e) ? (U.toMin(e) - U.toMin(s) + 1440) % 1440 : 0;
+    // 노출분 ↔ 시작/종료 자동 연동 (입찰 등록·시간대 수정 팝업과 동일)
+    const [durStr, setDurStr] = useState(() => {
+      const d = (start && end) ? (U.toMin(end) - U.toMin(start) + 1440) % 1440 : 0;
+      return d > 0 ? String(d) : '';
+    });
+    const onDurChange = (ev) => {
+      const v = ev.target.value.replace(/[^\d]/g, '');
+      setDurStr(v);
+      const n = parseInt(v, 10);
+      if (/^\d{1,2}:\d{2}$/.test(s) && n > 0) setE(U.toHHMM((U.toMin(s) + n) % 1440));
+    };
+    const onStartChange = (v) => {
+      setS(v);
+      const n = parseInt(durStr, 10);
+      if (/^\d{1,2}:\d{2}$/.test(v) && n > 0) setE(U.toHHMM((U.toMin(v) + n) % 1440));
+    };
+    const onEndChange = (v) => {
+      setE(v);
+      if (/^\d{1,2}:\d{2}$/.test(s) && /^\d{1,2}:\d{2}$/.test(v)) {
+        const d = (U.toMin(v) - U.toMin(s) + 1440) % 1440;
+        if (d > 0) setDurStr(String(d));
+      }
+    };
     function save() {
       if (!/^\d{1,2}:\d{2}$/.test(s) || !/^\d{1,2}:\d{2}$/.test(e)) { alert('시작/종료 시간을 입력하세요.'); return; }
       if (dur <= 0) { alert('종료가 시작보다 늦어야 합니다.'); return; }
@@ -412,10 +469,21 @@
         extra=${hasOverride ? html`<button onClick=${() => { if (confirm('이 날짜의 시간띠를 프로그램 기본 시간으로 되돌릴까요?\n(띠 시간 그대로 편성된 상품의 시간은 유지됩니다)')) { store.resetDayBands(day.id); onClose(); } }}
           class="text-[12px] text-ink-soft hover:text-brand mr-auto">기본 시간으로 복원</button>` : undefined}>
         <${Field} label=${`띠 시간 (24시간) * — ${dur}분`}>
-          <div class="flex items-center gap-1.5">
-            <${TimeInput} value=${s} onChange=${setS} />
-            <span class="text-ink-soft">~</span>
-            <${TimeInput} value=${e} onChange=${setE} />
+          <div class="flex flex-col gap-1.5">
+            <div class="flex items-center gap-2">
+              <span class="text-[12px] text-ink-soft w-10 shrink-0">노출분</span>
+              <div class="flex items-center rounded border border-slate-300 focus-within:border-brand px-2" title="노출분을 넣으면 종료시간이 자동 계산됩니다">
+                <input value=${durStr} onInput=${onDurChange} inputmode="numeric" placeholder="예: 60"
+                  class="w-16 py-1.5 text-[13px] tabular-nums text-right bg-transparent outline-none" />
+                <span class="text-[12px] text-ink-soft pl-0.5">분</span>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-[12px] text-ink-soft w-10 shrink-0">시간</span>
+              <${TimeInput} value=${s} onChange=${onStartChange} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+              <span class="text-ink-soft shrink-0">~</span>
+              <${TimeInput} value=${e} onChange=${onEndChange} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+            </div>
           </div>
         <//>
         <div class="text-[12px] text-ink-soft leading-relaxed">
