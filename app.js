@@ -434,7 +434,7 @@
                     이 시간대에 상품 <b>${sharers.length}개</b>가 함께 있습니다 — 저장하면 <b>${placement.productName}</b>만 새 시간으로 분리되고, 나머지 상품의 시간은 그대로 유지됩니다.</div>`
                 : html`<label class="mt-2 flex items-center gap-1.5 text-[12px] text-ink cursor-pointer">
                     <input type="checkbox" checked=${ripple} onChange=${(ev) => setRipple(ev.target.checked)} />
-                    종료시간 변경분만큼 <b>뒤 시간대도 함께 밀기</b> <span class="text-ink-soft">(고정 띠는 제외)</span></label>`}
+                    종료에 <b>이어져 있던 뒤 시간대만 함께 밀기</b> <span class="text-ink-soft">(어긋난 시간대·고정 띠는 그대로)</span></label>`}
             <//>`
           : html`<${Field} label="순번명 *"><input value=${label} onInput=${(ev) => setLabel(ev.target.value)} class=${inputCls} placeholder="예: 1부" /><//>`}
       <//>`;

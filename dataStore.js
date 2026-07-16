@@ -1230,14 +1230,22 @@
         if (ripple && oldEnd && /^\d{1,2}:\d{2}$/.test(oldEnd)) {
           const delta = toMin(end) - toMin(oldEnd);
           const wrap = (m) => toHHMM(((m % 1440) + 1440) % 1440);
-          if (delta !== 0) f.day.slots.forEach((sl) => {
-            if (sl.id === f.slot.id || !sl.start || sl.std) return;
-            if (toMin(sl.start) >= toMin(oldEnd)) {
-              sl.start = wrap(toMin(sl.start) + delta);
-              if (sl.end) sl.end = wrap(toMin(sl.end) + delta);
-              moved++;
-            }
-          });
+          if (delta !== 0) {
+            // 체인 방식: "원래 종료시간에 딱 이어져 있던" 시간대만 따라 밀고, 그 뒤로도 이어진 것만 연쇄.
+            // 어긋나 있던(간격/무관한) 시간대는 건드리지 않음 — 이미 매칭돼 있으면 밀 것도 없음.
+            const chain = new Set([toMin(oldEnd)]);
+            f.day.slots
+              .filter((sl) => sl.id !== f.slot.id && sl.start && !sl.std)
+              .sort((a, b) => toMin(a.start) - toMin(b.start))
+              .forEach((sl) => {
+                const s0 = toMin(sl.start);
+                if (!chain.has(s0)) return;
+                if (sl.end) chain.add(toMin(sl.end)); // 이 슬롯의 원래 종료에 이어진 것도 연쇄 대상
+                sl.start = wrap(s0 + delta);
+                if (sl.end) sl.end = wrap(toMin(sl.end) + delta);
+                moved++;
+              });
+          }
         }
         f.day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
         log({ action: '시간수정', from: old, to: `${start}~${end}`,
