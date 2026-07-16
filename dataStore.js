@@ -168,6 +168,7 @@
         return !snap.some((o) => o.id !== x.id && has(o) && slotOverlap(x, o));
       });
     });
+    repairOrphanPlacements(s); // 슬롯 소실로 화면에서 사라진 편성 복구
     return s;
   }
   // 고아 조각 슬롯만 빠르게 청소 (변경 때마다 호출 — std 로직은 건드리지 않음)
@@ -178,6 +179,24 @@
     s.days.forEach((day) => {
       day.slots = day.slots.filter((sl) =>
         sl.std || sl.manual || sl.label || sl.bucket || bidSlot.has(sl.id) || plSlot.has(sl.id));
+    });
+    return s;
+  }
+  // 고아 편성 복구: placement.slotId가 어느 날짜에도 없으면(동기화 경합 등으로 슬롯 소실)
+  // 화면에서 상품이 통째로 사라지므로, 원본 입찰의 슬롯(살아있으면) 또는 해당 날짜 고정 띠로 재귀속
+  function repairOrphanPlacements(s) {
+    if (!s || !s.placements) return s;
+    const slotSet = new Set((s.days || []).flatMap((d) => d.slots.map((x) => x.id)));
+    (s.placements || []).forEach((p) => {
+      if (slotSet.has(p.slotId)) return;
+      const bid = p.sourceBidId && (s.bids || []).find((b) => b.id === p.sourceBidId);
+      if (!bid) return; // 수기 편성은 날짜를 특정할 수 없음 — 유지
+      if (slotSet.has(bid.slotId)) { p.slotId = bid.slotId; return; }
+      const day = (s.days || []).find((d) => d.id === bid.dayId);
+      if (day) {
+        const t = day.slots.find((x) => x.std) || day.slots[0];
+        if (t) p.slotId = t.id;
+      }
     });
     return s;
   }
@@ -432,7 +451,8 @@
     }
     function notify() { persist(state); subs.forEach((fn) => fn(state)); }
     function emit() {
-      gcOrphanSlots(state); // 상품 이동 후 남은 빈 조각 슬롯 즉시 청소
+      repairOrphanPlacements(state); // 슬롯 소실로 사라진 편성 즉시 복구
+      gcOrphanSlots(state);          // 상품 이동 후 남은 빈 조각 슬롯 즉시 청소
       const changed = recordHistory();
       if (holdSync && changed && !suppressDirty) draftDirty++;
       notify();
@@ -1234,17 +1254,38 @@
         const sharers = state.placements.filter((x) => x.slotId === f.slot.id);
         if (sharers.length <= 1) { api.updateSlotTime(f.slot.id, { start, end, ripple }); return; }
         const day = f.day;
-        let ns = day.slots.find((s) => s.id !== f.slot.id && s.start === start && s.end === end);
-        if (!ns) {
-          ns = { id: 'slot_' + uid(), start, end, manual: true };
-          day.slots.push(ns);
-          day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
-        }
+        const oldS = f.slot.start, oldE = f.slot.end;
+        const findOrMake = (s2, e2) => {
+          let sl = day.slots.find((x) => x.id !== f.slot.id && x.start === s2 && x.end === e2);
+          if (!sl) { sl = { id: 'slot_' + uid(), start: s2, end: e2, manual: true }; day.slots.push(sl); }
+          return sl;
+        };
+        const ns = findOrMake(start, end);
         p.slotId = ns.id;
         stamp(p);
+        // 남은 상품 시간 자동 보정: 분리한 상품이 시간대의 앞부분을 가져가면 남은 상품은 뒤(끝~원래끝)로,
+        // 뒷부분을 가져가면 남은 상품은 앞(원래시작~시작)으로 이어붙임
+        let restNote = '';
+        if (oldS && oldE) {
+          let rs = null, re = null;
+          if (start === oldS && toMin(end) < toMin(oldE)) { rs = end; re = oldE; }
+          else if (end === oldE && toMin(start) > toMin(oldS)) { rs = oldS; re = start; }
+          if (rs) {
+            const rest = sharers.filter((x) => x.id !== p.id);
+            if (f.slot.std) {
+              // 고정 띠 슬롯은 시간을 건드리지 않고, 남은 상품들을 나머지 구간 슬롯으로 이동
+              const rSlot = findOrMake(rs, re);
+              rest.forEach((x) => { x.slotId = rSlot.id; stamp(x); });
+            } else {
+              f.slot.start = rs; f.slot.end = re;
+            }
+            restNote = ` · 남은 상품 ${rest.length}개 → ${rs}~${re}`;
+          }
+        }
+        day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
         log({ action: '시간수정', productName: p.productName, teamName: teamName(p.teamId),
-              from: `${f.slot.start}~${f.slot.end}`, to: `${start}~${end}`,
-              detail: `${day.date} 이 상품만 시간 분리 (같은 시간대 다른 상품은 유지)` });
+              from: `${oldS}~${oldE}`, to: `${start}~${end}`,
+              detail: `${day.date} 이 상품만 시간 분리${restNote}` });
         emit();
       },
       updateSlotLabel(slotId, label) {
