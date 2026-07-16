@@ -1110,7 +1110,6 @@
       setSaveOpen(false);
       onSaved && onSaved(); // 최종편성안 탭으로 이동
     }
-    const draftN = store.draftCount ? store.draftCount() : 0;
     return html`
       <div class="flex flex-col md:flex-row flex-1 min-h-0">
         <${BidPool} state=${state} />
@@ -1123,8 +1122,6 @@
                 : html`<span class="text-[11px] font-normal text-slate-400 ml-1">· 저장 안 됨</span>`}
             </h2>
             <div class="flex items-center gap-2 flex-wrap justify-end">
-              ${draftN > 0 && html`<span class="text-[11px] font-semibold text-amber-800 bg-amber-100 border border-amber-300 rounded px-2 py-1 whitespace-nowrap shrink-0"
-                title="수정 내용은 '편성 저장'을 눌러야 서버(다른 사람 화면)에 반영됩니다">● 저장 안 된 변경 ${draftN}건</span>`}
               ${!simple && html`<button onClick=${() => setMemoOpen(true)}
                 class=${`text-xs px-2.5 py-1 rounded border whitespace-nowrap shrink-0 ${hasMemo ? 'border-amber-400 text-amber-700 bg-amber-50' : 'border-slate-300 bg-white hover:border-brand hover:text-brand'}`}
                 title="PD·쇼호스트 캐스팅 특이사항(휴가·불가일 등)">📌 캐스팅 메모${hasMemo ? ' ●' : ''}</button>`}
@@ -1133,11 +1130,12 @@
               <button onClick=${() => setSnapOpen(true)}
                 class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0">저장본 ${snaps.length}</button>
               <button onClick=${() => setSaveOpen(true)}
-                class=${`text-xs font-semibold px-3 py-1 rounded bg-brand text-white hover:bg-brand-dark whitespace-nowrap shrink-0 ${draftN > 0 ? 'ring-2 ring-amber-400 ring-offset-1' : ''}`}>편성 저장${draftN > 0 ? ` (${draftN})` : ''}</button>
+                title="현재 편성을 저장본(되돌리기 지점)으로 기록하고 최종편성안으로 이동 — 수정은 이미 실시간 반영됩니다"
+                class="text-xs font-semibold px-3 py-1 rounded bg-brand text-white hover:bg-brand-dark whitespace-nowrap shrink-0">편성 저장</button>
             </div>
           </div>
           ${simple && html`<div class="mb-2 text-[12px] text-ink-soft bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5">
-            상품명·팀명·노출분만 간결하게 표시합니다. 드래그로 <b>순서·시간띠를 조정</b>하고 “편성 저장”을 누르면 <b>최종편성안</b>으로 이동해 PD·쇼호스트·스튜디오와 상세를 입력합니다.</div>`}
+            상품명·팀명·노출분만 간결하게 표시합니다. 드래그로 <b>순서·시간띠를 조정</b>하면 <b>실시간으로 모두에게 반영</b>됩니다. “편성 저장”은 저장본(되돌리기 지점)을 남기고 <b>최종편성안</b>으로 이동합니다.</div>`}
           <div class="space-y-4">
             ${days.length === 0 && html`<div class="text-sm text-slate-400 py-10 text-center">이 달에는 편성일이 없습니다. “+ 편성일 추가”로 추가하세요.</div>`}
             ${groupByWeek(days).map(([wk, days]) => html`
@@ -1160,7 +1158,8 @@
     const [label, setLabel] = useState('');
     return html`
       <${Modal} title=${`${year}년 ${month}월 편성안 저장`} onClose=${onClose} onSave=${() => onSave(label)}>
-        <div class="text-[13px] text-ink">편성 <b>${count}건</b>을 저장하고 <b>${next || '최종편성안'}</b>으로 이동합니다.</div>
+        <div class="text-[13px] text-ink">현재 편성 <b>${count}건</b>을 <b>저장본(되돌리기 지점)</b>으로 기록하고 <b>${next || '최종편성안'}</b>으로 이동합니다.</div>
+        <div class="text-[12px] text-ink-soft -mt-1">수정 내용은 이미 실시간으로 반영되어 있습니다 — 저장본은 이 시점으로 되돌리기 위한 기록입니다.</div>
         <${Field} label="메모 (선택)">
           <input value=${label} onInput=${(e) => setLabel(e.target.value)} class=${inputCls} placeholder="예: 7월 확정안 v1" autofocus />
         <//>
@@ -3084,25 +3083,10 @@
     const allowed = roleCfg ? roleCfg.tabs : [];
     const curTab = roleCfg ? (allowed.includes(tab) ? tab : allowed[0]) : null;
 
-    // 편성표 초안 모드: 입찰 보드·PD 캐스팅에 있는 동안 수정은 로컬 보류 → '편성 저장'으로 일괄 반영
-    // (두 탭 사이 이동은 초안을 그대로 유지 — beginHold를 다시 호출하면 초안 카운트가 초기화되므로 유지 중엔 재호출 금지)
-    const draftTab = (t) => t === 'schedule' || t === 'board';
-    const [leaveTo, setLeaveTo] = useState(null); // 저장 안 된 채 이동 시 확인 팝업 대상 탭
-    useEffect(() => {
-      if (!store.beginHold) return;
-      if (draftTab(curTab)) { if (!store.isHolding || !store.isHolding()) store.beginHold(); }
-      else store.endHold();
-    }, [curTab]);
-    // 새로고침/창닫기 시 브라우저 경고 (저장 안 된 초안)
-    useEffect(() => {
-      const h = (e) => { if (store.draftCount && store.draftCount() > 0) { e.preventDefault(); e.returnValue = ''; } };
-      window.addEventListener('beforeunload', h);
-      return () => window.removeEventListener('beforeunload', h);
-    }, []);
-    function guardTab(next) {
-      if (draftTab(curTab) && !draftTab(next) && store.draftCount && store.draftCount() > 0) { setLeaveTo(next); return; }
-      setTab(next);
-    }
+    // 초안(보류) 모드 제거 — 모든 수정은 즉시 서버에 반영(실시간 공유).
+    // '편성 저장' 버튼은 저장본(되돌리기 지점) 기록 + 최종편성안 이동 용도로만 사용.
+    useEffect(() => { if (store.endHold) store.endHold(); }, []);
+    function guardTab(next) { setTab(next); }
 
     function doLogin(a) {
       try { localStorage.setItem(window.AUTH.storageKey, JSON.stringify({ ...a, ts: Date.now() })); } catch (e) {}
@@ -3229,10 +3213,6 @@
         ${backup && html`<${BackupModal} isAdmin=${roleCfg.isAdmin} onClose=${() => setBackup(false)} />`}
         ${teamMgr && html`<${TeamManagerModal} state=${state} onClose=${() => setTeamMgr(false)} />`}
         ${castMgr && html`<${CastingManagerModal} state=${state} onClose=${() => setCastMgr(false)} />`}
-        ${leaveTo && html`<${LeaveGuardModal} count=${store.draftCount ? store.draftCount() : 0}
-          onSave=${() => { store.flushDraft(); setTab(leaveTo); setLeaveTo(null); }}
-          onDiscard=${() => { store.discardDraft(); setTab(leaveTo); setLeaveTo(null); }}
-          onStay=${() => setLeaveTo(null)} />`}
         <${MakerFooter} />
       </div>`;
   }
