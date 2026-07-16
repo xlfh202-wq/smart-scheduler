@@ -1297,6 +1297,7 @@
         emit();
       },
       // 고정 시간띠(밴드) 시간 조정 — 해당 날짜에만 적용. 띠 시간 그대로 편성된 슬롯도 함께 이동.
+      // 시간을 줄이면 남는 앞/뒤 구간은 자동으로 별도 띠로 생성 (예: 65분 띠를 35분으로 → 남은 30분 띠 생성)
       updateDayBand(dayId, idx, { start, end }) {
         const day = state.days.find((d) => d.id === dayId);
         if (!day) return;
@@ -1307,13 +1308,53 @@
         if (!base[idx]) return;
         const [oldS, oldE] = base[idx];
         base[idx] = [start, end];
+        const made = [];
+        if (toMin(end) < toMin(oldE)) { base.splice(idx + 1, 0, [end, oldE]); made.push(`${end}~${oldE}`); }   // 뒤 잔여 띠
+        if (toMin(start) > toMin(oldS)) { base.splice(idx, 0, [oldS, start]); made.push(`${oldS}~${start}`); } // 앞 잔여 띠
         day.bands = base;
         day.slots.forEach((sl) => {
           if (sl.start === oldS && sl.end === oldE) { sl.start = start; sl.end = end; }
         });
         day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
-        log({ action: '시간띠조정', from: `${oldS}~${oldE}`, to: `${start}~${end}`, detail: `${day.date} 시간띠 조정(이 날짜만)` });
+        log({ action: '시간띠조정', from: `${oldS}~${oldE}`, to: `${start}~${end}`,
+              detail: `${day.date} 시간띠 조정(이 날짜만)${made.length ? ` · 남는 구간 띠 생성: ${made.join(', ')}` : ''}` });
         emit();
+      },
+      // 시간띠 삭제(이 날짜만) — 이 띠 구간의 상품은 삭제하지 않고 입찰 풀로 복귀
+      removeDayBand(dayId, idx) {
+        const day = state.days.find((d) => d.id === dayId);
+        if (!day) return { error: '날짜를 찾을 수 없습니다.' };
+        const sched = progSchedule(day.programId);
+        const entry = sched && sched.find((sc) => sc.wd === day.weekday);
+        const base = (day.bands && day.bands.length) ? day.bands.map((b) => b.slice())
+          : ((entry && entry.slots) || []).map((b) => b.slice());
+        if (!base[idx]) return { error: '시간띠를 찾을 수 없습니다.' };
+        if (base.length <= 1) return { error: '마지막 시간띠는 삭제할 수 없습니다. 대신 편성일 삭제를 사용하세요.' };
+        const [bs, be] = base[idx];
+        base.splice(idx, 1);
+        day.bands = base;
+        // 이 띠 구간(시작시간 기준)의 슬롯 제거 + 상품 보존(removeSlot과 동일 규칙)
+        const inBand = (sl) => sl.start && toMin(sl.start) >= toMin(bs) && toMin(sl.start) < toMin(be);
+        const gone = day.slots.filter(inBand);
+        let saved = 0;
+        gone.forEach((sl) => {
+          state.placements.filter((p) => p.slotId === sl.id).forEach((p) => {
+            if (!p.sourceBidId) {
+              const product = { name: p.productName, ...(p.detail || {}), durationMin: p.durationMin, items: p.items };
+              state.bids.push(stamp({ id: uid(), teamId: p.teamId, dayId: day.id, slotId: null, product, createdAt: nowISO() }));
+            }
+            saved++;
+          });
+          state.placements = state.placements.filter((p) => p.slotId !== sl.id);
+        });
+        const goneIds = new Set(gone.map((s) => s.id));
+        day.slots = day.slots.filter((s) => !goneIds.has(s.id));
+        const fb = day.slots[0] ? day.slots[0].id : null;
+        state.bids.forEach((b) => { if (goneIds.has(b.slotId)) b.slotId = fb; });
+        log({ action: '시간띠삭제', from: `${bs}~${be}`,
+              detail: `${day.date} 시간띠 삭제(이 날짜만)${saved ? ` · 상품 ${saved}건 입찰 풀로 복귀` : ''}` });
+        emit();
+        return { ok: true, saved };
       },
       // 시간띠 조정을 기본(프로그램 고정 스케줄)으로 되돌리기
       resetDayBands(dayId) {

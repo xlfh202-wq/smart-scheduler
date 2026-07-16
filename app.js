@@ -500,7 +500,8 @@
         <//>
         <div class="text-[12px] text-ink-soft leading-relaxed">
           <b>${fmtDay(day)} 하루에만</b> 적용됩니다 (다른 주 같은 요일은 그대로).<br/>
-          띠 시간(${start}~${end}) 그대로 편성된 상품은 새 시간으로 함께 이동하고, 최종편성안에도 반영됩니다.
+          띠 시간(${start}~${end}) 그대로 편성된 상품은 새 시간으로 함께 이동하고, 최종편성안에도 반영됩니다.<br/>
+          <b>시간을 줄이면 남는 구간은 자동으로 별도 띠</b>로 생성됩니다 (예: 65분 → 35분이면 남은 30분 띠 생성).
         </div>
       <//>`;
   }
@@ -508,7 +509,7 @@
   /* =====================================================================
    *  고정 시간띠 행 — MD가 잘게 쪼갠 시간대도 이 띠 아래에 자동 귀속 표시
    * ===================================================================== */
-  function BandRow({ state, day, band, onQuickAdd, onExtBid, onExtMove, onEditBand, simple }) {
+  function BandRow({ state, day, band, onQuickAdd, onExtBid, onExtMove, onEditBand, onCtxMenu, simple }) {
     const [over, setOver] = useState(false);
     const isExt = !!band.ext;
     const slots = band.slots || [];
@@ -547,7 +548,8 @@
         style=${compColor && !over ? { borderColor: compColor, boxShadow: `0 0 0 1px ${compColor}` } : (over ? {} : { borderColor: '#e2e8f0', borderStyle: isExt ? 'dashed' : 'solid' })}
         onDragOver=${(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave=${() => setOver(false)}
-        onDrop=${onDrop}>
+        onDrop=${onDrop}
+        onContextMenu=${(!isExt && onCtxMenu) ? ((e) => { e.preventDefault(); e.stopPropagation(); onCtxMenu(e.clientX, e.clientY); }) : undefined}>
         <div class=${`w-[104px] shrink-0 px-1.5 py-1.5 border-r border-slate-200 flex flex-col gap-0.5 ${isExt ? 'bg-slate-100/70' : 'bg-slate-50'}`}>
           ${isExt
             ? html`<span class="text-[12px] font-bold text-ink-soft leading-tight">확장<br/>${band.label}</span>`
@@ -588,7 +590,7 @@
   /* =====================================================================
    *  슬롯 셀 (드롭 타깃)
    * ===================================================================== */
-  function SlotCell({ state, day, slot, simple }) {
+  function SlotCell({ state, day, slot, simple, onCtxMenu }) {
     const [over, setOver] = useState(false);
     const [splitOpen, setSplitOpen] = useState(false);
     const [addOpen, setAddOpen] = useState(false);
@@ -612,7 +614,8 @@
         style=${compColor && !over ? { borderColor: compColor, boxShadow: `0 0 0 1px ${compColor}` } : (over ? {} : { borderColor: '#e2e8f0' })}
         onDragOver=${(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave=${() => setOver(false)}
-        onDrop=${onDrop}>
+        onDrop=${onDrop}
+        onContextMenu=${onCtxMenu ? ((e) => { e.preventDefault(); e.stopPropagation(); onCtxMenu(e.clientX, e.clientY); }) : undefined}>
         <div class="w-[104px] shrink-0 px-1.5 py-1.5 bg-slate-50 border-r border-slate-200 flex flex-col gap-0.5">
           <${SlotTimeButton} slot=${slot} rippleDefault=${true} className="text-[13.5px] font-extrabold text-ink tabular-nums leading-tight text-left whitespace-nowrap" />
           ${slot.start && slot.end && html`<span class="text-[11px] font-semibold text-ink-soft">${dur}분</span>`}
@@ -714,6 +717,9 @@
     const useBands = !!(bandDefs && bandDefs.length);
     const [showExt, setShowExt] = useState(false);
     const [bandEdit, setBandEdit] = useState(null); // {idx,start,end} — 시간띠 조정 팝업
+    const [ctxMenu, setCtxMenu] = useState(null);   // 우클릭 메뉴 {x,y,kind:'band'|'slot',band?,idx?,slot?}
+    const [slotAddFor, setSlotAddFor] = useState(null); // 우클릭: 이 시간대에 상품 추가
+    const [splitFor, setSplitFor] = useState(null);     // 우클릭: 시간 분할
     let bands = [], extBefore = null, extAfter = null, labelSlots = [];
     if (useBands) {
       bands = bandDefs.map(([bs, be]) => ({ start: bs, end: be, slots: [] }));
@@ -797,17 +803,54 @@
               onExtBid=${setBidTimeFor} onExtMove=${setMoveTimeFor} />`}
             ${bands.map((bd, bi) => html`<${BandRow} key=${bi} state=${state} day=${day} band=${bd} simple=${simple}
               onQuickAdd=${(st) => { setQuickInit(st); setQuickOpen(true); }}
-              onEditBand=${() => setBandEdit({ idx: bi, start: bd.start, end: bd.end })} />`)}
+              onEditBand=${() => setBandEdit({ idx: bi, start: bd.start, end: bd.end })}
+              onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'band', band: bd, idx: bi })} />`)}
             ${(showExt || extAfter.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extAfter} simple=${simple}
               onExtBid=${setBidTimeFor} onExtMove=${setMoveTimeFor} />`}
-            ${labelSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} simple=${simple} />`)}`
+            ${labelSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} simple=${simple}
+              onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'slot', slot: s })} />`)}`
           : (sortedSlots.length === 0
             ? html`<div class="text-[12px] text-slate-400 py-3 text-center">시간대가 없습니다. “+ 상품” 또는 “+ 시간대”로 추가하세요.</div>`
-            : sortedSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} simple=${simple} />`))}
+            : sortedSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} simple=${simple}
+              onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'slot', slot: s })} />`))}
         </div>
         ${addOpen && html`<${AddSlotModal} day=${day} onClose=${() => setAddOpen(false)} />`}
         ${bandEdit && html`<${BandTimeModal} day=${day} idx=${bandEdit.idx} start=${bandEdit.start} end=${bandEdit.end}
           hasOverride=${!!(day.bands && day.bands.length)} onClose=${() => setBandEdit(null)} />`}
+        ${slotAddFor && html`<${SlotAddModal} state=${state} slot=${slotAddFor} onClose=${() => setSlotAddFor(null)} />`}
+        ${splitFor && html`<${SplitModal} slot=${splitFor} dur=${U.slotDuration(splitFor)} onClose=${() => setSplitFor(null)} />`}
+        ${ctxMenu && (() => {
+          const close = () => setCtxMenu(null);
+          const item = (label, fn, danger) => html`
+            <button onClick=${() => { close(); fn(); }}
+              class=${`w-full text-left px-3 py-1.5 hover:bg-slate-100 ${danger ? 'text-rose-600' : 'text-ink'}`}>${label}</button>`;
+          const head = ctxMenu.kind === 'band'
+            ? `${fmtDay(day)} · 띠 ${ctxMenu.band.start}~${ctxMenu.band.end}`
+            : `${fmtDay(day)} · ${slotName(ctxMenu.slot)}`;
+          return html`
+            <div class="fixed inset-0 z-50" onClick=${close} onContextMenu=${(e) => { e.preventDefault(); close(); }}>
+              <div class="absolute bg-white rounded-lg shadow-xl border border-slate-200 py-1 w-60 text-[13px]"
+                style=${{ left: Math.min(ctxMenu.x, window.innerWidth - 256) + 'px', top: Math.min(ctxMenu.y, window.innerHeight - 190) + 'px' }}
+                onClick=${(e) => e.stopPropagation()}>
+                <div class="px-3 py-1 text-[11px] text-ink-soft border-b border-slate-100">${head}</div>
+                ${ctxMenu.kind === 'band' ? html`
+                  ${item('➕ 상품 추가 (이 띠 시간)', () => { setQuickInit(ctxMenu.band.start); setQuickOpen(true); })}
+                  ${item('⏱ 시간띠 조정 — 줄이면 남는 구간 자동 띠', () => setBandEdit({ idx: ctxMenu.idx, start: ctxMenu.band.start, end: ctxMenu.band.end }))}
+                  ${item('🗑 이 시간띠 삭제 (이 날짜만)', () => {
+                    if (!confirm(`${ctxMenu.band.start}~${ctxMenu.band.end} 시간띠를 삭제할까요?\n이 구간의 상품은 삭제되지 않고 입찰 풀로 돌아갑니다.`)) return;
+                    const r = store.removeDayBand(day.id, ctxMenu.idx);
+                    if (r && r.error) alert(r.error);
+                  }, true)}`
+                : html`
+                  ${item('➕ 이 시간대에 상품 추가', () => setSlotAddFor(ctxMenu.slot))}
+                  ${ctxMenu.slot.start && ctxMenu.slot.end && item('⊟ 시간 분할', () => setSplitFor(ctxMenu.slot))}
+                  ${item('✕ 시간대 삭제', () => {
+                    const n = state.placements.filter((x) => x.slotId === ctxMenu.slot.id).length;
+                    if (confirm(`이 시간대를 삭제할까요?${n ? `\n배정된 상품 ${n}개는 삭제되지 않고 입찰 풀(미편성)로 돌아갑니다.` : ''}`)) store.removeSlot(ctxMenu.slot.id);
+                  }, true)}`}
+              </div>
+            </div>`;
+        })()}
         ${quickOpen && html`<${QuickAddModal} state=${state} day=${day} initStart=${quickInit} onClose=${() => setQuickOpen(false)} />`}
         ${moveTimeFor && html`<${MoveTimeModal} state=${state} day=${day} placementId=${moveTimeFor} onClose=${() => setMoveTimeFor(null)} />`}
         ${bidTimeFor && html`<${BidTimeModal} state=${state} day=${day} bidId=${bidTimeFor} onClose=${() => setBidTimeFor(null)} />`}
