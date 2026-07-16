@@ -1393,12 +1393,19 @@
     days.forEach((d) => {
       const slots = d.slots.slice().sort((a, b) => slotStart(a) - slotStart(b));
       let firstOfDay = true;
+      const hasContent = (sid) => state.placements.some((p) => p.slotId === sid);
+      const ovl = (a, b) => a.start && a.end && b.start && b.end
+        && U.toMin(a.start) < U.toMin(b.end) && U.toMin(b.start) < U.toMin(a.end);
       slots.forEach((s) => {
         const pls = state.placements.filter((p) => p.slotId === s.id);
         if (pls.length === 0) {
           // 빈 행은 고정 띠(std)·수기(manual)·순번(label) 슬롯만 표시 —
           // MD 입찰이 참조만 하는 조각 슬롯(상품 이동 후 잔여물)은 빈 행으로 노출하지 않음
-          if (s.std || s.manual || s.label) { rows.push({ day: d, slot: s, p: null, firstOfDay }); firstOfDay = false; }
+          if (!(s.std || s.manual || s.label)) return;
+          if (s.start && s.start === s.end) return; // 0분 잔재 슬롯은 빈 행으로 표시하지 않음
+          // 그 시간 구간에 이미 상품이 편성된 시간대가 겹쳐 있으면(예: 65분 띠를 2행으로 분할) 빈 행 숨김
+          if (slots.some((o) => o.id !== s.id && hasContent(o.id) && ovl(s, o))) return;
+          rows.push({ day: d, slot: s, p: null, firstOfDay }); firstOfDay = false;
         } else {
           pls.forEach((p) => { rows.push({ day: d, slot: s, p, firstOfDay, compete: pls.length > 1 }); firstOfDay = false; });
         }
