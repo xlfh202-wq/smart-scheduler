@@ -160,10 +160,24 @@
     s.days.forEach((day) => {
       const snap = day.slots.slice();
       day.slots = day.slots.filter((x) => {
+        // 고아 조각 슬롯 제거: 고정(std)·수기(manual)·순번(label)·버킷이 아닌 시간 슬롯이
+        // 입찰·편성 어디서도 참조되지 않으면 잔여물이므로 정리 (상품 이동 후 남는 빈 껍데기)
+        if (!x.std && !x.manual && !x.label && !x.bucket && !has(x)) return false;
         if (!x.std || has(x)) return true;
         // 빈 고정슬롯이 다른 '내용 있는' 슬롯과 시간 겹치면 제거
         return !snap.some((o) => o.id !== x.id && has(o) && slotOverlap(x, o));
       });
+    });
+    return s;
+  }
+  // 고아 조각 슬롯만 빠르게 청소 (변경 때마다 호출 — std 로직은 건드리지 않음)
+  function gcOrphanSlots(s) {
+    if (!s || !s.days) return s;
+    const bidSlot = new Set((s.bids || []).map((b) => b.slotId));
+    const plSlot = new Set((s.placements || []).map((p) => p.slotId));
+    s.days.forEach((day) => {
+      day.slots = day.slots.filter((sl) =>
+        sl.std || sl.manual || sl.label || sl.bucket || bidSlot.has(sl.id) || plSlot.has(sl.id));
     });
     return s;
   }
@@ -418,6 +432,7 @@
     }
     function notify() { persist(state); subs.forEach((fn) => fn(state)); }
     function emit() {
+      gcOrphanSlots(state); // 상품 이동 후 남은 빈 조각 슬롯 즉시 청소
       const changed = recordHistory();
       if (holdSync && changed && !suppressDirty) draftDirty++;
       notify();
@@ -1235,7 +1250,8 @@
         if (!firstMinutes || firstMinutes <= 0 || firstMinutes >= total) return;
         const startMin = toMin(f.slot.start);
         const mid = toHHMM(startMin + firstMinutes);
-        const second = { id: 'slot_' + uid(), start: mid, end: f.slot.end };
+        // 분할 후반부는 PD가 의도적으로 만든 칸 — manual 승계로 고아 슬롯 청소(gc) 대상에서 제외
+        const second = { id: 'slot_' + uid(), start: mid, end: f.slot.end, std: f.slot.std, manual: true };
         f.slot.end = mid;
         const idx = f.day.slots.findIndex((s) => s.id === slotId);
         f.day.slots.splice(idx + 1, 0, second);

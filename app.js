@@ -1274,7 +1274,9 @@
       slots.forEach((s) => {
         const pls = state.placements.filter((p) => p.slotId === s.id);
         if (pls.length === 0) {
-          rows.push({ day: d, slot: s, p: null, firstOfDay }); firstOfDay = false;
+          // 빈 행은 고정 띠(std)·수기(manual)·순번(label) 슬롯만 표시 —
+          // MD 입찰이 참조만 하는 조각 슬롯(상품 이동 후 잔여물)은 빈 행으로 노출하지 않음
+          if (s.std || s.manual || s.label) { rows.push({ day: d, slot: s, p: null, firstOfDay }); firstOfDay = false; }
         } else {
           pls.forEach((p) => { rows.push({ day: d, slot: s, p, firstOfDay, compete: pls.length > 1 }); firstOfDay = false; });
         }
