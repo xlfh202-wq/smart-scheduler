@@ -182,7 +182,7 @@
           </div>
         </div>
         ${info && html`<${PlacementDetailModal} state=${state} p=${p} startEdit=${startEdit} onClose=${(e) => { e && e.stopPropagation && e.stopPropagation(); setInfo(false); }} />`}
-        ${subEdit && subSlot && html`<${EditSlotTimeModal} slot=${subSlot} onClose=${() => setSubEdit(false)} />`}
+        ${subEdit && subSlot && html`<${EditSlotTimeModal} slot=${subSlot} placement=${p} rippleDefault=${true} onClose=${() => setSubEdit(false)} />`}
         ${castOpen && html`<${CastQuickModal} state=${state} p=${p} onClose=${() => setCastOpen(false)} />`}
       </div>`;
   }
@@ -348,20 +348,24 @@
   /* =====================================================================
    *  슬롯 시간 인라인 수정 (클릭 → 시간/순번 직접 조정)
    * ===================================================================== */
-  function SlotTimeButton({ slot, className }) {
+  function SlotTimeButton({ slot, className, placement, rippleDefault }) {
     const [open, setOpen] = useState(false);
     return html`
       <button onClick=${(e) => { e.stopPropagation(); setOpen(true); }}
         title="클릭해 시간 수정" class=${`${className || ''} hover:text-brand hover:underline decoration-dotted`}>${slotName(slot)}</button>
-      ${open && html`<${EditSlotTimeModal} slot=${slot} onClose=${() => setOpen(false)} />`}`;
+      ${open && html`<${EditSlotTimeModal} slot=${slot} placement=${placement} rippleDefault=${rippleDefault} onClose=${() => setOpen(false)} />`}`;
   }
-  function EditSlotTimeModal({ slot, onClose }) {
+  function EditSlotTimeModal({ slot, placement, rippleDefault, onClose }) {
     const isOrder = !!(slot.label && !slot.start);
     const [s, setS] = useState(slot.start || '20:45');
     const [e, setE] = useState(slot.end || '21:45');
     const [label, setLabel] = useState(slot.label || '');
     const [mode, setMode] = useState(isOrder ? 'order' : 'time');
     const dur = (mode === 'time' && s && e) ? (U.toMin(e) - U.toMin(s) + 1440) % 1440 : 0;
+    // 행(상품) 컨텍스트: 같은 시간대에 다른 상품이 함께 있으면 이 상품만 분리해 시간 적용
+    const sharers = placement ? store.getState().placements.filter((x) => x.slotId === slot.id) : [];
+    const shared = !!placement && sharers.length > 1;
+    const [ripple, setRipple] = useState(rippleDefault !== undefined ? !!rippleDefault : false);
     // 노출분 ↔ 시작/종료 자동 연동 (입찰 등록 팝업과 동일)
     const [durStr, setDurStr] = useState(() => {
       const d = (slot.start && slot.end) ? (U.toMin(slot.end) - U.toMin(slot.start) + 1440) % 1440 : 0;
@@ -389,7 +393,9 @@
       if (mode === 'time') {
         if (!/^\d{1,2}:\d{2}$/.test(s) || !/^\d{1,2}:\d{2}$/.test(e)) { alert('시작/종료 시간을 입력하세요.'); return; }
         if (dur <= 0) { alert('종료가 시작보다 늦어야 합니다.'); return; }
-        store.updateSlotTime(slot.id, { start: s, end: e });
+        if (shared) store.updatePlacementTime(placement.id, { start: s, end: e }); // 이 상품만 분리
+        else if (placement && store.updatePlacementTime) store.updatePlacementTime(placement.id, { start: s, end: e, ripple });
+        else store.updateSlotTime(slot.id, { start: s, end: e, ripple });
       } else {
         if (!label.trim()) { alert('순번명을 입력하세요.'); return; }
         store.updateSlotLabel(slot.id, label.trim());
@@ -423,6 +429,12 @@
                 </div>
               </div>
               <div class="text-[11px] text-ink-soft mt-1">노출분 입력 → 종료시간 자동 · 시작을 바꾸면 노출분(${dur || '-'}분)에 맞춰 종료도 이동</div>
+              ${shared
+                ? html`<div class="mt-2 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[12px] text-amber-800">
+                    이 시간대에 상품 <b>${sharers.length}개</b>가 함께 있습니다 — 저장하면 <b>${placement.productName}</b>만 새 시간으로 분리되고, 나머지 상품의 시간은 그대로 유지됩니다.</div>`
+                : html`<label class="mt-2 flex items-center gap-1.5 text-[12px] text-ink cursor-pointer">
+                    <input type="checkbox" checked=${ripple} onChange=${(ev) => setRipple(ev.target.checked)} />
+                    종료시간 변경분만큼 <b>뒤 시간대도 함께 밀기</b> <span class="text-ink-soft">(고정 띠는 제외)</span></label>`}
             <//>`
           : html`<${Field} label="순번명 *"><input value=${label} onInput=${(ev) => setLabel(ev.target.value)} class=${inputCls} placeholder="예: 1부" /><//>`}
       <//>`;
@@ -602,7 +614,7 @@
         onDragLeave=${() => setOver(false)}
         onDrop=${onDrop}>
         <div class="w-[104px] shrink-0 px-1.5 py-1.5 bg-slate-50 border-r border-slate-200 flex flex-col gap-0.5">
-          <${SlotTimeButton} slot=${slot} className="text-[13.5px] font-extrabold text-ink tabular-nums leading-tight text-left whitespace-nowrap" />
+          <${SlotTimeButton} slot=${slot} rippleDefault=${true} className="text-[13.5px] font-extrabold text-ink tabular-nums leading-tight text-left whitespace-nowrap" />
           ${slot.start && slot.end && html`<span class="text-[11px] font-semibold text-ink-soft">${dur}분</span>`}
           ${compColor && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: compColor + '22', color: compColor }}>
             <span class="w-1.5 h-1.5 rounded-full shrink-0" style=${{ background: compColor }}></span>경쟁 ${compete}팀</span>`}
@@ -1505,7 +1517,7 @@
                       <td class=${`${tdMerge} font-semibold tabular-nums text-ink`} rowSpan=${dayCount[r.day.date]}>${m}/${dnum}${r.day.airTime ? html`<div class="text-[10px] font-normal text-ink-soft mt-0.5 whitespace-nowrap">${r.day.airTime}</div>` : ''}</td>
                       <td class=${`${tdMerge} font-semibold ${wdColor}`} rowSpan=${dayCount[r.day.date]}>${wd}</td>`}
                     <td class=${`${td} tabular-nums font-medium ${r.compete ? 'text-amber-700' : ''}`} data-col="time">
-                      ${readOnly ? slotName(r.slot) : html`<${SlotTimeButton} slot=${r.slot} className="tabular-nums font-medium text-left" />`}
+                      ${readOnly ? slotName(r.slot) : html`<${SlotTimeButton} slot=${r.slot} placement=${r.p} rippleDefault=${true} className="tabular-nums font-medium text-left" />`}
                       ${r.compete && html`<span class="text-[10px] text-amber-600">●경쟁</span>`}
                       ${r.slot.start && r.slot.end && html`<div class="text-[11px] text-ink-soft font-normal" data-col="dur">${U.slotDuration(r.slot)}분</div>`}
                     </td>

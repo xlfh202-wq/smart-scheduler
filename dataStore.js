@@ -1198,14 +1198,53 @@
 
       /* ---------- 슬롯/요일 편집 ---------- */
       // 슬롯 시간 직접 수정 (입찰보드·편성표 인라인)
-      updateSlotTime(slotId, { start, end }) {
+      // ripple: 종료시간 변경분만큼 같은 날짜(원래 종료시간 이후 시작)의 시간대들을 함께 밀기 — 고정 띠(std)는 제외
+      updateSlotTime(slotId, { start, end, ripple }) {
         const f = findSlot(slotId);
         if (!f) return;
+        const oldEnd = f.slot.end;
         const old = (f.slot.start && f.slot.end) ? `${f.slot.start}~${f.slot.end}` : (f.slot.label || '슬롯');
         f.slot.start = start; f.slot.end = end;
         delete f.slot.label;
+        let moved = 0;
+        if (ripple && oldEnd && /^\d{1,2}:\d{2}$/.test(oldEnd)) {
+          const delta = toMin(end) - toMin(oldEnd);
+          const wrap = (m) => toHHMM(((m % 1440) + 1440) % 1440);
+          if (delta !== 0) f.day.slots.forEach((sl) => {
+            if (sl.id === f.slot.id || !sl.start || sl.std) return;
+            if (toMin(sl.start) >= toMin(oldEnd)) {
+              sl.start = wrap(toMin(sl.start) + delta);
+              if (sl.end) sl.end = wrap(toMin(sl.end) + delta);
+              moved++;
+            }
+          });
+        }
         f.day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
-        log({ action: '시간수정', from: old, to: `${start}~${end}`, detail: `${f.day.date} 시간 수정` });
+        log({ action: '시간수정', from: old, to: `${start}~${end}`,
+              detail: `${f.day.date} 시간 수정${moved ? ` · 뒤 시간대 ${moved}개 함께 이동` : ''}` });
+        emit();
+      },
+      // 행 단위 시간 수정: 여러 상품이 한 시간대를 공유 중이면 이 상품만 새 시간대로 분리
+      // (한 행을 고쳤는데 같은 시간대의 다른 상품까지 바뀌는 문제 방지)
+      updatePlacementTime(placementId, { start, end, ripple }) {
+        const p = state.placements.find((x) => x.id === placementId);
+        if (!p) return;
+        const f = findSlot(p.slotId);
+        if (!f) return;
+        const sharers = state.placements.filter((x) => x.slotId === f.slot.id);
+        if (sharers.length <= 1) { api.updateSlotTime(f.slot.id, { start, end, ripple }); return; }
+        const day = f.day;
+        let ns = day.slots.find((s) => s.id !== f.slot.id && s.start === start && s.end === end);
+        if (!ns) {
+          ns = { id: 'slot_' + uid(), start, end, manual: true };
+          day.slots.push(ns);
+          day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
+        }
+        p.slotId = ns.id;
+        stamp(p);
+        log({ action: '시간수정', productName: p.productName, teamName: teamName(p.teamId),
+              from: `${f.slot.start}~${f.slot.end}`, to: `${start}~${end}`,
+              detail: `${day.date} 이 상품만 시간 분리 (같은 시간대 다른 상품은 유지)` });
         emit();
       },
       updateSlotLabel(slotId, label) {
