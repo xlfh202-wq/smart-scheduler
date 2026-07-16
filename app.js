@@ -441,6 +441,63 @@
   }
 
   /* =====================================================================
+   *  부 나누기 (패션: 1부·2부…) — 한 날짜의 상품을 부별로 일괄 배분
+   * ===================================================================== */
+  function PartAssignModal({ state, day, onClose }) {
+    const partNum = (lbl) => { const m = (lbl || '').match(/(\d+)\s*부/); return m ? parseInt(m[1], 10) : 0; };
+    const products = state.placements
+      .filter((p) => day.slots.some((s) => s.id === p.slotId))
+      .slice()
+      .sort((a, b) => {
+        const sa = day.slots.find((s) => s.id === a.slotId), sb = day.slots.find((s) => s.id === b.slotId);
+        return (partNum(sa && sa.label) - partNum(sb && sb.label)) || (a.productName || '').localeCompare(b.productName || '');
+      });
+    // 부 목록: 기본 1~6부 + 이미 존재하는 더 큰 부
+    const [maxPart, setMaxPart] = useState(() => {
+      const ex = Math.max(6, ...day.slots.map((s) => partNum(s.label)));
+      return ex;
+    });
+    const parts = Array.from({ length: maxPart }, (_, i) => `${i + 1}부`);
+    // 상품별 배정 상태 (기본 = 현재 부, 부가 아니면 1부)
+    const [asg, setAsg] = useState(() => {
+      const m = {};
+      products.forEach((p) => {
+        const sl = day.slots.find((s) => s.id === p.slotId);
+        m[p.id] = (sl && sl.label && partNum(sl.label)) ? sl.label : '1부';
+      });
+      return m;
+    });
+    function save() {
+      const r = store.assignParts(day.id, products.map((p) => ({ placementId: p.id, part: asg[p.id] })));
+      alert(`${r.moved}건을 이동했습니다. 빈 부는 최종편성안에 표시되지 않습니다.`);
+      onClose();
+    }
+    return html`
+      <${Modal} title=${`${fmtDay(day)} · 부 나누기`} onClose=${onClose} onSave=${save}
+        extra=${html`<button onClick=${() => setMaxPart(maxPart + 1)}
+          class="text-[12px] text-ink-soft hover:text-brand mr-auto">+ ${maxPart + 1}부 추가</button>`}>
+        <div class="text-[12px] text-ink-soft -mt-1">각 상품의 부를 선택하고 저장하면 한 번에 배분됩니다. 비어 있는 부는 최종편성안에 표시되지 않습니다.</div>
+        <div class="flex flex-col gap-1.5 max-h-[50vh] overflow-y-auto pr-1">
+          ${products.length === 0 && html`<div class="text-[12px] text-slate-400 text-center py-4">이 날짜에 편성된 상품이 없습니다.</div>`}
+          ${products.map((p) => {
+            const team = teamOf(state, p.teamId);
+            return html`
+              <div key=${p.id} class="flex items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5">
+                <span class="w-2 h-2 rounded-full shrink-0" style=${{ background: team.color }}></span>
+                <span class="flex-1 min-w-0 truncate text-[13px] font-medium text-ink" title=${p.productName}>${p.productName}</span>
+                <span class="text-[10.5px] text-ink-soft shrink-0 hidden sm:inline">${team.name}</span>
+                <div class="flex gap-1 shrink-0 flex-wrap justify-end">
+                  ${parts.map((pt) => html`
+                    <button key=${pt} type="button" onClick=${() => setAsg((prev) => ({ ...prev, [p.id]: pt }))}
+                      class=${`text-[11px] px-1.5 py-0.5 rounded-full border transition ${asg[p.id] === pt ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-brand hover:text-brand'}`}>${pt}</button>`)}
+                </div>
+              </div>`;
+          })}
+        </div>
+      <//>`;
+  }
+
+  /* =====================================================================
    *  시간띠(밴드) 시간 조정 — 해당 날짜에만 적용, 최종편성안에도 그대로 반영
    * ===================================================================== */
   function BandTimeModal({ day, idx, start, end, hasOverride, onClose }) {
@@ -720,6 +777,7 @@
     const [ctxMenu, setCtxMenu] = useState(null);   // 우클릭 메뉴 {x,y,kind:'band'|'slot',band?,idx?,slot?}
     const [slotAddFor, setSlotAddFor] = useState(null); // 우클릭: 이 시간대에 상품 추가
     const [splitFor, setSplitFor] = useState(null);     // 우클릭: 시간 분할
+    const [partOpen, setPartOpen] = useState(false);    // 부 나누기(패션)
     let bands = [], extBefore = null, extAfter = null, labelSlots = [];
     if (useBands) {
       bands = bandDefs.map(([bs, be]) => ({ start: bs, end: be, slots: [] }));
@@ -785,6 +843,7 @@
           </div>
           <div class="flex items-center gap-2 text-[11px] text-ink-soft">
             <button onClick=${() => { setQuickInit(''); setQuickOpen(true); }} class="font-semibold text-brand bg-white border border-brand/40 hover:bg-brand hover:text-white px-1.5 py-0.5 rounded">+ 상품</button>
+            ${fashion && html`<button onClick=${() => setPartOpen(true)} class="hover:text-brand" title="이 날짜의 상품을 1부·2부…로 한번에 배분">🧩 부 나누기</button>`}
             ${useBands && html`<button onClick=${() => setShowExt(!showExt)} class="hover:text-brand" title="고정 시간띠 앞뒤의 확장 시간대 보기/숨기기">확장 ${showExt ? '▴' : '▾'}</button>`}
             <button onClick=${() => setAddOpen(true)} class="hover:text-brand">+ 시간대</button>
             <button onClick=${() => store.addSlot(day.id, { order: true })} class="hover:text-brand">+ 순번</button>
@@ -819,6 +878,7 @@
           hasOverride=${!!(day.bands && day.bands.length)} onClose=${() => setBandEdit(null)} />`}
         ${slotAddFor && html`<${SlotAddModal} state=${state} slot=${slotAddFor} onClose=${() => setSlotAddFor(null)} />`}
         ${splitFor && html`<${SplitModal} slot=${splitFor} dur=${U.slotDuration(splitFor)} onClose=${() => setSplitFor(null)} />`}
+        ${partOpen && html`<${PartAssignModal} state=${state} day=${day} onClose=${() => setPartOpen(false)} />`}
         ${ctxMenu && (() => {
           const close = () => setCtxMenu(null);
           const item = (label, fn, danger) => html`
@@ -1277,6 +1337,8 @@
     const hasMemo = !!(state.castingMemo && state.castingMemo[`${state.activeProgram}|${state.view.year}-${String(state.view.month).padStart(2, '0')}`]);
     const [moveFor, setMoveFor] = useState(null); // 드래그 이동 대상 {pid, day} → 시간 지정 팝업
     const [ctxMenu, setCtxMenu] = useState(null); // 우클릭 메뉴 {x, y, r(행)}
+    const [partAssignDay, setPartAssignDay] = useState(null); // 부 나누기(패션)
+    const isFashionProg = programSchema(state) === 'fashion';
     const [quickAddDay, setQuickAddDay] = useState(null); // 행 추가(시간·상품)
     const [addSlotDay, setAddSlotDay] = useState(null);   // 시간대만 추가
     const [slotAddFor, setSlotAddFor] = useState(null);   // 빈 시간대에 상품 추가
@@ -1402,6 +1464,7 @@
           // 빈 행은 고정 띠(std)·수기(manual)·순번(label) 슬롯만 표시 —
           // MD 입찰이 참조만 하는 조각 슬롯(상품 이동 후 잔여물)은 빈 행으로 노출하지 않음
           if (!(s.std || s.manual || s.label)) return;
+          if (s.label && !s.start) return; // 빈 부(1부·2부…)·미정 버킷은 표시하지 않음 (부 나누기 후 빈 부 숨김)
           if (s.start && s.start === s.end) return; // 0분 잔재 슬롯은 빈 행으로 표시하지 않음
           // 그 시간 구간에 이미 상품이 편성된 시간대가 겹쳐 있으면(예: 65분 띠를 2행으로 분할) 빈 행 숨김
           if (slots.some((o) => o.id !== s.id && hasContent(o.id) && ovl(s, o))) return;
@@ -1472,6 +1535,7 @@
         ${memoOpen && html`<${CastingMemoModal} state=${state} onClose=${() => setMemoOpen(false)} />`}
         ${moveFor && html`<${MoveTimeModal} state=${state} day=${moveFor.day} placementId=${moveFor.pid} onClose=${() => setMoveFor(null)} />`}
         ${quickAddDay && html`<${QuickAddModal} state=${state} day=${quickAddDay} onClose=${() => setQuickAddDay(null)} />`}
+        ${partAssignDay && html`<${PartAssignModal} state=${state} day=${partAssignDay} onClose=${() => setPartAssignDay(null)} />`}
         ${addSlotDay && html`<${AddSlotModal} day=${addSlotDay} onClose=${() => setAddSlotDay(null)} />`}
         ${slotAddFor && html`<${SlotAddModal} state=${state} slot=${slotAddFor} onClose=${() => setSlotAddFor(null)} />`}
         ${ctxMenu && (() => {
@@ -1489,6 +1553,7 @@
                 <div class="px-3 py-1 text-[11px] text-ink-soft border-b border-slate-100">
                   ${month}/${dnum}(${U.WEEKDAY_KO[r.day.weekday]}) ${slotName(r.slot)}${p ? ' · ' + p.productName : ''}</div>
                 ${item(`➕ ${month}/${dnum}에 행 추가 (시간·상품)`, () => setQuickAddDay(r.day))}
+                ${isFashionProg && item('🧩 부 나누기 (1부~N부 한번에 배분)', () => setPartAssignDay(r.day))}
                 ${item('⏱ 시간대만 추가', () => setAddSlotDay(r.day))}
                 ${!p && item('📦 이 시간대에 상품 추가', () => setSlotAddFor(r.slot))}
                 ${p && item('🚫 상품 편성 제외 (입찰 풀로)', () => {

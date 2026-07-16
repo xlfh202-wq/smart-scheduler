@@ -1205,6 +1205,27 @@
         emit();
       },
 
+      // 부 나누기(패션): 한 날짜의 상품들을 1부·2부…로 일괄 배분 — [{placementId, part}]
+      assignParts(dayId, list) {
+        const day = state.days.find((d) => d.id === dayId);
+        if (!day) return { moved: 0 };
+        let moved = 0;
+        (list || []).forEach(({ placementId, part }) => {
+          if (!part) return;
+          const p = state.placements.find((x) => x.id === placementId);
+          if (!p) return;
+          let slot = day.slots.find((s) => s.label === part && !s.start);
+          if (!slot) {
+            slot = { id: 'slot_' + uid(), start: '', end: '', label: part, manual: true };
+            day.slots.push(slot);
+          }
+          if (p.slotId !== slot.id) { p.slotId = slot.id; stamp(p); moved++; }
+        });
+        if (moved) log({ action: '부배분', detail: `${day.date} 부 나누기 — ${moved}건 이동` });
+        emit();
+        return { moved };
+      },
+
       // 같은 시간띠 안에서 카드 순서 변경 (dragId 카드를 beforeId 카드 앞으로)
       reorderPlacement(dragId, beforeId) {
         const i = state.placements.findIndex((p) => p.id === dragId);
