@@ -356,12 +356,10 @@
       ${open && html`<${EditSlotTimeModal} slot=${slot} placement=${placement} rippleDefault=${rippleDefault} onClose=${() => setOpen(false)} />`}`;
   }
   function EditSlotTimeModal({ slot, placement, rippleDefault, onClose }) {
-    const isOrder = !!(slot.label && !slot.start);
     const [s, setS] = useState(slot.start || '20:45');
     const [e, setE] = useState(slot.end || '21:45');
-    const [label, setLabel] = useState(slot.label || '');
-    const [mode, setMode] = useState(isOrder ? 'order' : 'time');
-    const dur = (mode === 'time' && s && e) ? (U.toMin(e) - U.toMin(s) + 1440) % 1440 : 0;
+    const mode = 'time'; // 순번(N부) 수기 입력은 제거 — 부 배정은 '부 나누기'로
+    const dur = (s && e) ? (U.toMin(e) - U.toMin(s) + 1440) % 1440 : 0;
     // 행(상품) 컨텍스트: 같은 시간대에 다른 상품이 함께 있으면 이 상품만 분리해 시간 적용
     const sharers = placement ? store.getState().placements.filter((x) => x.slotId === slot.id) : [];
     const shared = !!placement && sharers.length > 1;
@@ -390,28 +388,16 @@
       }
     };
     function save() {
-      if (mode === 'time') {
-        if (!/^\d{1,2}:\d{2}$/.test(s) || !/^\d{1,2}:\d{2}$/.test(e)) { alert('시작/종료 시간을 입력하세요.'); return; }
-        if (dur <= 0) { alert('종료가 시작보다 늦어야 합니다.'); return; }
-        if (shared) store.updatePlacementTime(placement.id, { start: s, end: e }); // 이 상품만 분리
-        else if (placement && store.updatePlacementTime) store.updatePlacementTime(placement.id, { start: s, end: e, ripple });
-        else store.updateSlotTime(slot.id, { start: s, end: e, ripple });
-      } else {
-        if (!label.trim()) { alert('순번명을 입력하세요.'); return; }
-        store.updateSlotLabel(slot.id, label.trim());
-      }
+      if (!/^\d{1,2}:\d{2}$/.test(s) || !/^\d{1,2}:\d{2}$/.test(e)) { alert('시작/종료 시간을 입력하세요.'); return; }
+      if (dur <= 0) { alert('종료가 시작보다 늦어야 합니다.'); return; }
+      if (shared) store.updatePlacementTime(placement.id, { start: s, end: e }); // 이 상품만 분리
+      else if (placement && store.updatePlacementTime) store.updatePlacementTime(placement.id, { start: s, end: e, ripple });
+      else store.updateSlotTime(slot.id, { start: s, end: e, ripple });
       onClose();
     }
     return html`
       <${Modal} title="시간대 수정" onClose=${onClose} onSave=${save}>
-        <div class="flex gap-1.5 mb-1">
-          <button type="button" onClick=${() => setMode('time')}
-            class=${`text-xs px-2.5 py-1 rounded-full border ${mode === 'time' ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft'}`}>시간 (HH:MM)</button>
-          <button type="button" onClick=${() => setMode('order')}
-            class=${`text-xs px-2.5 py-1 rounded-full border ${mode === 'order' ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft'}`}>순번 (N부)</button>
-        </div>
-        ${mode === 'time'
-          ? html`<${Field} label=${`방송 시간 (24시간) * — ${dur}분`}>
+        ${html`<${Field} label=${`방송 시간 (24시간) * — ${dur}분`}>
               <div class="flex flex-col gap-1.5">
                 <div class="flex items-center gap-2">
                   <span class="text-[12px] text-ink-soft w-10 shrink-0">노출분</span>
@@ -435,8 +421,7 @@
                 : html`<label class="mt-2 flex items-center gap-1.5 text-[12px] text-ink cursor-pointer">
                     <input type="checkbox" checked=${ripple} onChange=${(ev) => setRipple(ev.target.checked)} />
                     종료에 <b>이어져 있던 뒤 시간대만 함께 밀기</b> <span class="text-ink-soft">(어긋난 시간대·고정 띠는 그대로)</span></label>`}
-            <//>`
-          : html`<${Field} label="순번명 *"><input value=${label} onInput=${(ev) => setLabel(ev.target.value)} class=${inputCls} placeholder="예: 1부" /><//>`}
+            <//>`}
       <//>`;
   }
 
@@ -493,6 +478,38 @@
                 </div>
               </div>`;
           })}
+        </div>
+      <//>`;
+  }
+
+  /* =====================================================================
+   *  부 선택 (패션: 드래그앤드롭·이동 시 어느 부에 넣을지 선택)
+   * ===================================================================== */
+  function MovePartModal({ state, day, placementId, bidId, onClose }) {
+    const partNum = (lbl) => { const m = (lbl || '').match(/(\d+)\s*부/); return m ? parseInt(m[1], 10) : 0; };
+    const item = placementId ? state.placements.find((x) => x.id === placementId) : state.bids.find((b) => b.id === bidId);
+    const name = placementId ? (item && item.productName) : (item && item.product && item.product.name);
+    const [maxPart, setMaxPart] = useState(() => Math.max(6, ...day.slots.map((s) => partNum(s.label))));
+    const [sel, setSel] = useState('1부');
+    const countOf = (pt) => {
+      const sl = day.slots.find((s) => s.label === pt && !s.start);
+      return sl ? state.placements.filter((p) => p.slotId === sl.id).length : 0;
+    };
+    function save() {
+      if (bidId) store.assignBidToDay(bidId, day.id, { part: sel });
+      else store.movePlacementToSlotSpec(placementId, day.id, { part: sel });
+      onClose();
+    }
+    return html`
+      <${Modal} title=${`${fmtDay(day)} · 부 선택${name ? ' · ' + name : ''}`} onClose=${onClose} onSave=${save}
+        extra=${html`<button onClick=${() => setMaxPart(maxPart + 1)}
+          class="text-[12px] text-ink-soft hover:text-brand mr-auto">+ ${maxPart + 1}부 추가</button>`}>
+        <div class="text-[12px] text-ink-soft -mt-1">넣을 부를 선택하세요. (괄호 숫자 = 현재 그 부의 상품 수)</div>
+        <div class="flex flex-wrap gap-1.5">
+          ${Array.from({ length: maxPart }, (_, i) => `${i + 1}부`).map((pt) => html`
+            <button key=${pt} type="button" onClick=${() => setSel(pt)}
+              class=${`text-[13px] px-3 py-1.5 rounded-full border transition ${sel === pt ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-brand hover:text-brand'}`}>
+              ${pt}${countOf(pt) ? ` (${countOf(pt)})` : ''}</button>`)}
         </div>
       <//>`;
   }
@@ -674,7 +691,9 @@
         onDrop=${onDrop}
         onContextMenu=${onCtxMenu ? ((e) => { e.preventDefault(); e.stopPropagation(); onCtxMenu(e.clientX, e.clientY); }) : undefined}>
         <div class="w-[104px] shrink-0 px-1.5 py-1.5 bg-slate-50 border-r border-slate-200 flex flex-col gap-0.5">
-          <${SlotTimeButton} slot=${slot} rippleDefault=${true} className="text-[13.5px] font-extrabold text-ink tabular-nums leading-tight text-left whitespace-nowrap" />
+          ${(slot.label && !slot.start)
+            ? html`<span class="text-[13.5px] font-extrabold text-ink leading-tight">${slotName(slot)}</span>`
+            : html`<${SlotTimeButton} slot=${slot} rippleDefault=${true} className="text-[13.5px] font-extrabold text-ink tabular-nums leading-tight text-left whitespace-nowrap" />`}
           ${slot.start && slot.end && html`<span class="text-[11px] font-semibold text-ink-soft">${dur}분</span>`}
           ${compColor && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: compColor + '22', color: compColor }}>
             <span class="w-1.5 h-1.5 rounded-full shrink-0" style=${{ background: compColor }}></span>경쟁 ${compete}팀</span>`}
@@ -778,6 +797,7 @@
     const [slotAddFor, setSlotAddFor] = useState(null); // 우클릭: 이 시간대에 상품 추가
     const [splitFor, setSplitFor] = useState(null);     // 우클릭: 시간 분할
     const [partOpen, setPartOpen] = useState(false);    // 부 나누기(패션)
+    const [partPick, setPartPick] = useState(null);     // 드롭 시 부 선택(패션) {bidId}|{pid}
     let bands = [], extBefore = null, extAfter = null, labelSlots = [];
     if (useBands) {
       bands = bandDefs.map(([bs, be]) => ({ start: bs, end: be, slots: [] }));
@@ -819,7 +839,7 @@
       const pl = drag.read(e);
       if (!pl) return;
       if (pl.kind === 'bid') {
-        if (fashion) store.assignBidToDay(pl.id, day.id, { part: nextPart() });
+        if (fashion) setPartPick({ bidId: pl.id }); // 어느 부에 넣을지 선택
         else setBidTimeFor(pl.id);
         return;
       }
@@ -827,8 +847,8 @@
       const p = state.placements.find((x) => x.id === pl.id);
       const curDay = p && state.days.find((d) => d.slots.some((s) => s.id === p.slotId));
       const sameDay = curDay && curDay.id === day.id;
-      if (!sameDay) { store.movePlacementToDay(pl.id, day.id); return; }
-      if (fashion) store.movePlacementToSlotSpec(pl.id, day.id, { part: nextPart() });
+      if (!sameDay && !fashion) { store.movePlacementToDay(pl.id, day.id); return; }
+      if (fashion) setPartPick({ pid: pl.id }); // 어느 부에 넣을지 선택 (다른 날짜에서 와도 동일)
       else setMoveTimeFor(pl.id);
     }
     return html`
@@ -879,6 +899,7 @@
         ${slotAddFor && html`<${SlotAddModal} state=${state} slot=${slotAddFor} onClose=${() => setSlotAddFor(null)} />`}
         ${splitFor && html`<${SplitModal} slot=${splitFor} dur=${U.slotDuration(splitFor)} onClose=${() => setSplitFor(null)} />`}
         ${partOpen && html`<${PartAssignModal} state=${state} day=${day} onClose=${() => setPartOpen(false)} />`}
+        ${partPick && html`<${MovePartModal} state=${state} day=${day} placementId=${partPick.pid} bidId=${partPick.bidId} onClose=${() => setPartPick(null)} />`}
         ${ctxMenu && (() => {
           const close = () => setCtxMenu(null);
           const item = (label, fn, danger) => html`
@@ -1533,7 +1554,9 @@
         </div>
         ${snapOpen && html`<${SnapshotsModal} state=${state} onClose=${() => setSnapOpen(false)} />`}
         ${memoOpen && html`<${CastingMemoModal} state=${state} onClose=${() => setMemoOpen(false)} />`}
-        ${moveFor && html`<${MoveTimeModal} state=${state} day=${moveFor.day} placementId=${moveFor.pid} onClose=${() => setMoveFor(null)} />`}
+        ${moveFor && (isFashionProg
+          ? html`<${MovePartModal} state=${state} day=${moveFor.day} placementId=${moveFor.pid} onClose=${() => setMoveFor(null)} />`
+          : html`<${MoveTimeModal} state=${state} day=${moveFor.day} placementId=${moveFor.pid} onClose=${() => setMoveFor(null)} />`)}
         ${quickAddDay && html`<${QuickAddModal} state=${state} day=${quickAddDay} onClose=${() => setQuickAddDay(null)} />`}
         ${partAssignDay && html`<${PartAssignModal} state=${state} day=${partAssignDay} onClose=${() => setPartAssignDay(null)} />`}
         ${addSlotDay && html`<${AddSlotModal} day=${addSlotDay} onClose=${() => setAddSlotDay(null)} />`}
@@ -1631,7 +1654,12 @@
                       <td class=${`${tdMerge} font-semibold tabular-nums text-ink`} rowSpan=${dayCount[r.day.date]}>${m}/${dnum}${r.day.airTime ? html`<div class="text-[10px] font-normal text-ink-soft mt-0.5 whitespace-nowrap">${r.day.airTime}</div>` : ''}</td>
                       <td class=${`${tdMerge} font-semibold ${wdColor}`} rowSpan=${dayCount[r.day.date]}>${wd}</td>`}
                     <td class=${`${td} tabular-nums font-medium ${r.compete ? 'text-amber-700' : ''}`} data-col="time">
-                      ${readOnly ? slotName(r.slot) : html`<${SlotTimeButton} slot=${r.slot} placement=${r.p} rippleDefault=${true} className="tabular-nums font-medium text-left" />`}
+                      ${readOnly ? slotName(r.slot)
+                        : isFashionProg ? html`<button onClick=${() => setPartAssignDay(r.day)}
+                            title="클릭해 부 나누기 (이 날짜의 상품을 1부~N부로 배분)"
+                            class="tabular-nums font-medium text-left hover:text-brand hover:underline decoration-dotted">${slotName(r.slot)}</button>`
+                        : (r.slot.label && !r.slot.start) ? slotName(r.slot)
+                        : html`<${SlotTimeButton} slot=${r.slot} placement=${r.p} rippleDefault=${true} className="tabular-nums font-medium text-left" />`}
                       ${r.compete && html`<span class="text-[10px] text-amber-600">●경쟁</span>`}
                       ${r.slot.start && r.slot.end && html`<div class="text-[11px] text-ink-soft font-normal" data-col="dur">${U.slotDuration(r.slot)}분</div>`}
                     </td>
