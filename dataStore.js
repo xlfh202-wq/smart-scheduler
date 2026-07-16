@@ -1233,13 +1233,19 @@
           if (delta !== 0) {
             // 체인 방식: "원래 종료시간에 딱 이어져 있던" 시간대만 따라 밀고, 그 뒤로도 이어진 것만 연쇄.
             // 어긋나 있던(간격/무관한) 시간대는 건드리지 않음 — 이미 매칭돼 있으면 밀 것도 없음.
+            // 고정 띠의 시작 시간은 앵커: 체인이 여기서 멈춤 (확장 시간 수정이 본방 띠 안을 끌고 가지 않도록)
+            const schedR = progSchedule(f.day.programId);
+            const entryR = schedR && schedR.find((sc) => sc.wd === f.day.weekday);
+            const bandDefsR = (f.day.bands && f.day.bands.length) ? f.day.bands : ((entryR && entryR.slots) || []);
+            const anchors = new Set(bandDefsR.map((b) => toMin(b[0])));
+            anchors.delete(toMin(f.slot.start)); // 지금 수정 중인 슬롯이 띠 시작이라면 그 앵커는 무시
             const chain = new Set([toMin(oldEnd)]);
             f.day.slots
               .filter((sl) => sl.id !== f.slot.id && sl.start && !sl.std)
               .sort((a, b) => toMin(a.start) - toMin(b.start))
               .forEach((sl) => {
                 const s0 = toMin(sl.start);
-                if (!chain.has(s0)) return;
+                if (!chain.has(s0) || anchors.has(s0)) return; // 이어져 있지 않거나 띠 시작(앵커)이면 불변
                 if (sl.end) chain.add(toMin(sl.end)); // 이 슬롯의 원래 종료에 이어진 것도 연쇄 대상
                 sl.start = wrap(s0 + delta);
                 if (sl.end) sl.end = wrap(toMin(sl.end) + delta);
