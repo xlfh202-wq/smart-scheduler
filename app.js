@@ -1599,11 +1599,107 @@
   }
 
   /* =====================================================================
+   *  지난 입찰 가져오기 (2차 편성) — 다른 프로그램/월의 내 팀 입찰을 현재 달로 복사
+   * ===================================================================== */
+  function ImportBidsModal({ state, team, onClose }) {
+    const programs = state.programs || [];
+    const dayById = (id) => state.days.find((d) => d.id === id);
+    // 원본: 프로그램 + 월 (기본값 = 현재 프로그램의 지난달)
+    const prev = shiftMonth(state.view, -1);
+    const [srcPid, setSrcPid] = useState(state.activeProgram);
+    const ymOf = (d) => d.date.slice(0, 7);
+    // 이 팀의 입찰이 있는 월 목록 (선택한 원본 프로그램 기준, 최신순)
+    const ymList = (() => {
+      const set = new Set();
+      state.bids.forEach((b) => {
+        if (b.teamId !== team) return;
+        const d = dayById(b.dayId);
+        if (d && d.programId === srcPid) set.add(ymOf(d));
+      });
+      return Array.from(set).sort().reverse();
+    })();
+    const prevYm = `${prev.year}-${String(prev.month).padStart(2, '0')}`;
+    const [srcYm, setSrcYm] = useState(() => (ymList.includes(prevYm) ? prevYm : (ymList[0] || prevYm)));
+    useEffect(() => { setSrcYm(ymList.includes(prevYm) ? prevYm : (ymList[0] || prevYm)); }, [srcPid]);
+    // 원본 입찰 목록
+    const srcBids = state.bids.filter((b) => {
+      if (b.teamId !== team) return false;
+      const d = dayById(b.dayId);
+      return d && d.programId === srcPid && ymOf(d) === srcYm;
+    }).slice().sort((a, b2) => {
+      const da = dayById(a.dayId), db = dayById(b2.dayId);
+      return (da ? da.date : '').localeCompare(db ? db.date : '');
+    });
+    const [sel, setSel] = useState(() => new Set());
+    const toggle = (id) => setSel((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+    // 대상: 현재 보고 있는 프로그램·월의 편성일
+    const targetDays = daysInView(state).slice().sort((a, b2) => a.date.localeCompare(b2.date))
+      .filter((d) => d.date.startsWith(`${state.view.year}-${String(state.view.month).padStart(2, '0')}`));
+    const [targetDayId, setTargetDayId] = useState(targetDays[0] ? targetDays[0].id : '');
+    function doImport() {
+      if (sel.size === 0) { alert('가져올 입찰을 선택하세요.'); return; }
+      if (!targetDayId) { alert('희망 편성일을 선택하세요.'); return; }
+      const r = store.copyBids([...sel], targetDayId);
+      alert(`${r.copied}건을 가져왔습니다.\n각 입찰을 클릭해 날짜·시간을 조정하세요.`);
+      onClose();
+    }
+    const progName = (id) => (programs.find((p) => p.id === id) || {}).name || id;
+    return html`
+      <${Modal} title=${`📋 지난 입찰 가져오기 — ${teamOf(state, team).name}`} onClose=${onClose} onSave=${doImport}
+        extra=${html`<div class="flex gap-2 mr-auto">
+          <button onClick=${() => setSel(new Set(srcBids.map((b) => b.id)))} class="text-[12px] text-ink-soft hover:text-brand">전체 선택</button>
+          <button onClick=${() => setSel(new Set())} class="text-[12px] text-ink-soft hover:text-brand">선택 해제</button>
+        </div>`}>
+        <div class="text-[12px] text-ink-soft -mt-1">
+          다른 프로그램/지난 달에 올렸던 입찰을 <b>${progName(state.activeProgram)} ${state.view.month}월</b>로 복사합니다 (2차 편성).
+          복사 후 각 입찰을 클릭해 날짜·시간을 조정하세요.
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-[12px] font-semibold text-ink shrink-0">원본</span>
+          <select value=${srcPid} onChange=${(e) => { setSrcPid(e.target.value); setSel(new Set()); }}
+            class="text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none">
+            ${programs.map((pg) => html`<option key=${pg.id} value=${pg.id}>${pg.name}</option>`)}
+          </select>
+          <select value=${srcYm} onChange=${(e) => { setSrcYm(e.target.value); setSel(new Set()); }}
+            class="text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none">
+            ${(ymList.length ? ymList : [srcYm]).map((y) => html`<option key=${y} value=${y}>${y.replace('-', '년 ')}월</option>`)}
+          </select>
+          <span class="text-[11px] text-ink-soft">— 내 팀 입찰 ${srcBids.length}건</span>
+        </div>
+        <div class="rounded-lg border border-slate-200 max-h-56 overflow-y-auto divide-y divide-slate-100">
+          ${srcBids.length === 0
+            ? html`<div class="text-[12px] text-slate-400 text-center py-4">이 프로그램·월에 내 팀 입찰이 없습니다.</div>`
+            : srcBids.map((b) => {
+              const d = dayById(b.dayId);
+              const sl = d && d.slots.find((s) => s.id === b.slotId);
+              const t = sl && sl.start ? `${sl.start}~${sl.end}` : (sl && sl.label) || '';
+              return html`
+                <label key=${b.id} class=${`flex items-center gap-2 px-2.5 py-1.5 cursor-pointer text-[13px] ${sel.has(b.id) ? 'bg-brand-light/40' : 'hover:bg-slate-50'}`}>
+                  <input type="checkbox" checked=${sel.has(b.id)} onChange=${() => toggle(b.id)} />
+                  <span class="text-[11px] text-ink-soft tabular-nums shrink-0 w-24">${d ? d.date.slice(5).replace('-', '/') : ''}(${d ? U.WEEKDAY_KO[d.weekday] : ''}) ${t}</span>
+                  <span class="font-medium text-ink min-w-0 truncate">${b.product && b.product.name}</span>
+                  ${b.product && b.product.durationMin && html`<span class="text-[11px] text-ink-soft shrink-0">${b.product.durationMin}분</span>`}
+                </label>`;
+            })}
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-[12px] font-semibold text-ink shrink-0">희망 편성일</span>
+          <select value=${targetDayId} onChange=${(e) => setTargetDayId(e.target.value)}
+            class="text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none">
+            ${targetDays.map((d) => html`<option key=${d.id} value=${d.id}>${d.date.slice(5).replace('-', '/')} (${U.WEEKDAY_KO[d.weekday]})</option>`)}
+          </select>
+          <span class="text-[11px] text-ink-soft">선택한 ${sel.size}건이 이 날짜의 기본 시간대로 들어갑니다</span>
+        </div>
+      <//>`;
+  }
+
+  /* =====================================================================
    *  MD 입찰 보드
    * ===================================================================== */
   function BidBoard({ state, readOnly, lockTeam }) {
     const teams = state.teams || []; // MD 입찰은 전체 팀 대상(부문별 그룹 표시)
     const [detailBid, setDetailBid] = useState(null); // 조회 전용: 칩 클릭 → 읽기 상세
+    const [importOpen, setImportOpen] = useState(false); // 지난 입찰 가져오기(2차 편성)
     const schema = programSchema(state);
     const fashion = schema === 'fashion';
     const [teamSel, setTeamSel] = useState(null);
@@ -1643,8 +1739,13 @@
         <div class="p-4 space-y-3 max-w-[1100px]">
           <div class="flex items-center justify-between gap-2 flex-wrap">
             <h2 class="text-base font-bold text-ink">${teamOf(state, team).name} 입찰 · ${state.view.year}년 ${state.view.month}월 — 총 ${teamBids.length}건</h2>
-            ${!readOnly && html`<button onClick=${() => setAddDayOpen(true)}
-              class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand">+ 편성일 추가</button>`}
+            ${!readOnly && html`<div class="flex items-center gap-2">
+              <button onClick=${() => setImportOpen(true)}
+                class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand"
+                title="다른 프로그램/지난 달에 올렸던 입찰을 이 달로 복사 (2차 편성)">📋 지난 입찰 가져오기</button>
+              <button onClick=${() => setAddDayOpen(true)}
+                class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand">+ 편성일 추가</button>
+            </div>`}
           </div>
           ${readOnly
             ? html`<div class="text-[11px] text-ink-soft -mt-1">🔎 조회 전용 — 입찰 카드를 클릭하면 상세 정보를 볼 수 있습니다.</div>`
@@ -1754,6 +1855,7 @@
           })}
         </div>
         ${modal && html`<${BidModal} state=${state} team=${team} schema=${schema} ctx=${modal} onClose=${() => setModal(null)} />`}
+        ${importOpen && html`<${ImportBidsModal} state=${state} team=${team} onClose=${() => setImportOpen(false)} />`}
         ${detailBid && html`<${BidDetailModal} state=${state} b=${detailBid} onClose=${() => setDetailBid(null)} />`}
         ${addDayOpen && html`<${AddDayModal} state=${state} onClose=${() => setAddDayOpen(false)} />`}
         ${slotModalDay && html`<${AddSlotModal} day=${state.days.find((d) => d.id === slotModalDay)} onClose=${() => setSlotModalDay(null)} />`}

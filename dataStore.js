@@ -700,6 +700,30 @@
         emit();
         return bid;
       },
+      // 지난 입찰 가져오기(2차 편성): 다른 프로그램/월의 입찰을 현재 보기의 날짜로 복사
+      // 복사본은 대상 날짜의 고정 첫 띠(또는 미정/1부)에 담기며, 이후 자유롭게 시간·날짜 조정
+      copyBids(bidIds, targetDayId) {
+        const day = state.days.find((d) => d.id === targetDayId);
+        if (!day) return { copied: 0 };
+        let copied = 0; let tid = null;
+        (bidIds || []).forEach((id) => {
+          const src = state.bids.find((b) => b.id === id);
+          if (!src) return;
+          const product = JSON.parse(JSON.stringify(src.product || {}));
+          const slot = ensureBucketSlotOnDay(day);
+          const bid = stamp({ id: uid(), teamId: src.teamId, dayId: day.id, slotId: slot.id, product, createdAt: nowISO() });
+          state.bids.push(bid);
+          state.placements.push(stamp(placementFromBid(bid, slot.id, day.programId)));
+          tid = src.teamId; copied++;
+        });
+        if (copied) {
+          const pn = ((state.programs || []).find((p) => p.id === day.programId) || {}).name || '';
+          log({ action: '입찰복사', teamName: teamName(tid),
+                detail: `지난 입찰 ${copied}건 복사 → ${pn} ${day.date} (2차 편성)` });
+          emit();
+        }
+        return { copied };
+      },
       updateBid(bidId, patch) {
         const b = state.bids.find((x) => x.id === bidId);
         if (!b) return;
