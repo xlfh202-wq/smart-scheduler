@@ -77,13 +77,6 @@
         if (cont) { cont.removeEventListener('wheel', halt); cont.removeEventListener('touchstart', halt); } };
     }, deps);
   };
-  // 입찰 보드·최종편성안 노출 범위 = 이전달~다음달 3개월 연속 (엑셀처럼 월 경계 넘는 드래그 이동이 쉽도록)
-  const daysInWideView = (state) => {
-    const keys = [monthKey(shiftMonth(state.view, -1)), monthKey(state.view), monthKey(shiftMonth(state.view, 1))];
-    return state.days
-      .filter((d) => d.programId === state.activeProgram && keys.includes(d.date.slice(0, 7)))
-      .slice().sort((a, b) => a.date.localeCompare(b.date));
-  };
   const activeProgramObj = (state) =>
     (state.programs || []).find((p) => p.id === state.activeProgram) || { name: '', color: '#da291c' };
 
@@ -1343,17 +1336,28 @@
     const [memoOpen, setMemoOpen] = useState(false);
     const hasMemo = !!(state.castingMemo && state.castingMemo[`${state.activeProgram}|${state.view.year}-${String(state.view.month).padStart(2, '0')}`]);
     const { year, month } = state.view;
-    const allDays = daysInWideView(state); // 이전달~다음달 연속 표시
     const centerKey = monthKey(state.view);
+    const winKeys = [monthKey(shiftMonth(state.view, -1)), centerKey, monthKey(shiftMonth(state.view, 1))];
+    // 전체 월을 스크롤에 표시 — 이전~다음달은 펼침, 먼 달은 접힌 헤더(클릭해 펼침/접기) → 렌더 부하는 3개월 수준 유지
+    const allDays = state.days.filter((d) => d.programId === state.activeProgram)
+      .slice().sort((a, b) => a.date.localeCompare(b.date));
     const days = allDays.filter((d) => d.date.slice(0, 7) === centerKey); // 집계·저장은 이번 달 기준
     const monthSlotIds = new Set(days.flatMap((d) => d.slots.map((s) => s.id)));
     const placedCount = state.placements.filter((p) => monthSlotIds.has(p.slotId)).length;
-    // 월별 섹션 (이전달/이번달/다음달) — 이번 달 위치로 자동 스크롤
-    const monthSections = [-1, 0, 1].map((off) => {
-      const v = shiftMonth(state.view, off);
-      const key = monthKey(v);
-      return { key, label: `${v.year}년 ${v.month}월`, center: off === 0, days: allDays.filter((d) => d.date.slice(0, 7) === key) };
-    });
+    const [expandedMonths, setExpandedMonths] = useState(() => new Set()); // 먼 달 중 펼쳐둔 것
+    const toggleMonth = (key) => setExpandedMonths((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+    const monthSections = [...new Set([...allDays.map((d) => d.date.slice(0, 7)), ...winKeys])].sort().map((key) => ({
+      key,
+      label: `${key.slice(0, 4)}년 ${Number(key.slice(5, 7))}월`,
+      center: key === centerKey,
+      win: winKeys.includes(key),
+      open: winKeys.includes(key) || expandedMonths.has(key),
+      days: allDays.filter((d) => d.date.slice(0, 7) === key),
+    }));
+    const secPlaced = (sec) => {
+      const ids = new Set(sec.days.flatMap((d) => d.slots.map((s) => s.id)));
+      return state.placements.filter((p) => ids.has(p.slotId)).length;
+    };
     useMonthAutoScroll('board-month-center', 8,
       [state.view.year, state.view.month, state.activeProgram, allDays.length > 0]);
     const snaps = (state.snapshots || []).filter((s) => s.year === year && s.month === month && s.programId === state.activeProgram);
@@ -1392,12 +1396,15 @@
           ${simple && html`<div class="mb-2 text-[12px] text-ink-soft bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5">
             상품명·팀명·노출분만 간결하게 표시합니다. 드래그로 <b>순서·시간띠를 조정</b>하면 <b>실시간으로 모두에게 반영</b>됩니다. “편성 저장”은 저장본(되돌리기 지점)을 남기고 <b>최종편성안</b>으로 이동합니다.</div>`}
           <div class="space-y-4">
-            ${monthSections.map((sec) => html`
+            ${monthSections.map((sec) => sec.open ? html`
               <div key=${sec.key} id=${sec.center ? 'board-month-center' : undefined}
                 class=${sec.center ? 'scroll-mt-2' : 'opacity-75'}>
                 <div class=${`flex items-center gap-3 mb-2 ${sec.center ? 'mt-1' : 'mt-2'}`}>
                   <div class="flex-1 border-t ${sec.center ? 'border-brand/50' : 'border-slate-300'}"></div>
-                  <div class=${`text-[13px] font-extrabold whitespace-nowrap ${sec.center ? 'text-brand' : 'text-slate-400'}`}>${sec.label}${sec.center ? '' : sec.key < centerKey ? ' (이전달)' : ' (다음달)'}</div>
+                  ${sec.win
+                    ? html`<div class=${`text-[13px] font-extrabold whitespace-nowrap ${sec.center ? 'text-brand' : 'text-slate-400'}`}>${sec.label}${sec.center ? '' : sec.key < centerKey ? ' (이전달)' : ' (다음달)'}</div>`
+                    : html`<button onClick=${() => toggleMonth(sec.key)} title="클릭해 이 달 접기"
+                        class="text-[13px] font-extrabold whitespace-nowrap text-slate-400 hover:text-brand">▾ ${sec.label} <span class="font-normal text-[11px]">(접기)</span></button>`}
                   <div class="flex-1 border-t ${sec.center ? 'border-brand/50' : 'border-slate-300'}"></div>
                 </div>
                 ${sec.days.length === 0
@@ -1411,7 +1418,14 @@
                             </div>`)}
                         </div>`)}
                     </div>`}
-              </div>`)}
+              </div>`
+            : html`
+              <button key=${sec.key} onClick=${() => toggleMonth(sec.key)} title="클릭해 이 달 펼치기"
+                class="w-full flex items-center gap-3 py-1 group">
+                <div class="flex-1 border-t border-slate-300"></div>
+                <span class="text-[13px] font-bold whitespace-nowrap text-slate-400 group-hover:text-brand">▸ ${sec.label} — 방송일 ${sec.days.length}일 · 편성 ${secPlaced(sec)}건 <span class="font-normal text-[11px]">(펼치기)</span></span>
+                <div class="flex-1 border-t border-slate-300"></div>
+              </button>`)}
           </div>
         </div>
         ${snapOpen && html`<${SnapshotsModal} state=${state} onClose=${() => setSnapOpen(false)} />`}
@@ -1668,17 +1682,24 @@
       finally { if (clone && clone.parentNode) clone.parentNode.removeChild(clone); setSaving(false); }
     }
     const centerKey = monthKey(state.view);
-    const days = daysInWideView(state); // 이전달~다음달 연속 표시 (월 경계 넘는 드래그 이동)
+    const winKeys = [monthKey(shiftMonth(state.view, -1)), centerKey, monthKey(shiftMonth(state.view, 1))];
+    // 전체 월을 스크롤에 표시 — 이전~다음달은 펼침, 먼 달은 접힌 헤더(클릭해 펼침)
+    const allProgDays = state.days.filter((d) => d.programId === state.activeProgram)
+      .slice().sort((a, b) => a.date.localeCompare(b.date));
+    const [expandedMonths, setExpandedMonths] = useState(() => new Set());
     const slotStart = (s) => (s.start ? U.toMin(s.start) : 9999);
     useMonthAutoScroll('final-month-center', 36, // sticky 표 헤더만큼 여유
-      [state.view.year, state.view.month, state.activeProgram, days.length > 0]);
-    // 행 구성: 월 구분 → 날짜 → 슬롯(시간순) → 편성(placement)
+      [state.view.year, state.view.month, state.activeProgram, allProgDays.length > 0]);
+    // 행 구성: 월 구분(먼 달은 접힘) → 날짜 → 슬롯(시간순) → 편성(placement)
     const rows = [];
-    let curYm = '';
-    days.forEach((d) => {
-      const ym = d.date.slice(0, 7);
-      if (ym !== curYm) { rows.push({ mhead: ym, day: d }); curYm = ym; }
-      dayRows(d);
+    const monthList = [...new Set([...allProgDays.map((d) => d.date.slice(0, 7)), ...winKeys])].sort();
+    monthList.forEach((ym) => {
+      const mdays = allProgDays.filter((d) => d.date.slice(0, 7) === ym);
+      const open = winKeys.includes(ym) || expandedMonths.has(ym);
+      const fakeDay = mdays[0] || { date: ym + '-01', weekday: 0, slots: [] };
+      if (!open) { rows.push({ mcollapse: ym, day: fakeDay, mdays }); return; }
+      rows.push({ mhead: ym, day: fakeDay, win: winKeys.includes(ym) });
+      mdays.forEach((d) => dayRows(d));
     });
     function dayRows(d) {
       // 미운영(결방): 그 날은 "미운영" 한 줄로만 표시
@@ -1706,7 +1727,7 @@
     }
     const total = rows.filter((r) => r.p && r.day.date.slice(0, 7) === centerKey).length; // 집계는 이번 달만
     const dayCount = {};
-    rows.forEach((r) => { if (!r.mhead) dayCount[r.day.date] = (dayCount[r.day.date] || 0) + 1; });
+    rows.forEach((r) => { if (!r.mhead && !r.mcollapse) dayCount[r.day.date] = (dayCount[r.day.date] || 0) + 1; });
     // PD·쇼호스트별 이 달 캐스팅 횟수 (콤마 등으로 여러 명 기입 시 각각 집계 — 이번 달만)
     const castCounts = (field) => {
       const map = new Map();
@@ -1844,12 +1865,26 @@
               ${rows.filter((r) => !r.mhead).length === 0 && html`<tr><td class=${td} colspan=${slim ? 8 : 16}><div class="text-center text-slate-400 py-8">편성이 없습니다.</div></td></tr>`}
               ${rows.map((r, i) => {
                 const adj = r.day.date.slice(0, 7) !== centerKey; // 이전/다음 달 행 (흐리게 · 이미지 저장 제외)
+                if (r.mcollapse) {
+                  const my = r.mcollapse.slice(0, 4), mm2 = Number(r.mcollapse.slice(5, 7));
+                  const ids = new Set(r.mdays.flatMap((d) => d.slots.map((s) => s.id)));
+                  const nP = state.placements.filter((p) => ids.has(p.slotId)).length;
+                  return html`<tr key=${i} data-adj="1">
+                    <td colspan=${slim ? 8 : 16} class="p-0 border border-slate-300">
+                      <button onClick=${() => setExpandedMonths((s) => new Set([...s, r.mcollapse]))} title="클릭해 이 달 펼치기"
+                        class="w-full px-2 py-1 text-center text-[12px] font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 hover:text-brand">
+                        ▸ ${my}년 ${mm2}월 — 방송일 ${r.mdays.length}일 · 편성 ${nP}건 <span class="font-normal text-[11px]">(펼치기)</span></button></td>
+                  </tr>`;
+                }
                 if (r.mhead) {
                   const my = r.mhead.slice(0, 4), mm2 = Number(r.mhead.slice(5, 7));
                   return html`<tr key=${i} data-adj="1" id=${!adj ? 'final-month-center' : undefined} class="scroll-mt-9">
                     <td colspan=${slim ? 8 : 16}
-                      class=${`px-2 py-1 text-center text-[12px] font-extrabold border border-slate-300 ${!adj ? 'bg-brand/10 text-brand' : 'bg-slate-200/70 text-slate-500'}`}>
-                      ${my}년 ${mm2}월${adj ? (r.mhead < centerKey ? ' (이전달)' : ' (다음달)') : ''}</td>
+                      class=${`${r.win ? 'px-2 py-1' : 'p-0'} text-center text-[12px] font-extrabold border border-slate-300 ${!adj ? 'bg-brand/10 text-brand' : 'bg-slate-200/70 text-slate-500'}`}>
+                      ${r.win
+                        ? html`${my}년 ${mm2}월${adj ? (r.mhead < centerKey ? ' (이전달)' : ' (다음달)') : ''}`
+                        : html`<button onClick=${() => setExpandedMonths((s) => { const n = new Set(s); n.delete(r.mhead); return n; })} title="클릭해 이 달 접기"
+                            class="w-full px-2 py-1 hover:text-brand">▾ ${my}년 ${mm2}월 <span class="font-normal text-[11px]">(접기)</span></button>`}</td>
                   </tr>`;
                 }
                 const p = r.p; const det = (p && p.detail) || {};
