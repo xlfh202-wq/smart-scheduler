@@ -1147,6 +1147,16 @@
               from: slotLabel(p.slotId), detail: p.sourceBidId ? '입찰풀로 복귀' : '입찰풀로 복귀(수기추가)' });
         emit();
       },
+      // 완전 삭제 — 입찰 풀로 돌려보내지 않고 상품(과 원본 입찰)을 지움 (수기추가 정리용)
+      deletePlacement(placementId) {
+        const p = state.placements.find((x) => x.id === placementId);
+        if (!p) return;
+        state.placements = state.placements.filter((x) => x.id !== placementId);
+        if (p.sourceBidId) state.bids = state.bids.filter((b) => b.id !== p.sourceBidId);
+        log({ action: '상품삭제', productName: p.productName, teamName: teamName(p.teamId),
+              from: slotLabel(p.slotId), detail: p.sourceBidId ? '원본 입찰 포함 완전 삭제' : '완전 삭제(수기추가)' });
+        emit();
+      },
       updatePlacementMeta(placementId, patch) {
         const p = state.placements.find((x) => x.id === placementId);
         if (!p) return;

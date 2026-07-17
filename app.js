@@ -141,12 +141,14 @@
     const [startEdit, setStartEdit] = useState(false);
     const [subEdit, setSubEdit] = useState(false);   // 세부 시간(⏱) 클릭 → 시간 조정
     const [castOpen, setCastOpen] = useState(false); // 🎤 빠른 캐스팅 입력
+    const [ctx, setCtx] = useState(null);            // 우클릭 메뉴 {x, y}
     const det = p.detail || {};
     const items = p.items || [];
     return html`
       <div draggable=${true}
         onDragStart=${(e) => drag.start(e, 'placement', p.id)}
         onClick=${() => { setStartEdit(false); setInfo(true); }} title="클릭하면 상세 정보 · ✎ 로 바로 수정"
+        onContextMenu=${(e) => { e.preventDefault(); e.stopPropagation(); setCtx({ x: e.clientX, y: e.clientY }); }}
         class=${`card-drag group relative ${simple ? 'w-[168px]' : 'w-[152px]'} rounded-md border border-slate-200 bg-white px-1.5 py-1 shadow-sm hover:shadow hover:border-brand transition`}
         style=${{ borderLeft: `4px solid ${team.color}` }}>
         <div class="flex items-start justify-between gap-0.5">
@@ -184,6 +186,27 @@
         ${info && html`<${PlacementDetailModal} state=${state} p=${p} startEdit=${startEdit} onClose=${(e) => { e && e.stopPropagation && e.stopPropagation(); setInfo(false); }} />`}
         ${subEdit && subSlot && html`<${EditSlotTimeModal} slot=${subSlot} placement=${p} rippleDefault=${true} onClose=${() => setSubEdit(false)} />`}
         ${castOpen && html`<${CastQuickModal} state=${state} p=${p} onClose=${() => setCastOpen(false)} />`}
+        ${ctx && (() => {
+          const close = () => setCtx(null);
+          const item = (label, fn, danger) => html`
+            <button onClick=${(e) => { e.stopPropagation(); close(); fn(); }}
+              class=${`w-full text-left px-3 py-1.5 hover:bg-slate-100 ${danger ? 'text-rose-600' : 'text-ink'}`}>${label}</button>`;
+          return html`
+            <div class="fixed inset-0 z-50 cursor-default" onClick=${(e) => { e.stopPropagation(); close(); }}
+              onContextMenu=${(e) => { e.preventDefault(); e.stopPropagation(); close(); }}>
+              <div class="absolute bg-white rounded-lg shadow-xl border border-slate-200 py-1 w-64 text-[13px]"
+                style=${{ left: Math.min(ctx.x, window.innerWidth - 272) + 'px', top: Math.min(ctx.y, window.innerHeight - 140) + 'px' }}
+                onClick=${(e) => e.stopPropagation()}>
+                <div class="px-3 py-1 text-[11px] text-ink-soft border-b border-slate-100 truncate">${p.productName}</div>
+                ${item('🚫 편성 제외 (입찰 풀로 복귀)', () => {
+                  if (confirm(`'${p.productName}'을(를) 편성에서 제외할까요?\n상품은 삭제되지 않고 입찰 풀(미편성)로 돌아갑니다.`)) store.removePlacement(p.id);
+                })}
+                ${item('🗑 완전 삭제 (입찰 풀에도 남기지 않음)', () => {
+                  if (confirm(`'${p.productName}'을(를) 완전히 삭제할까요?\n입찰 풀로 돌아가지 않고 지워집니다.${p.sourceBidId ? '\n원본 입찰도 함께 삭제됩니다.' : ''}`)) store.deletePlacement(p.id);
+                }, true)}
+              </div>
+            </div>`;
+        })()}
       </div>`;
   }
 
@@ -715,29 +738,60 @@
       </div>`;
   }
 
-  // 슬롯에 상품 직접 추가 (빈 슬롯 더블클릭) — 상품명/팀명/노출분만
+  // 부(순번) 칩 선택 — 패션류(부 편성) 프로그램의 상품 수기 추가에서 사용
+  function PartChipPicker({ state, day, sel, onSel }) {
+    const partNum = (lbl) => { const m = (lbl || '').match(/(\d+)\s*부/); return m ? parseInt(m[1], 10) : 0; };
+    const [maxPart, setMaxPart] = useState(() => Math.max(6, ...day.slots.map((s) => partNum(s.label)), partNum(sel)));
+    const countOf = (pt) => {
+      const sl = day.slots.find((s) => s.label === pt && !s.start);
+      return sl ? state.placements.filter((p) => p.slotId === sl.id).length : 0;
+    };
+    return html`
+      <div class="flex flex-wrap items-center gap-1.5">
+        ${Array.from({ length: maxPart }, (_, i) => `${i + 1}부`).map((pt) => html`
+          <button key=${pt} type="button" onClick=${() => onSel(pt)}
+            class=${`text-[13px] px-3 py-1.5 rounded-full border transition ${sel === pt ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-brand hover:text-brand'}`}>
+            ${pt}${countOf(pt) ? ` (${countOf(pt)})` : ''}</button>`)}
+        <button type="button" onClick=${() => setMaxPart(maxPart + 1)}
+          class="text-[12px] text-ink-soft hover:text-brand px-1">+ ${maxPart + 1}부 추가</button>
+      </div>`;
+  }
+
+  // 슬롯에 상품 직접 추가 (빈 슬롯 더블클릭) — 상품명/팀명/노출분만 (부 슬롯은 노출분 대신 부 선택)
   function SlotAddModal({ state, slot, onClose }) {
     const teams = programTeams(state);
+    const day = state.days.find((d) => d.slots.some((s) => s.id === slot.id));
+    const isPart = !!(day && slot.label && !slot.start && /\d+\s*부/.test(slot.label)); // 1부·2부… 슬롯
     const [name, setName] = useState('');
     const [dur, setDur] = useState('');
+    const [part, setPart] = useState(slot.label || '1부');
     const [team, setTeam] = useState(teams[0] ? teams[0].id : 'etc');
     function save() {
       if (!name.trim()) { alert('상품명을 입력하세요.'); return; }
-      store.addPlacement(slot.id, { productName: name.trim(), teamId: team, durationMin: dur ? parseInt(dur, 10) : null });
+      if (isPart) store.addQuickPlacement({ dayId: day.id, part, productName: name.trim(), teamId: team });
+      else store.addPlacement(slot.id, { productName: name.trim(), teamId: team, durationMin: dur ? parseInt(dur, 10) : null });
       onClose();
     }
     return html`
       <${Modal} title=${`${slotName(slot)} · 상품 추가`} onClose=${onClose} onSave=${save}>
         <${Field} label="상품명 *"><input value=${name} onInput=${(e) => setName(e.target.value)} class=${inputCls} autofocus placeholder="예: 롯데호텔김치" /><//>
-        <div class="grid grid-cols-2 gap-3">
-          <${Field} label="팀명">
-            <select value=${team} onChange=${(e) => setTeam(e.target.value)} class=${inputCls}>
-              ${teamOptions(state)}
-            </select>
-          <//>
-          <${Field} label="노출분"><input type="number" value=${dur} onInput=${(e) => setDur(e.target.value)} class=${inputCls} placeholder="예: 20" /><//>
-        </div>
-        <div class="text-[12px] text-ink-soft">이 시간대(${slotName(slot)})에 바로 편성됩니다. 구성·가격 등은 최종편성안에서 보강하세요.</div>
+        ${isPart
+          ? html`
+            <${Field} label="팀명">
+              <select value=${team} onChange=${(e) => setTeam(e.target.value)} class=${inputCls}>
+                ${teamOptions(state)}
+              </select>
+            <//>
+            <${Field} label="부(순번) *"><${PartChipPicker} state=${state} day=${day} sel=${part} onSel=${setPart} /><//>`
+          : html`<div class="grid grid-cols-2 gap-3">
+              <${Field} label="팀명">
+                <select value=${team} onChange=${(e) => setTeam(e.target.value)} class=${inputCls}>
+                  ${teamOptions(state)}
+                </select>
+              <//>
+              <${Field} label="노출분"><input type="number" value=${dur} onInput=${(e) => setDur(e.target.value)} class=${inputCls} placeholder="예: 20" /><//>
+            </div>`}
+        <div class="text-[12px] text-ink-soft">${isPart ? '선택한 부에 바로 편성됩니다. (괄호 숫자 = 현재 그 부의 상품 수)' : `이 시간대(${slotName(slot)})에 바로 편성됩니다.`} 구성·가격 등은 최종편성안에서 보강하세요.</div>
       <//>`;
   }
 
@@ -987,8 +1041,7 @@
     function save() {
       if (!name.trim()) { alert('상품명을 입력하세요.'); return; }
       if (orderMode) {
-        if (!part.trim()) { alert('부(순번)를 입력하세요. 예: 1부'); return; }
-        store.addQuickPlacement({ dayId: day.id, part: part.trim(), durationMin: dur ? parseInt(dur, 10) : null, productName: name.trim(), teamId: team });
+        store.addQuickPlacement({ dayId: day.id, part, productName: name.trim(), teamId: team });
       } else {
         if (!/^\d{1,2}:\d{2}$/.test(start)) { alert('시간을 24시간 형식(예: 21:00)으로 입력하세요.'); return; }
         store.addQuickPlacement({ dayId: day.id, start, durationMin: dur ? parseInt(dur, 10) : null, productName: name.trim(), teamId: team });
@@ -1000,19 +1053,25 @@
         <${Field} label="상품명 *">
           <input value=${name} onInput=${(e) => setName(e.target.value)} class=${inputCls} autofocus placeholder="예: 롯데호텔김치" />
         <//>
-        <div class="grid grid-cols-2 gap-3">
-          ${orderMode
-            ? html`<${Field} label="부(순번) *"><input value=${part} onInput=${(e) => setPart(e.target.value)} class=${inputCls} placeholder="예: 1부 / 2부 / 3부" list="part-list" />
-                <datalist id="part-list"><option value="1부"/><option value="2부"/><option value="3부"/></datalist><//>`
-            : html`<${Field} label="시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${setStart} /><//>`}
-          <${Field} label="노출분"><input type="number" value=${dur} onInput=${(e) => setDur(e.target.value)} class=${inputCls} placeholder="예: 20" /><//>
-        </div>
-        <${Field} label="팀명">
-          <select value=${team} onChange=${(e) => setTeam(e.target.value)} class=${inputCls}>
-            ${teamOptions(state)}
-          </select>
-        <//>
-        <div class="text-[12px] text-ink-soft">${orderMode ? '부(1부·2부·3부)에 편성됩니다. 방송시간은 날짜 옆에서 수정하세요.' : '시간을 입력하면 해당 시간대(시작~시작+노출분)로 자동 반영됩니다.'} 구성·가격 등은 최종편성안에서 보강하세요.</div>
+        ${orderMode
+          ? html`
+            <${Field} label="팀명">
+              <select value=${team} onChange=${(e) => setTeam(e.target.value)} class=${inputCls}>
+                ${teamOptions(state)}
+              </select>
+            <//>
+            <${Field} label="부(순번) *"><${PartChipPicker} state=${state} day=${day} sel=${part} onSel=${setPart} /><//>`
+          : html`
+            <div class="grid grid-cols-2 gap-3">
+              <${Field} label="시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${setStart} /><//>
+              <${Field} label="노출분"><input type="number" value=${dur} onInput=${(e) => setDur(e.target.value)} class=${inputCls} placeholder="예: 20" /><//>
+            </div>
+            <${Field} label="팀명">
+              <select value=${team} onChange=${(e) => setTeam(e.target.value)} class=${inputCls}>
+                ${teamOptions(state)}
+              </select>
+            <//>`}
+        <div class="text-[12px] text-ink-soft">${orderMode ? '선택한 부에 바로 편성됩니다. (괄호 숫자 = 현재 그 부의 상품 수) 방송시간은 날짜 옆에서 수정하세요.' : '시간을 입력하면 해당 시간대(시작~시작+노출분)로 자동 반영됩니다.'} 구성·가격 등은 최종편성안에서 보강하세요.</div>
       <//>`;
   }
 
@@ -1041,6 +1100,7 @@
     const [q, setQ] = useState('');
     const [detail, setDetail] = useState(null);
     const [over, setOver] = useState(false);
+    const [ctx, setCtx] = useState(null); // 우클릭 메뉴 {x, y, bid}
     const placedBidIds = new Set(state.placements.map((p) => p.sourceBidId).filter(Boolean));
     // 미편성 입찰 풀 = 지난달 + 이번달 (편성이 월간 이동이 잦아 두 달치 함께 봄)
     const prevKey = monthKey(shiftMonth(state.view, -1));
@@ -1092,6 +1152,7 @@
             return html`
               <div key=${b.id} draggable=${true} onDragStart=${(e) => drag.start(e, 'bid', b.id)}
                 onClick=${() => setDetail(b)} title="클릭하면 상세 정보"
+                onContextMenu=${(e) => { e.preventDefault(); e.stopPropagation(); setCtx({ x: e.clientX, y: e.clientY, bid: b }); }}
                 class=${`card-drag rounded-md border px-2 py-1.5 ${placed ? 'bg-slate-100 opacity-70' : isPrev ? 'bg-amber-50/60' : 'bg-white'} hover:shadow-sm hover:border-brand`}
                 style=${{ borderLeft: `4px solid ${t.color}` }}>
                 <div class="text-[12px] font-semibold text-ink leading-tight">${pr.name}</div>
@@ -1109,6 +1170,24 @@
           })}
         </div>
         ${detail && html`<${BidDetailModal} state=${state} b=${detail} onClose=${() => setDetail(null)} />`}
+        ${ctx && (() => {
+          const close = () => setCtx(null);
+          const b = ctx.bid;
+          return html`
+            <div class="fixed inset-0 z-50 cursor-default" onClick=${close}
+              onContextMenu=${(e) => { e.preventDefault(); close(); }}>
+              <div class="absolute bg-white rounded-lg shadow-xl border border-slate-200 py-1 w-64 text-[13px]"
+                style=${{ left: Math.min(ctx.x, window.innerWidth - 272) + 'px', top: Math.min(ctx.y, window.innerHeight - 120) + 'px' }}
+                onClick=${(e) => e.stopPropagation()}>
+                <div class="px-3 py-1 text-[11px] text-ink-soft border-b border-slate-100 truncate">${b.product.name}</div>
+                <button onClick=${() => { close(); setDetail(b); }}
+                  class="w-full text-left px-3 py-1.5 hover:bg-slate-100 text-ink">🔎 상세 정보</button>
+                <button onClick=${() => { close();
+                    if (confirm(`'${b.product.name}' 입찰을 삭제할까요?\n입찰 풀에서 완전히 지워집니다.`)) store.deleteBid(b.id); }}
+                  class="w-full text-left px-3 py-1.5 hover:bg-slate-100 text-rose-600">🗑 입찰 삭제</button>
+              </div>
+            </div>`;
+        })()}
       </aside>`;
   }
 
