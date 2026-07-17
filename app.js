@@ -49,32 +49,43 @@
   const daysInView = (state) => state.days.filter((d) =>
     d.programId === state.activeProgram && inScheduleView(d.date, state.view));
   // 월 앵커로 스크롤 (scrollIntoView 대신 직접 scrollTop 계산 — 초기 로드 중에도 확실히 동작)
+  // 요소 높이 추적 (상단 고정 바 높이만큼 스크롤 위치 보정용)
+  const useElemHeight = (ref, init) => {
+    const [h, setH] = useState(init);
+    useEffect(() => {
+      const el = ref.current;
+      if (!el || !window.ResizeObserver) return;
+      const ro = new ResizeObserver(() => setH(el.offsetHeight));
+      ro.observe(el); setH(el.offsetHeight);
+      return () => ro.disconnect();
+    }, []);
+    return h;
+  };
   // 이번 달 앵커로 자동 스크롤 — 하이드레이트로 위쪽(이전달) 내용이 늦게 자라도 초기 8초간 위치를 고정.
   // 사용자가 직접 스크롤(휠·터치)하면 즉시 고정 해제.
   const useMonthAutoScroll = (id, pad, deps) => {
     useEffect(() => {
       let stopped = false, cont = null;
       const halt = () => { stopped = true; };
-      let done = false, tries = 0;
+      let tries = 0;
+      const EVTS = ['wheel', 'touchstart', 'pointerdown']; // 사용자 입력이 감지되면 즉시 고정 해제
       const tick = () => {
         const el = document.getElementById(id);
         const c = el && (el.closest('.overflow-y-auto') || el.closest('.overflow-auto'));
         if (!el || !c) return;
-        if (cont !== c) { // (재)마운트로 컨테이너가 바뀌면 사용자 스크롤 감지 리스너 재부착
-          if (cont) { cont.removeEventListener('wheel', halt); cont.removeEventListener('touchstart', halt); }
+        if (cont !== c) { // (재)마운트로 컨테이너가 바뀌면 사용자 입력 감지 리스너 재부착
+          if (cont) EVTS.forEach((ev) => cont.removeEventListener(ev, halt));
           cont = c;
-          cont.addEventListener('wheel', halt, { passive: true });
-          cont.addEventListener('touchstart', halt, { passive: true });
+          EVTS.forEach((ev) => cont.addEventListener(ev, halt, { passive: true }));
         }
         const target = el.getBoundingClientRect().top - c.getBoundingClientRect().top + c.scrollTop - (pad || 8);
         if (target > 0 && Math.abs(c.scrollTop - target) > 40) c.scrollTop = target;
-        // 실제로 자리 잡혔을 때만 종료 — 레이아웃이 아직 유동적이면(대입이 되돌아가면) 계속 재시도
-        if (target > 0 && Math.abs(c.scrollTop - target) < 40) done = true;
       };
       tick();
-      const iv = setInterval(() => { if (stopped || done || ++tries > 75) clearInterval(iv); else tick(); }, 400);
+      // 초기 10초간 위치를 재확인·재고정 — 성공 판정 없이 유지 (레이아웃·데이터가 늦게 채워지는 모든 경우 대응)
+      const iv = setInterval(() => { if (stopped || ++tries > 25) clearInterval(iv); else tick(); }, 400);
       return () => { clearInterval(iv);
-        if (cont) { cont.removeEventListener('wheel', halt); cont.removeEventListener('touchstart', halt); } };
+        if (cont) EVTS.forEach((ev) => cont.removeEventListener(ev, halt)); };
     }, deps);
   };
   const activeProgramObj = (state) =>
@@ -1358,8 +1369,10 @@
       const ids = new Set(sec.days.flatMap((d) => d.slots.map((s) => s.id)));
       return state.placements.filter((p) => ids.has(p.slotId)).length;
     };
-    useMonthAutoScroll('board-month-center', 8,
-      [state.view.year, state.view.month, state.activeProgram, allDays.length > 0]);
+    const topBarRef = useRef(null);
+    const topBarH = useElemHeight(topBarRef, 48); // 상단 고정 도구 바 높이
+    useMonthAutoScroll('board-month-center', topBarH + 8, // 고정 바에 가리지 않게 보정
+      [state.view.year, state.view.month, state.activeProgram, allDays.length > 0, topBarH]);
     const snaps = (state.snapshots || []).filter((s) => s.year === year && s.month === month && s.programId === state.activeProgram);
     const lastSnap = snaps[0];
     const [saveOpen, setSaveOpen] = useState(false);
@@ -1372,8 +1385,9 @@
     return html`
       <div class="flex flex-col md:flex-row flex-1 min-h-0">
         <${BidPool} state=${state} />
-        <div class="flex-1 overflow-y-auto p-2 sm:p-4">
-          <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
+        <div class="flex-1 overflow-y-auto px-2 sm:px-4 pb-2 sm:pb-4">
+          <div ref=${topBarRef}
+            class="sticky top-0 z-30 -mx-2 sm:-mx-4 px-2 sm:px-4 pt-2 sm:pt-3 pb-2 mb-3 bg-white border-b border-slate-200 shadow-sm flex items-center justify-between gap-3 flex-wrap">
             <h2 class="text-base font-bold text-ink">${year}년 ${month}월 ${simple ? '입찰 보드' : '편성표 (상세)'}
               <span class="text-[12px] font-normal text-ink-soft">방송일 ${days.length}일 · 편성 ${placedCount}건 · ${shiftMonth(state.view, -1).month}~${shiftMonth(state.view, 1).month}월 함께 표시</span>
               ${lastSnap
@@ -1688,8 +1702,10 @@
       .slice().sort((a, b) => a.date.localeCompare(b.date));
     const [expandedMonths, setExpandedMonths] = useState(() => new Set());
     const slotStart = (s) => (s.start ? U.toMin(s.start) : 9999);
-    useMonthAutoScroll('final-month-center', 36, // sticky 표 헤더만큼 여유
-      [state.view.year, state.view.month, state.activeProgram, allProgDays.length > 0]);
+    const topBarRef = useRef(null);
+    const topBarH = useElemHeight(topBarRef, 48); // 상단 고정 도구 바 높이
+    useMonthAutoScroll('final-month-center', topBarH + 8, // 고정 바에 가리지 않게 보정
+      [state.view.year, state.view.month, state.activeProgram, allProgDays.length > 0, topBarH]);
     // 행 구성: 월 구분(먼 달은 접힘) → 날짜 → 슬롯(시간순) → 편성(placement)
     const rows = [];
     const monthList = [...new Set([...allProgDays.map((d) => d.date.slice(0, 7)), ...winKeys])].sort();
@@ -1760,9 +1776,10 @@
     };
 
     return html`
-      <div class="flex-1 overflow-auto p-4 bg-slate-100">
+      <div class="flex-1 overflow-auto px-4 pb-4 bg-slate-100">
         ${['pd', 'host', 'studio'].map((fld) => html`<datalist key=${fld} id=${'cast-' + fld + '-dl'}>${((castOpts && castOpts[fld]) || []).map((o) => html`<option key=${o} value=${o}></option>`)}</datalist>`)}
-        <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
+        <div ref=${topBarRef}
+          class="sticky top-0 z-30 -mx-4 px-4 pt-3 pb-2 mb-3 bg-slate-100 border-b border-slate-200 shadow-sm flex items-center justify-between gap-3 flex-wrap">
           <h2 class="text-base font-bold text-ink">${prog.name} · ${year}년 ${month}월 최종편성안
             <span class="text-[12px] font-normal text-ink-soft">총 ${total}편성${readOnly ? ' · 조회 전용' : ' · 셀 클릭=수정 · 행 우클릭=추가/삭제 · ⠿ 드래그=이동'}</span></h2>
           <div class="flex items-center gap-2">
