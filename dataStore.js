@@ -983,6 +983,28 @@
         emit();
         return { added, newDays, programs: progs.size };
       },
+      // 날짜 운영 상태: null(정상) | 'off'(미운영·결방) | 'general'(테마PGM 대신 일반프로그램 운영)
+      // 'off' 표기 시 이 날의 편성 상품은 입찰 풀(미편성)로 복귀 (수기추가 상품은 입찰로 변환해 보존)
+      setDayStatus(dayId, { status, reason }) {
+        const day = state.days.find((d) => d.id === dayId);
+        if (!day) return;
+        const st = status || null;
+        if (st === 'off') {
+          const slotIds = new Set(day.slots.map((s) => s.id));
+          state.placements.filter((p) => slotIds.has(p.slotId)).forEach((p) => {
+            if (!p.sourceBidId) {
+              const product = { name: p.productName, ...(p.detail || {}), durationMin: p.durationMin, items: p.items };
+              state.bids.push(stamp({ id: uid(), teamId: p.teamId, dayId: day.id, slotId: p.slotId, product, createdAt: nowISO() }));
+            }
+          });
+          state.placements = state.placements.filter((p) => !slotIds.has(p.slotId));
+        }
+        if (st) { day.status = st; day.statusReason = (reason || '').trim(); }
+        else { delete day.status; delete day.statusReason; }
+        log({ action: '운영상태', from: day.date,
+              detail: `${st === 'off' ? '미운영(결방)' : st === 'general' ? '일반프로그램 운영' : '정상 운영으로 해제'}${reason ? ' · ' + reason : ''}` });
+        emit();
+      },
       // 날짜별 방송시간(패션: 날짜 옆 표기) 수정
       setDayAirTime(dayId, text) {
         const day = state.days.find((d) => d.id === dayId);
