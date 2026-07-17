@@ -637,10 +637,10 @@
             <span class="w-1.5 h-1.5 rounded-full shrink-0" style=${{ background: compColor }}></span>경쟁 ${compete}팀</span>`}
         </div>
         <div class=${`flex-1 flex flex-wrap items-stretch content-start gap-1 p-1.5 min-h-[56px] ${placements.length === 0 ? 'cursor-copy' : ''}`}
-          onDoubleClick=${placements.length === 0 && !isExt && onQuickAdd ? (() => onQuickAdd(band.start)) : undefined}
-          title=${placements.length === 0 && !isExt ? '더블클릭하면 상품 추가' : ''}>
+          onDoubleClick=${placements.length === 0 && onQuickAdd ? (() => onQuickAdd(band.start || '')) : undefined}
+          title=${placements.length === 0 && onQuickAdd ? '더블클릭하면 상품 추가' : ''}>
           ${placements.length === 0
-            ? html`<div class="text-[11px] text-slate-300 self-center px-2 select-none">${isExt ? '확장 시간대 — 카드를 놓으면 시간 지정 팝업' : '입찰 카드를 끌어다 놓거나 더블클릭해 추가'}</div>`
+            ? html`<div class="text-[11px] text-slate-300 self-center px-2 select-none">${isExt ? '확장 시간대 — 더블클릭해 시간을 지정해 추가하거나, 카드를 놓으면 시간 지정 팝업' : '입찰 카드를 끌어다 놓거나 더블클릭해 추가'}</div>`
             : placements.map((p) => html`
               <div key=${p.id} onDrop=${(e) => {
                   // 같은 띠·같은 시간 카드 위에 놓으면 → 그 카드 앞으로 순서 변경
@@ -879,12 +879,14 @@
         <div class="p-1.5 flex flex-col gap-1">
           ${useBands ? html`
             ${(showExt || extBefore.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extBefore} simple=${simple}
+              onQuickAdd=${() => { setQuickInit(''); setQuickOpen(true); }}
               onExtBid=${setBidTimeFor} onExtMove=${setMoveTimeFor} />`}
             ${bands.map((bd, bi) => html`<${BandRow} key=${bi} state=${state} day=${day} band=${bd} simple=${simple}
               onQuickAdd=${(st) => { setQuickInit(st); setQuickOpen(true); }}
               onEditBand=${() => setBandEdit({ idx: bi, start: bd.start, end: bd.end })}
               onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'band', band: bd, idx: bi })} />`)}
             ${(showExt || extAfter.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extAfter} simple=${simple}
+              onQuickAdd=${() => { setQuickInit(bands[bands.length - 1].end); setQuickOpen(true); }}
               onExtBid=${setBidTimeFor} onExtMove=${setMoveTimeFor} />`}
             ${labelSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} simple=${simple}
               onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'slot', slot: s })} />`)}`
