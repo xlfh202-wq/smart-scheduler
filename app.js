@@ -48,6 +48,42 @@
   };
   const daysInView = (state) => state.days.filter((d) =>
     d.programId === state.activeProgram && inScheduleView(d.date, state.view));
+  // 월 앵커로 스크롤 (scrollIntoView 대신 직접 scrollTop 계산 — 초기 로드 중에도 확실히 동작)
+  // 이번 달 앵커로 자동 스크롤 — 하이드레이트로 위쪽(이전달) 내용이 늦게 자라도 초기 8초간 위치를 고정.
+  // 사용자가 직접 스크롤(휠·터치)하면 즉시 고정 해제.
+  const useMonthAutoScroll = (id, pad, deps) => {
+    useEffect(() => {
+      let stopped = false, cont = null;
+      const halt = () => { stopped = true; };
+      let done = false, tries = 0;
+      const tick = () => {
+        const el = document.getElementById(id);
+        const c = el && (el.closest('.overflow-y-auto') || el.closest('.overflow-auto'));
+        if (!el || !c) return;
+        if (cont !== c) { // (재)마운트로 컨테이너가 바뀌면 사용자 스크롤 감지 리스너 재부착
+          if (cont) { cont.removeEventListener('wheel', halt); cont.removeEventListener('touchstart', halt); }
+          cont = c;
+          cont.addEventListener('wheel', halt, { passive: true });
+          cont.addEventListener('touchstart', halt, { passive: true });
+        }
+        const target = el.getBoundingClientRect().top - c.getBoundingClientRect().top + c.scrollTop - (pad || 8);
+        if (target > 0 && Math.abs(c.scrollTop - target) > 40) c.scrollTop = target;
+        // 실제로 자리 잡혔을 때만 종료 — 레이아웃이 아직 유동적이면(대입이 되돌아가면) 계속 재시도
+        if (target > 0 && Math.abs(c.scrollTop - target) < 40) done = true;
+      };
+      tick();
+      const iv = setInterval(() => { if (stopped || done || ++tries > 75) clearInterval(iv); else tick(); }, 400);
+      return () => { clearInterval(iv);
+        if (cont) { cont.removeEventListener('wheel', halt); cont.removeEventListener('touchstart', halt); } };
+    }, deps);
+  };
+  // 입찰 보드·최종편성안 노출 범위 = 이전달~다음달 3개월 연속 (엑셀처럼 월 경계 넘는 드래그 이동이 쉽도록)
+  const daysInWideView = (state) => {
+    const keys = [monthKey(shiftMonth(state.view, -1)), monthKey(state.view), monthKey(shiftMonth(state.view, 1))];
+    return state.days
+      .filter((d) => d.programId === state.activeProgram && keys.includes(d.date.slice(0, 7)))
+      .slice().sort((a, b) => a.date.localeCompare(b.date));
+  };
   const activeProgramObj = (state) =>
     (state.programs || []).find((p) => p.id === state.activeProgram) || { name: '', color: '#da291c' };
 
@@ -1307,9 +1343,19 @@
     const [memoOpen, setMemoOpen] = useState(false);
     const hasMemo = !!(state.castingMemo && state.castingMemo[`${state.activeProgram}|${state.view.year}-${String(state.view.month).padStart(2, '0')}`]);
     const { year, month } = state.view;
-    const days = daysInView(state);
+    const allDays = daysInWideView(state); // 이전달~다음달 연속 표시
+    const centerKey = monthKey(state.view);
+    const days = allDays.filter((d) => d.date.slice(0, 7) === centerKey); // 집계·저장은 이번 달 기준
     const monthSlotIds = new Set(days.flatMap((d) => d.slots.map((s) => s.id)));
     const placedCount = state.placements.filter((p) => monthSlotIds.has(p.slotId)).length;
+    // 월별 섹션 (이전달/이번달/다음달) — 이번 달 위치로 자동 스크롤
+    const monthSections = [-1, 0, 1].map((off) => {
+      const v = shiftMonth(state.view, off);
+      const key = monthKey(v);
+      return { key, label: `${v.year}년 ${v.month}월`, center: off === 0, days: allDays.filter((d) => d.date.slice(0, 7) === key) };
+    });
+    useMonthAutoScroll('board-month-center', 8,
+      [state.view.year, state.view.month, state.activeProgram, allDays.length > 0]);
     const snaps = (state.snapshots || []).filter((s) => s.year === year && s.month === month && s.programId === state.activeProgram);
     const lastSnap = snaps[0];
     const [saveOpen, setSaveOpen] = useState(false);
@@ -1325,7 +1371,7 @@
         <div class="flex-1 overflow-y-auto p-2 sm:p-4">
           <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
             <h2 class="text-base font-bold text-ink">${year}년 ${month}월 ${simple ? '입찰 보드' : '편성표 (상세)'}
-              <span class="text-[12px] font-normal text-ink-soft">방송일 ${days.length}일 · 편성 ${placedCount}건 · +${shiftMonth(state.view, 1).month}월 첫주 포함</span>
+              <span class="text-[12px] font-normal text-ink-soft">방송일 ${days.length}일 · 편성 ${placedCount}건 · ${shiftMonth(state.view, -1).month}~${shiftMonth(state.view, 1).month}월 함께 표시</span>
               ${lastSnap
                 ? html`<span class="text-[11px] font-normal text-emerald-600 ml-1">· 마지막 저장 ${fmtTs(lastSnap.ts)}</span>`
                 : html`<span class="text-[11px] font-normal text-slate-400 ml-1">· 저장 안 됨</span>`}
@@ -1346,13 +1392,25 @@
           ${simple && html`<div class="mb-2 text-[12px] text-ink-soft bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5">
             상품명·팀명·노출분만 간결하게 표시합니다. 드래그로 <b>순서·시간띠를 조정</b>하면 <b>실시간으로 모두에게 반영</b>됩니다. “편성 저장”은 저장본(되돌리기 지점)을 남기고 <b>최종편성안</b>으로 이동합니다.</div>`}
           <div class="space-y-4">
-            ${days.length === 0 && html`<div class="text-sm text-slate-400 py-10 text-center">이 달에는 편성일이 없습니다. “+ 편성일 추가”로 추가하세요.</div>`}
-            ${groupByWeek(days).map(([wk, days]) => html`
-              <div key=${wk} class="flex flex-wrap gap-3 items-start">
-                ${days.map((d) => html`
-                  <div class="w-full sm:flex-1 sm:min-w-[280px]">
-                    <${DayBlock} state=${state} day=${d} simple=${simple} />
-                  </div>`)}
+            ${monthSections.map((sec) => html`
+              <div key=${sec.key} id=${sec.center ? 'board-month-center' : undefined}
+                class=${sec.center ? 'scroll-mt-2' : 'opacity-75'}>
+                <div class=${`flex items-center gap-3 mb-2 ${sec.center ? 'mt-1' : 'mt-2'}`}>
+                  <div class="flex-1 border-t ${sec.center ? 'border-brand/50' : 'border-slate-300'}"></div>
+                  <div class=${`text-[13px] font-extrabold whitespace-nowrap ${sec.center ? 'text-brand' : 'text-slate-400'}`}>${sec.label}${sec.center ? '' : sec.key < centerKey ? ' (이전달)' : ' (다음달)'}</div>
+                  <div class="flex-1 border-t ${sec.center ? 'border-brand/50' : 'border-slate-300'}"></div>
+                </div>
+                ${sec.days.length === 0
+                  ? html`<div class="text-[12px] text-slate-400 py-3 text-center">이 달에는 편성일이 없습니다.${sec.center ? ' “+ 편성일 추가”로 추가하세요.' : ''}</div>`
+                  : html`<div class="space-y-4">
+                      ${groupByWeek(sec.days).map(([wk, wdays]) => html`
+                        <div key=${wk} class="flex flex-wrap gap-3 items-start">
+                          ${wdays.map((d) => html`
+                            <div class="w-full sm:flex-1 sm:min-w-[280px]">
+                              <${DayBlock} state=${state} day=${d} simple=${simple} />
+                            </div>`)}
+                        </div>`)}
+                    </div>`}
               </div>`)}
           </div>
         </div>
@@ -1506,6 +1564,7 @@
         : ['방송일', '요일', '시간', '상태', '상품명', '그룹코드', 'PD', '쇼호스트', '스튜디오', '내용/타이틀', '구성', '준비물량', '가격', '마진', '최근달성률', '비고(PD)'];
       const aoa = [header]; const merges = []; let ri = 1;
       rows.forEach((r) => {
+        if (r.mhead || r.day.date.slice(0, 7) !== centerKey) return; // 엑셀은 이번 달만
         if (r.off) {
           const dn = Number(r.day.date.slice(8)); const mm2 = Number(r.day.date.slice(5, 7));
           const label = '미운영(결방)' + (r.day.statusReason ? ' — ' + r.day.statusReason : '');
@@ -1578,8 +1637,8 @@
           div.style.wordBreak = 'break-word';
           cf.parentNode.replaceChild(div, cf);
         });
-        // 화면 전용 요소(드래그 손잡이 등)는 이미지에서 제외
-        clone.querySelectorAll('.no-capture').forEach((el) => el.remove());
+        // 화면 전용 요소(드래그 손잡이 등)·이전/다음 달 행은 이미지에서 제외 (이미지는 이번 달만)
+        clone.querySelectorAll('.no-capture, [data-adj="1"]').forEach((el) => el.remove());
         // 선택한 항목만 남김 (방송일·요일은 항상 포함)
         if (picked) clone.querySelectorAll('[data-col]').forEach((cel) => {
           if (!picked.has(cel.getAttribute('data-col'))) cel.remove();
@@ -1608,11 +1667,20 @@
       } catch (e) { alert('이미지 저장 실패: ' + e.message); }
       finally { if (clone && clone.parentNode) clone.parentNode.removeChild(clone); setSaving(false); }
     }
-    const days = daysInView(state).slice().sort((a, b) => a.date.localeCompare(b.date));
+    const centerKey = monthKey(state.view);
+    const days = daysInWideView(state); // 이전달~다음달 연속 표시 (월 경계 넘는 드래그 이동)
     const slotStart = (s) => (s.start ? U.toMin(s.start) : 9999);
-    // 행 구성: 날짜 → 슬롯(시간순) → 편성(placement)
+    useMonthAutoScroll('final-month-center', 36, // sticky 표 헤더만큼 여유
+      [state.view.year, state.view.month, state.activeProgram, days.length > 0]);
+    // 행 구성: 월 구분 → 날짜 → 슬롯(시간순) → 편성(placement)
     const rows = [];
+    let curYm = '';
     days.forEach((d) => {
+      const ym = d.date.slice(0, 7);
+      if (ym !== curYm) { rows.push({ mhead: ym, day: d }); curYm = ym; }
+      dayRows(d);
+    });
+    function dayRows(d) {
       // 미운영(결방): 그 날은 "미운영" 한 줄로만 표시
       if (d.status === 'off') { rows.push({ day: d, slot: null, p: null, off: true, firstOfDay: true }); return; }
       const slots = d.slots.slice().sort((a, b) => slotStart(a) - slotStart(b));
@@ -1635,14 +1703,15 @@
           pls.forEach((p) => { rows.push({ day: d, slot: s, p, firstOfDay, compete: pls.length > 1 }); firstOfDay = false; });
         }
       });
-    });
-    const total = rows.filter((r) => r.p).length;
+    }
+    const total = rows.filter((r) => r.p && r.day.date.slice(0, 7) === centerKey).length; // 집계는 이번 달만
     const dayCount = {};
-    rows.forEach((r) => { dayCount[r.day.date] = (dayCount[r.day.date] || 0) + 1; });
-    // PD·쇼호스트별 이 달 캐스팅 횟수 (콤마 등으로 여러 명 기입 시 각각 집계)
+    rows.forEach((r) => { if (!r.mhead) dayCount[r.day.date] = (dayCount[r.day.date] || 0) + 1; });
+    // PD·쇼호스트별 이 달 캐스팅 횟수 (콤마 등으로 여러 명 기입 시 각각 집계 — 이번 달만)
     const castCounts = (field) => {
       const map = new Map();
       rows.forEach((r) => {
+        if (r.mhead || r.day.date.slice(0, 7) !== centerKey) return;
         if (!r.p || !r.p[field]) return;
         String(r.p[field]).split(/[,/·+&]/).map((s) => s.trim()).filter(Boolean)
           .forEach((n) => map.set(n, (map.get(n) || 0) + 1));
@@ -1772,8 +1841,17 @@
               </tr>
             </thead>
             <tbody>
-              ${rows.length === 0 && html`<tr><td class=${td} colspan=${slim ? 8 : 16}><div class="text-center text-slate-400 py-8">이 달 편성이 없습니다.</div></td></tr>`}
+              ${rows.filter((r) => !r.mhead).length === 0 && html`<tr><td class=${td} colspan=${slim ? 8 : 16}><div class="text-center text-slate-400 py-8">편성이 없습니다.</div></td></tr>`}
               ${rows.map((r, i) => {
+                const adj = r.day.date.slice(0, 7) !== centerKey; // 이전/다음 달 행 (흐리게 · 이미지 저장 제외)
+                if (r.mhead) {
+                  const my = r.mhead.slice(0, 4), mm2 = Number(r.mhead.slice(5, 7));
+                  return html`<tr key=${i} data-adj="1" id=${!adj ? 'final-month-center' : undefined} class="scroll-mt-9">
+                    <td colspan=${slim ? 8 : 16}
+                      class=${`px-2 py-1 text-center text-[12px] font-extrabold border border-slate-300 ${!adj ? 'bg-brand/10 text-brand' : 'bg-slate-200/70 text-slate-500'}`}>
+                      ${my}년 ${mm2}월${adj ? (r.mhead < centerKey ? ' (이전달)' : ' (다음달)') : ''}</td>
+                  </tr>`;
+                }
                 const p = r.p; const det = (p && p.detail) || {};
                 const dnum = Number(r.day.date.slice(8));
                 const m = Number(r.day.date.slice(5, 7));
@@ -1781,7 +1859,7 @@
                 const wdColor = r.day.weekday === 6 ? 'text-blue-600' : r.day.weekday === 0 ? 'text-red-500' : 'text-ink';
                 const pend = p && p.pending;
                 if (r.off) return html`
-                  <tr key=${i} class="border-t-2 border-t-slate-300 bg-slate-50"
+                  <tr key=${i} data-adj=${adj ? '1' : undefined} class=${`border-t-2 border-t-slate-300 bg-slate-50 ${adj ? 'opacity-60' : ''}`}
                     onContextMenu=${readOnly ? undefined : ((e) => { e.preventDefault(); setStatusDay(r.day); })}>
                     <td class=${`${tdMerge} font-semibold tabular-nums text-slate-500`}>${m}/${dnum}</td>
                     <td class=${`${tdMerge} font-semibold ${wdColor}`}>${wd}</td>
@@ -1791,7 +1869,8 @@
                     </td>
                   </tr>`;
                 return html`
-                  <tr key=${i} class=${`${r.firstOfDay ? 'border-t-2 border-t-slate-300' : ''} ${pend ? 'bg-amber-100' : 'hover:bg-amber-50'}`}
+                  <tr key=${i} data-adj=${adj ? '1' : undefined}
+                    class=${`${r.firstOfDay ? 'border-t-2 border-t-slate-300' : ''} ${pend ? 'bg-amber-100' : 'hover:bg-amber-50'} ${adj ? 'opacity-60' : ''}`}
                     onDragOver=${readOnly ? undefined : ((e) => e.preventDefault())}
                     onDrop=${readOnly ? undefined : ((e) => {
                       const pl = drag.read(e);
