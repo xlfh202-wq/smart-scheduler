@@ -832,48 +832,39 @@
       <//>`}`;
   }
 
-  // 날짜 운영 상태 배지 (미운영/일반프로그램 운영)
-  function DayStatusBadge({ day, big }) {
-    if (!day.status) return '';
-    const off = day.status === 'off';
+  // 날짜 미운영 배지
+  function DayStatusBadge({ day }) {
+    if (day.status !== 'off') return '';
     return html`
-      <span class=${`inline-flex items-center gap-1 font-bold rounded ${big ? 'text-[12px] px-2 py-0.5' : 'text-[11px] px-1.5 py-0.5'} ${off ? 'bg-slate-200 text-slate-600' : 'bg-sky-100 text-sky-700'}`}
-        title=${day.statusReason || (off ? '이 날은 이 프로그램을 운영하지 않습니다' : '테마PGM 대신 일반프로그램으로 운영합니다')}>
-        ${off ? '🚫 미운영' : '📺 일반프로그램 운영'}${day.statusReason ? html`<span class="font-normal">· ${day.statusReason}</span>` : ''}
+      <span class="inline-flex items-center gap-1 font-bold rounded text-[11px] px-1.5 py-0.5 bg-slate-200 text-slate-600"
+        title=${day.statusReason || '이 날은 이 프로그램을 운영하지 않습니다'}>
+        🚫 미운영${day.statusReason ? html`<span class="font-normal">· ${day.statusReason}</span>` : ''}
       </span>`;
   }
 
-  // 날짜 운영 상태 표기 팝업 — 정상 / 미운영(결방) / 일반프로그램 운영 + 사유
+  // 날짜 미운영(결방) 표기 팝업 — 사유 메모 + 해제 (PD·관리자)
   function DayStatusModal({ state, day, onClose }) {
-    const [st, setSt] = useState(day.status || null);
+    const isOff = day.status === 'off';
     const [reason, setReason] = useState(day.statusReason || '');
     const slotIds = new Set(day.slots.map((s) => s.id));
     const n = state.placements.filter((p) => slotIds.has(p.slotId)).length;
     function save() {
-      if (st === 'off' && day.status !== 'off' && n > 0) {
-        if (!confirm(`미운영으로 표기하면 이 날의 편성 상품 ${n}건은 입찰 풀(미편성)로 돌아갑니다. 계속할까요?`)) return;
-      }
-      store.setDayStatus(day.id, { status: st, reason });
+      if (!isOff && n > 0 && !confirm(`미운영으로 표기하면 이 날의 편성 상품 ${n}건은 입찰 풀(미편성)로 돌아갑니다. 계속할까요?`)) return;
+      store.setDayStatus(day.id, { status: 'off', reason });
       onClose();
     }
-    const opt = (val, label, desc) => html`
-      <button type="button" onClick=${() => setSt(val)}
-        class=${`flex-1 min-w-[140px] text-left rounded-lg border px-3 py-2 transition ${st === val ? 'border-brand bg-brand/5 ring-1 ring-brand' : 'border-slate-300 hover:border-slate-400'}`}>
-        <div class=${`text-[13px] font-bold ${st === val ? 'text-brand' : 'text-ink'}`}>${label}</div>
-        <div class="text-[11px] text-ink-soft mt-0.5 leading-snug">${desc}</div>
-      </button>`;
     return html`
-      <${Modal} title=${`${fmtDay(day)} · 운영 상태 표기`} onClose=${onClose} onSave=${save}>
-        <div class="flex gap-2 flex-wrap">
-          ${opt(null, '✅ 정상 운영', '평소대로 이 프로그램을 편성·운영')}
-          ${opt('off', '🚫 미운영 (결방)', `이 날은 이 프로그램을 하지 않음${n ? ` · 편성 상품 ${n}건은 입찰 풀로 복귀` : ''}`)}
-          ${opt('general', '📺 일반프로그램 운영', '테마PGM은 쉬고, 상품은 일반프로그램으로 운영 요청 (상품 유지)')}
+      <${Modal} title=${`${fmtDay(day)} · 미운영(결방) 표기`} onClose=${onClose} onSave=${save}
+        extra=${isOff ? html`<button onClick=${() => { store.setDayStatus(day.id, { status: null }); onClose(); }}
+          class="text-[12px] text-ink-soft hover:text-brand mr-auto">✅ 미운영 해제 (정상 운영으로)</button>` : undefined}>
+        <div class="text-[12px] text-ink-soft leading-relaxed">
+          이 날은 이 프로그램을 운영하지 않는다는 표시입니다. MD 입찰·입찰 보드·최종편성안에 배지로 보이고, 이 날짜로의 편성·입찰이 막힙니다.
+          ${!isOff && n > 0 && html`<b class="text-rose-600"> 현재 편성 상품 ${n}건은 입찰 풀(미편성)로 돌아갑니다.</b>`}
         </div>
-        ${st && html`<${Field} label="사유 / 안내 문구 (선택)">
-          <input value=${reason} onInput=${(e) => setReason(e.target.value)} class=${inputCls}
-            placeholder=${st === 'off' ? '예: 추석 연휴 결방' : '예: 유리네 휴방 · 일반PGM으로 운영 요청'} />
-        <//>`}
-        <div class="text-[12px] text-ink-soft">표기하면 MD 입찰·입찰 보드·최종편성안 모두에 배지로 표시되어, 편성·PD가 바로 알 수 있습니다.</div>
+        <${Field} label="사유 메모 (선택)">
+          <input value=${reason} onInput=${(e) => setReason(e.target.value)} class=${inputCls} autofocus
+            placeholder="예: 추석 연휴 결방 / 일반프로그램으로 운영" />
+        <//>
       <//>`;
   }
 
@@ -965,7 +956,7 @@
           </div>
           <div class="flex items-center gap-2 text-[11px] text-ink-soft">
             ${day.status !== 'off' && html`<button onClick=${() => { setQuickInit(''); setQuickOpen(true); }} class="font-semibold text-brand bg-white border border-brand/40 hover:bg-brand hover:text-white px-1.5 py-0.5 rounded">+ 상품</button>`}
-            <button onClick=${() => setStatusOpen(true)} class="hover:text-brand" title="미운영(결방)·일반프로그램 운영 표기">운영</button>
+            <button onClick=${() => setStatusOpen(true)} class="hover:text-brand" title="이 날짜를 미운영(결방)으로 표기 / 해제">${day.status === 'off' ? '미운영 해제' : '미운영'}</button>
             ${fashion && html`<button onClick=${() => setPartOpen(true)} class="hover:text-brand" title="이 날짜의 상품을 1부·2부…로 한번에 배분">🧩 부 나누기</button>`}
             ${useBands && html`<button onClick=${() => setShowExt(!showExt)} class="hover:text-brand" title="고정 시간띠 앞뒤의 확장 시간대 보기/숨기기">확장 ${showExt ? '▴' : '▾'}</button>`}
             <button onClick=${() => setAddOpen(true)} class="hover:text-brand">+ 시간대</button>
@@ -983,7 +974,7 @@
           <div class="px-3 py-6 text-center bg-slate-50">
             <div class="text-[14px] font-bold text-slate-500">🚫 이 날은 미운영(결방)입니다</div>
             ${day.statusReason && html`<div class="text-[12px] text-slate-500 mt-1">${day.statusReason}</div>`}
-            <div class="text-[11px] text-slate-400 mt-1">다시 편성하려면 상단 "운영"에서 해제하세요.</div>
+            <div class="text-[11px] text-slate-400 mt-1">다시 편성하려면 상단 "미운영 해제"를 누르세요.</div>
           </div>`}
         <div class=${`p-1.5 flex flex-col gap-1 ${day.status === 'off' ? 'hidden' : ''}`}>
           ${useBands ? html`
@@ -1499,7 +1490,7 @@
     const isFashionProg = programSchema(state) === 'fashion';
     const [quickAddDay, setQuickAddDay] = useState(null); // 행 추가(시간·상품)
     const [addSlotDay, setAddSlotDay] = useState(null);   // 시간대만 추가
-    const [statusDay, setStatusDay] = useState(null);     // 운영 상태 표기(미운영/일반운영)
+    const [statusDay, setStatusDay] = useState(null);     // 미운영(결방) 표기 팝업
     const [slotAddFor, setSlotAddFor] = useState(null);   // 빈 시간대에 상품 추가
     const snapCount = (state.snapshots || []).filter((s) =>
       s.year === state.view.year && s.month === state.view.month && s.programId === state.activeProgram).length;
@@ -1515,9 +1506,9 @@
         : ['방송일', '요일', '시간', '상태', '상품명', '그룹코드', 'PD', '쇼호스트', '스튜디오', '내용/타이틀', '구성', '준비물량', '가격', '마진', '최근달성률', '비고(PD)'];
       const aoa = [header]; const merges = []; let ri = 1;
       rows.forEach((r) => {
-        if (r.off || r.general) {
+        if (r.off) {
           const dn = Number(r.day.date.slice(8)); const mm2 = Number(r.day.date.slice(5, 7));
-          const label = (r.off ? '미운영(결방)' : '일반프로그램 운영') + (r.day.statusReason ? ' — ' + r.day.statusReason : '');
+          const label = '미운영(결방)' + (r.day.statusReason ? ' — ' + r.day.statusReason : '');
           aoa.push([`${mm2}/${dn}`, U.WEEKDAY_KO[r.day.weekday], label].concat(Array((slim ? 8 : 16) - 3).fill('')));
           if (r.firstOfDay) {
             const span = dayCount[r.day.date];
@@ -1626,8 +1617,6 @@
       if (d.status === 'off') { rows.push({ day: d, slot: null, p: null, off: true, firstOfDay: true }); return; }
       const slots = d.slots.slice().sort((a, b) => slotStart(a) - slotStart(b));
       let firstOfDay = true;
-      // 일반프로그램 운영: 상품 행 위에 안내 행을 먼저 표시
-      if (d.status === 'general') { rows.push({ day: d, slot: null, p: null, general: true, firstOfDay: true }); firstOfDay = false; }
       const hasContent = (sid) => state.placements.some((p) => p.slotId === sid);
       const ovl = (a, b) => a.start && a.end && b.start && b.end
         && U.toMin(a.start) < U.toMin(b.end) && U.toMin(b.start) < U.toMin(a.end);
@@ -1729,7 +1718,7 @@
                 <div class="px-3 py-1 text-[11px] text-ink-soft border-b border-slate-100">
                   ${month}/${dnum}(${U.WEEKDAY_KO[r.day.weekday]}) ${slotName(r.slot)}${p ? ' · ' + p.productName : ''}</div>
                 ${item(`➕ ${month}/${dnum}에 행 추가 (시간·상품)`, () => setQuickAddDay(r.day))}
-                ${item('🚦 운영 상태 표기 (미운영·일반프로그램)', () => setStatusDay(r.day))}
+                ${item(`🚫 ${month}/${dnum} 미운영(결방) 표기`, () => setStatusDay(r.day))}
                 ${isFashionProg && item('🧩 부 나누기 (1부~N부 한번에 배분)', () => setPartAssignDay(r.day))}
                 ${item('⏱ 시간대만 추가', () => setAddSlotDay(r.day))}
                 ${!p && item('📦 이 시간대에 상품 추가', () => setSlotAddFor(r.slot))}
@@ -1799,17 +1788,6 @@
                     <td class=${`${td} text-slate-500`} colspan=${slim ? 6 : 14}>
                       <span class="font-bold">🚫 미운영 (결방)</span>${r.day.statusReason ? html` — ${r.day.statusReason}` : ''}
                       ${!readOnly && html`<span class="no-capture text-[11px] text-slate-400 ml-2">우클릭으로 수정/해제</span>`}
-                    </td>
-                  </tr>`;
-                if (r.general) return html`
-                  <tr key=${i} class="border-t-2 border-t-slate-300"
-                    onContextMenu=${readOnly ? undefined : ((e) => { e.preventDefault(); setStatusDay(r.day); })}>
-                    ${r.firstOfDay && html`
-                      <td class=${`${tdMerge} font-semibold tabular-nums text-ink`} rowSpan=${dayCount[r.day.date]}>${m}/${dnum}${r.day.airTime ? html`<div class="text-[10px] font-normal text-ink-soft mt-0.5 whitespace-nowrap">${r.day.airTime}</div>` : ''}</td>
-                      <td class=${`${tdMerge} font-semibold ${wdColor}`} rowSpan=${dayCount[r.day.date]}>${wd}</td>`}
-                    <td class="px-2 py-1 border border-slate-200 bg-sky-50 text-sky-700 text-[12px] font-bold" colspan=${slim ? 6 : 14}>
-                      📺 이 날은 테마PGM 대신 일반프로그램으로 운영${r.day.statusReason ? html` — <span class="font-normal">${r.day.statusReason}</span>` : ''}
-                      ${!readOnly && html`<span class="no-capture text-[11px] font-normal text-sky-400 ml-2">우클릭으로 수정/해제</span>`}
                     </td>
                   </tr>`;
                 return html`
@@ -2109,7 +2087,6 @@
     const [modal, setModal] = useState(null); // {dayId, slotId, bid?}
     const [addDayOpen, setAddDayOpen] = useState(false);
     const [slotModalDay, setSlotModalDay] = useState(null);
-    const [statusDay, setStatusDay] = useState(null); // 운영 상태 표기 팝업
     const days = daysInView(state);
     const monthDayIds = new Set(days.map((d) => d.id));
     const teamBids = state.bids.filter((b) => b.teamId === team && monthDayIds.has(b.dayId));
@@ -2192,7 +2169,6 @@
                   <${DayStatusBadge} day=${day} />
                 </span>
                 ${!readOnly && html`<div class="flex items-center gap-2 text-[11px] text-ink-soft">
-                  <button onClick=${() => setStatusDay(day)} class="hover:text-brand" title="미운영(결방)·일반프로그램 운영 표기">운영</button>
                   ${!fashion && html`<button onClick=${() => setSlotModalDay(day.id)} class="hover:text-brand">+ 시간대</button>`}
                   ${!fashion && html`<button onClick=${() => store.addSlot(day.id, { order: true })} class="hover:text-brand">+ 순번</button>`}
                   <button onClick=${() => { const n = state.bids.filter((b) => b.dayId === day.id).length;
@@ -2267,7 +2243,6 @@
         ${detailBid && html`<${BidDetailModal} state=${state} b=${detailBid} onClose=${() => setDetailBid(null)} />`}
         ${addDayOpen && html`<${AddDayModal} state=${state} onClose=${() => setAddDayOpen(false)} />`}
         ${slotModalDay && html`<${AddSlotModal} day=${state.days.find((d) => d.id === slotModalDay)} onClose=${() => setSlotModalDay(null)} />`}
-        ${statusDay && html`<${DayStatusModal} state=${state} day=${state.days.find((d) => d.id === statusDay.id) || statusDay} onClose=${() => setStatusDay(null)} />`}
       </div>`;
   }
 
