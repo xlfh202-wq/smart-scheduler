@@ -2222,6 +2222,17 @@
     const days = daysInView(state);
     const monthDayIds = new Set(days.map((d) => d.id));
     const teamBids = state.bids.filter((b) => b.teamId === team && monthDayIds.has(b.dayId));
+    // 팀별 이번 달 입찰 건수 (칩 배지 + 자동 선택용)
+    const cntByTeam = {};
+    state.bids.forEach((b) => { if (monthDayIds.has(b.dayId)) cntByTeam[b.teamId] = (cntByTeam[b.teamId] || 0) + 1; });
+    // 프로그램·월 전환 시: 보고 있던 팀이 이 프로그램에 입찰 0건이면, 입찰이 있는 첫 팀으로 자동 이동
+    useEffect(() => {
+      if (lockedTeam) return;
+      if ((cntByTeam[team] || 0) === 0) {
+        const best = teams.find((t) => cntByTeam[t.id]);
+        if (best && best.id !== team) setTeamSel(best.id);
+      }
+    }, [state.activeProgram, state.view.year, state.view.month]);
 
     return html`
       <div class="flex-1 overflow-y-auto">
@@ -2241,6 +2252,7 @@
                     class=${`text-xs px-2.5 py-1 rounded-full border transition ${team === t.id ? 'text-white border-transparent' : 'bg-white text-ink-soft border-slate-300 hover:border-slate-400'}`}
                     style=${team === t.id ? { background: t.color } : {}}>
                     <${TeamDot} color=${t.color} /> <span class="ml-1">${t.name}</span>
+                    ${cntByTeam[t.id] ? html`<span class=${`ml-1 px-1 rounded-full text-[10px] font-bold tabular-nums ${team === t.id ? 'bg-white/30 text-white' : 'bg-brand/10 text-brand'}`}>${cntByTeam[t.id]}</span>` : ''}
                   </button>`)}
               </span>`)}
           </div>
