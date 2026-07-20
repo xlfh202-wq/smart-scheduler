@@ -6,6 +6,7 @@
   const { useState, useEffect, useMemo, useRef } = React;
   const html = htm.bind(React.createElement);
   const store = window.createDataStore();
+  window.__store = store; // 관리자 콘솔 유지보수용 (데이터 점검·일괄 작업)
   const U = store.util;
 
   /* ---------- 공용 훅 ---------- */
