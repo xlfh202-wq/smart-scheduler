@@ -1762,8 +1762,8 @@
     const slotStart = (s) => (s.start ? U.toMin(s.start) : 9999);
     const topBarRef = useRef(null);
     const topBarH = useElemHeight(topBarRef, 48); // 상단 고정 도구 바 높이
-    useMonthAutoScroll('final-month-center', topBarH + 8, // 고정 바에 가리지 않게 보정
-      [state.view.year, state.view.month, state.activeProgram, allProgDays.length > 0, topBarH]);
+    useMonthAutoScroll('final-month-center', 40, // 표 내부 스크롤 — 고정된 thead 높이만큼 보정
+      [state.view.year, state.view.month, state.activeProgram, allProgDays.length > 0]);
     // 행 구성: 월 구분(먼 달은 접힘) → 날짜 → 슬롯(시간순) → 편성(placement)
     const rows = [];
     const monthList = [...new Set([...allProgDays.map((d) => d.date.slice(0, 7)), ...winKeys])].sort();
@@ -1876,7 +1876,7 @@
     };
 
     return html`
-      <div class="flex-1 overflow-auto px-4 pb-4 bg-slate-100">
+      <div class="flex-1 min-h-0 flex flex-col overflow-hidden px-4 pb-4 bg-slate-100">
         ${['pd', 'host', 'studio'].map((fld) => html`<datalist key=${fld} id=${'cast-' + fld + '-dl'}>${((castOpts && castOpts[fld]) || []).map((o) => html`<option key=${o} value=${o}></option>`)}</datalist>`)}
         <div ref=${topBarRef}
           class="sticky top-0 z-30 -mx-4 px-4 pt-3 pb-2 mb-3 bg-slate-100 border-b border-slate-200 shadow-sm flex items-center justify-between gap-3 flex-wrap">
@@ -1953,12 +1953,12 @@
             </div>`}
           </div>`}
         ${imgColsOpen && html`<${ImgColsModal} slim=${slim} onClose=${() => setImgColsOpen(false)} onSave=${(pk) => saveImage(pk)} />`}
-        <div ref=${capRef} id="final-capture" class="bg-white rounded-lg shadow-sm overflow-x-auto">
+        <div ref=${capRef} id="final-capture" class="bg-white rounded-lg shadow-sm overflow-auto flex-1 min-h-0">
           <div class="px-3 py-2 border-b-2 border-brand text-[13px] font-bold text-ink">
             ${prog.name} · ${year}년 ${month}월 최종편성안 <span class="font-normal text-ink-soft">(총 ${total}편성)</span>
           </div>
           <table class=${`w-full ${slim ? 'min-w-[830px]' : 'min-w-[1610px]'} text-[12px] border-collapse`}>
-            <thead class="sticky top-0">
+            <thead class="sticky top-0 z-20">
               <tr>
                 <th class=${th} style=${{ minWidth: '70px' }}>방송일</th>
                 <th class=${th} style=${{ minWidth: '36px' }}>요일</th>
