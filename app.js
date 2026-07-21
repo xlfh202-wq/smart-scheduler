@@ -778,7 +778,7 @@
                     class="text-[13.5px] font-extrabold text-ink tabular-nums leading-tight text-left whitespace-nowrap hover:text-brand hover:underline decoration-dotted"
                     title="클릭해 이 날짜의 시간띠 시간 조정">${band.start}~${band.end}</button>`
                 : html`<span class="text-[13.5px] font-extrabold text-ink tabular-nums leading-tight whitespace-nowrap">${band.start}~${band.end}</span>`}
-              <span class="text-[11px] font-semibold text-ink-soft">${dur}분</span>`}
+              <span class="text-[11px] font-semibold text-ink-soft">${dur}분${band.extBand ? html` <span class="text-[10px] font-bold text-amber-600" title="확장띠 — 시간이 고정된 확장 구간">확장</span>` : ''}</span>`}
           ${compColor && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: compColor + '22', color: compColor }}>
             <span class="w-1.5 h-1.5 rounded-full shrink-0" style=${{ background: compColor }}></span>경쟁 ${compete}팀</span>`}
           ${splitShare && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: '#0284c722', color: '#0284c7' }}
@@ -1046,7 +1046,7 @@
     const [partPick, setPartPick] = useState(null);     // 드롭 시 부 선택(패션) {bidId}|{pid}
     let bands = [], extBefore = null, extAfter = null, labelSlots = [];
     if (useBands) {
-      bands = bandDefs.map(([bs, be]) => ({ start: bs, end: be, slots: [] }));
+      bands = bandDefs.map((bd) => ({ start: bd[0], end: bd[1], extBand: bd[2] === 'ext', slots: [] }));
       extBefore = { ext: 'before', label: `~${bands[0].start}`, slots: [] };
       extAfter = { ext: 'after', label: `${bands[bands.length - 1].end}~`, slots: [] };
       const firstStart = U.toMin(bands[0].start);
@@ -1205,9 +1205,9 @@
       ${bands.length > 0 && html`
         <${Field} label="편성할 시간 띠 *">
           <div class="flex flex-wrap gap-1.5">
-            ${bands.map(([bs, be], i) => html`<button type="button" key=${i} onClick=${() => setBandIdx(i)}
+            ${bands.map((bd, i) => html`<button type="button" key=${i} onClick=${() => setBandIdx(i)}
               class=${`text-[13px] px-3 py-1.5 rounded-full border transition tabular-nums ${bandIdx === i ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-brand hover:text-brand'}`}>
-              ${bs}~${be} <span class="text-[11px] font-normal">(${(U.toMin(be) - U.toMin(bs) + 1440) % 1440}분)</span></button>`)}
+              ${bd[0]}~${bd[1]} <span class="text-[11px] font-normal">(${(U.toMin(bd[1]) - U.toMin(bd[0]) + 1440) % 1440}분${bd[2] === 'ext' ? '·확장' : ''})</span></button>`)}
             <button type="button" onClick=${() => setBandIdx(-1)}
               class=${`text-[13px] px-3 py-1.5 rounded-full border transition ${bandIdx === -1 ? 'bg-slate-600 text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-slate-500'}`}>직접 입력</button>
           </div>
@@ -1793,7 +1793,7 @@
         const dnum = Number(r.day.date.slice(8)); const mm = Number(r.day.date.slice(5, 7));
         const items = (p && p.items && p.items.length > 1) ? '\n· ' + p.items.join('\n· ') : '';
         const srcPartX = p && p.sourceBidId ? ((state.bids.find((x) => x.id === p.sourceBidId) || {}).part || null) : null;
-        const bandCell = hasBandCol ? [r.band && r.firstOfBand ? `${r.band[0]}~${r.band[1]}` : ''] : [];
+        const bandCell = hasBandCol ? [r.band && r.firstOfBand ? `${r.band[0]}~${r.band[1]}${r.band[2] === 'ext' ? ' (확장)' : ''}` : ''] : [];
         const timeCell = (srcPartX ? `[${srcPartX}부] ` : '') + slotName(r.slot) + (r.slot.start && r.slot.end ? ` (${U.slotDuration(r.slot)}분)` : '');
         aoa.push(['', ''].map((_, ci) => (r.firstOfDay ? (ci === 0 ? `${mm}/${dnum}` : U.WEEKDAY_KO[r.day.weekday]) : ''))
           .concat(bandCell, slim
@@ -1940,14 +1940,20 @@
           pls.forEach((p) => items.push({ slot: s, p, compete: !!ci && ci.compete >= 2 }));
         }
       });
-      // 2) 정렬: 띠 순 → 같은 띠 안에서는 부(순번) 묶음(같은 팀)을 인접 배치, 나머지는 시간순
+      // 2) 정렬: 실제 시간순 — 띠에 속한 행은 띠 시작시간을 앵커로 묶고(rowSpan 병합 유지),
+      //    띠 밖 슬롯(수기 +시간대·확장 등)은 자기 시작시간 위치에 끼워 넣는다
       const partOfP = (p) => (p && p.sourceBidId) ? (parseInt((state.bids.find((x) => x.id === p.sourceBidId) || {}).part, 10) || null) : null;
       const startOf = (it) => U.toMin(it.slot.start || '00:00');
+      const bandTime = (it) => { const bi = bandOf(it.slot);
+        if (bi >= 0) return U.toMin(dBands[bi][0]);
+        return it.slot.start ? U.toMin(it.slot.start) : 100000; }; // 순번(시간 없음)은 맨 뒤
       const anchor = {}; // (띠|팀) 부 묶음의 가장 이른 시작
       items.forEach((it) => { const pt = partOfP(it.p); if (!pt) return;
         const k = bandOf(it.slot) + '|' + it.p.teamId;
         anchor[k] = Math.min(anchor[k] === undefined ? 9999 : anchor[k], startOf(it)); });
       items.sort((a, b) => {
+        const ta = bandTime(a), tb = bandTime(b);
+        if (ta !== tb) return ta - tb;
         const ba = bandOf(a.slot), bb = bandOf(b.slot);
         if (ba !== bb) return (ba < 0 ? 999 : ba) - (bb < 0 ? 999 : bb);
         const pa = partOfP(a.p), pb = partOfP(b.p);
@@ -2179,7 +2185,7 @@
                       <td class=${`${tdMerge} font-semibold ${wdColor}`} rowSpan=${dayCount[r.day.date]}>${wd}</td>`}
                     ${hasBandCol && (r.band
                       ? (r.firstOfBand ? html`<td class=${`${tdMerge} font-semibold tabular-nums text-ink whitespace-nowrap`} data-col="time" rowSpan=${bandCount[r.bandKey]}>
-                            ${r.band[0]}~${r.band[1]}<div class="text-[10px] font-normal text-ink-soft">${(U.toMin(r.band[1]) - U.toMin(r.band[0]) + 1440) % 1440}분 띠</div></td>` : '')
+                            ${r.band[0]}~${r.band[1]}<div class="text-[10px] font-normal text-ink-soft">${(U.toMin(r.band[1]) - U.toMin(r.band[0]) + 1440) % 1440}분 띠${r.band[2] === 'ext' ? html` <span class="font-bold text-amber-600">확장</span>` : ''}</div></td>` : '')
                       : html`<td class=${td} data-col="time"></td>`)}
                     <td class=${`${td} tabular-nums font-medium ${r.compete ? 'text-amber-700' : ''}`} data-col="time">
                       ${srcPart && html`<span class="inline-block align-middle text-[10px] font-bold text-sky-700 bg-sky-50 border border-sky-200 rounded px-1 mr-1" title="MD 입찰의 부(순번)">${srcPart}부</span>`}
@@ -2621,7 +2627,7 @@
                     <div key=${bi} class="flex gap-3 px-3 py-2">
                       <div class="w-28 shrink-0 pt-0.5">
                         <div class="text-[13px] font-bold tabular-nums">${bs}~${be}</div>
-                        <div class="text-[11px] text-ink-soft">${durB}분 띠</div>
+                        <div class="text-[11px] text-ink-soft">${durB}분 띠${bandDefs[bi][2] === 'ext' ? html` <span class="text-[10px] font-bold text-amber-600">확장</span>` : ''}</div>
                       </div>
                       <div class="flex-1 flex flex-wrap gap-1.5 items-start">
                         ${inBand.map((b) => html`<${BidChip} key=${b.id} state=${state} b=${b} readOnly=${readOnly}
@@ -2808,7 +2814,7 @@
       const sc = store.getSchedule ? store.getSchedule(day && day.programId) : null;
       const e2 = sc && day ? sc.find((x) => x.wd === day.weekday) : null;
       const defs = (day && day.bands && day.bands.length) ? day.bands : (e2 && e2.slots);
-      if (defs && defs.length) return defs.map(([s2, e3]) => ({ id: 'band_' + s2, start: s2, end: e3 }));
+      if (defs && defs.length) return defs.map((bd) => ({ id: 'band_' + bd[0], start: bd[0], end: bd[1], extBand: bd[2] === 'ext' }));
       return (day ? day.slots : []).filter((s) => s.start && s.end);
     })();
     // 띠 모드: 시간 수기 입력 대신 [고정 띠 + 부(순번) + 희망 노출분(참고용)] — 모든 띠 프로그램 공통
@@ -2939,7 +2945,7 @@
             <div class="flex flex-wrap gap-1.5">
               ${bands.map((s, i) => html`<button type="button" key=${i} onClick=${() => setBandIdx(i)}
                 class=${`text-[13px] px-3 py-1.5 rounded-full border transition tabular-nums ${bandIdx === i ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-brand hover:text-brand'}`}>
-                ${s.start}~${s.end} <span class="text-[11px] font-normal">(${(U.toMin(s.end) - U.toMin(s.start) + 1440) % 1440}분)</span></button>`)}
+                ${s.start}~${s.end} <span class="text-[11px] font-normal">(${(U.toMin(s.end) - U.toMin(s.start) + 1440) % 1440}분${s.extBand ? '·확장' : ''})</span></button>`)}
             </div>
           <//>
           <${Field} label="부(순번) — 한 띠에 여러 상품을 나눠 넣을 때만 선택">
