@@ -2279,7 +2279,11 @@
             // 프로그램 고정 스케줄 띠는 항상 기준으로 표시: 실제 슬롯이 없어도(다른 팀이 쪼개 흡수된 경우) 가상 띠 행으로 노출
             const schedB = store.getSchedule ? store.getSchedule(day.programId) : null;
             const entryB = !fashion && schedB ? schedB.find((sc) => sc.wd === day.weekday) : null;
-            const bandDefs = (day.bands && day.bands.length) ? day.bands : ((entryB && entryB.slots) || null);
+            const stdBandsB = (entryB && entryB.slots) || null;
+            // MD 화면 기준 띠: 표준 고정 띠. PD의 날짜별 조정(day.bands)은 개수가 같을 때만 반영 —
+            // 편성 과정에서 잘게 조각난 오버라이드는 MD에게 표준 띠로 보여줌
+            const bandDefs = (day.bands && day.bands.length && (!stdBandsB || day.bands.length <= stdBandsB.length))
+              ? day.bands : (stdBandsB || ((day.bands && day.bands.length) ? day.bands : null));
             let rowSlots = bandDefs ? baseSlots.slice() : (baseSlots.length ? baseSlots : day.slots);
             if (bandDefs) bandDefs.forEach(([bs, be]) => {
               if (!day.slots.some((s) => s.start === bs && s.end === be))
@@ -2349,6 +2353,47 @@
                     </button>`}
                   </div>
                 </div>`
+              : (bandDefs && bandDefs.length) ? html`
+              <div class="divide-y divide-slate-100">
+                ${bandDefs.map(([bs, be], bi) => {
+                  const slotIn = (b) => { if (b.dayId !== day.id) return false;
+                    const sl = day.slots.find((s) => s.id === b.slotId);
+                    return sl && sl.start && sl.end && U.toMin(sl.start) >= U.toMin(bs) && U.toMin(sl.end) <= U.toMin(be); };
+                  const inBand = teamBids.filter(slotIn).sort((a, b2) =>
+                    ((parseInt(a.part, 10) || 99) - (parseInt(b2.part, 10) || 99))
+                    || (U.toMin((day.slots.find((s) => s.id === a.slotId) || {}).start || '00:00')
+                      - U.toMin((day.slots.find((s) => s.id === b2.slotId) || {}).start || '00:00')));
+                  const durB = (U.toMin(be) - U.toMin(bs) + 1440) % 1440;
+                  return html`
+                    <div key=${bi} class="flex gap-3 px-3 py-2">
+                      <div class="w-28 shrink-0 pt-0.5">
+                        <div class="text-[13px] font-bold tabular-nums">${bs}~${be}</div>
+                        <div class="text-[11px] text-ink-soft">${durB}분 띠</div>
+                      </div>
+                      <div class="flex-1 flex flex-wrap gap-1.5 items-start">
+                        ${inBand.map((b) => html`<${BidChip} key=${b.id} state=${state} b=${b} readOnly=${readOnly}
+                          onEdit=${() => (readOnly ? setDetailBid(b) : setModal({ dayId: day.id, start: bs, end: be, bid: b }))} />`)}
+                        ${!readOnly && html`<button onClick=${() => setModal({ dayId: day.id, start: bs, end: be })}
+                          class="text-[12px] px-2 py-1 rounded border border-dashed border-slate-300 text-ink-soft hover:border-brand hover:text-brand self-start">
+                          + 입찰
+                        </button>`}
+                      </div>
+                    </div>`;
+                })}
+                ${(() => { // 띠에 담기지 않은 입찰 (시간 미정·띠 밖 시간)
+                  const anyIn = (b) => bandDefs.some(([bs, be]) => { const sl = day.slots.find((s) => s.id === b.slotId);
+                    return sl && sl.start && sl.end && U.toMin(sl.start) >= U.toMin(bs) && U.toMin(sl.end) <= U.toMin(be); });
+                  const un = teamBids.filter((b) => b.dayId === day.id && !anyIn(b));
+                  if (!un.length) return '';
+                  return html`<div class="flex gap-3 px-3 py-2 bg-amber-50/60">
+                    <div class="w-28 shrink-0 pt-0.5 text-[12px] font-bold text-amber-700">띠 밖 / 미정</div>
+                    <div class="flex-1 flex flex-wrap gap-1.5 items-start">
+                      ${un.map((b) => html`<${BidChip} key=${b.id} state=${state} b=${b} readOnly=${readOnly}
+                        onEdit=${() => (readOnly ? setDetailBid(b) : setModal({ dayId: day.id, start: bandDefs[0][0], end: bandDefs[0][1], bid: b }))} />`)}
+                    </div>
+                  </div>`;
+                })()}
+              </div>`
               : html`
               <div class="divide-y divide-slate-100">
                 ${shownSlots.length === 0 && html`<div class="text-[12px] text-slate-400 text-center py-3">시간대가 없습니다. “+ 시간대” 또는 “+ 순번”으로 추가하세요.</div>`}
@@ -2417,6 +2462,7 @@
         class=${`card-drag text-left rounded-md border bg-white px-2 py-1 hover:shadow-sm ${isGroup ? 'min-w-[220px]' : ''}`}
         style=${{ borderLeft: `4px solid ${t.color}` }}>
         <div class="flex items-center gap-1">
+          ${b.part && html`<${Badge} color="#0891b2" title="띠 안 순번 (부)">${b.part}부<//>`}
           ${isGroup && html`<${Badge} color="#7c3aed" title="동시 노출 묶음">동시 ${items.length}<//>`}
           <span class="text-[12px] font-semibold text-ink leading-tight">${pr.name}</span>
         </div>
@@ -2512,6 +2558,26 @@
       if (defs && defs.length) return defs.map(([s2, e3]) => ({ id: 'band_' + s2, start: s2, end: e3 }));
       return (day ? day.slots : []).filter((s) => s.start && s.end);
     })();
+    // 띠 모드: 시간 수기 입력 대신 [고정 띠 + 부(순번) + 희망 노출분(참고용)] — 모든 띠 프로그램 공통
+    const bandMode = !fashion && !orderMode && bands.length > 0;
+    const bandIdxInit = () => {
+      const s0 = (initSlot && initSlot.start) || ctx.start, e0 = (initSlot && initSlot.end) || ctx.end;
+      if (!s0) return 0;
+      const i = bands.findIndex((x) => U.toMin(s0) >= U.toMin(x.start) && (!e0 || U.toMin(e0) <= U.toMin(x.end)));
+      return i >= 0 ? i : 0;
+    };
+    const [bandIdx, setBandIdx] = useState(bandIdxInit);
+    const [part, setPart] = useState(() => {
+      if (b && b.part) return parseInt(b.part, 10) || 1;
+      const bd = bands[bandIdxInit()];
+      if (!bd) return 1;
+      const used = state.bids.filter((x) => x.teamId === team && x.dayId === ctx.dayId && (!b || x.id !== b.id))
+        .map((x) => { const sl = state.days.flatMap((d) => d.slots).find((s) => s.id === x.slotId);
+          return (sl && sl.start && sl.end && U.toMin(sl.start) >= U.toMin(bd.start) && U.toMin(sl.end) <= U.toMin(bd.end))
+            ? (parseInt(x.part, 10) || 0) : 0; });
+      return Math.max(0, ...used) + 1;
+    });
+    const [maxPart, setMaxPart] = useState(() => Math.max(4, (b && parseInt(b.part, 10)) || 1));
 
     function save() {
       const items = f.items.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -2531,7 +2597,7 @@
         sme: f.sme, special: f.special, isNew: f.isNew,
         specialNote: f.special ? f.specialNote.trim() : '',
         groupCode: codes.map((c) => c.trim()).filter(Boolean).join(' / '), recent: f.recent.some(Boolean) ? f.recent : undefined,
-        durationMin: (fashion || orderMode) ? (f.durationMin ? parseInt(f.durationMin, 10) : null) : durMin,
+        durationMin: (fashion || orderMode || bandMode) ? (f.durationMin ? parseInt(f.durationMin, 10) : null) : durMin,
         items: items.length ? items : undefined,
         dongsi: items.length > 1,
       };
@@ -2542,6 +2608,11 @@
       } else if (orderMode) {
         if (b) store.updateBid(b.id, { product, slotId });
         else store.addBid({ teamId: team, dayId, slotId, product });
+      } else if (bandMode) {
+        // 띠 + 부(순번) 저장 — 편성(placement) 위치는 PD 조정 그대로 유지
+        const bd = bands[bandIdx] || bands[0];
+        if (b) { store.updateBid(b.id, { product }); store.setBidBand(b.id, { start: bd.start, end: bd.end, part }); }
+        else store.addBid({ teamId: team, dayId, start: bd.start, end: bd.end, part, product });
       } else {
         if (!/^\d{1,2}:\d{2}$/.test(start) || !/^\d{1,2}:\d{2}$/.test(end)) { alert('시작/종료 시간을 입력하세요.'); return; }
         if (durMin <= 0) { alert('종료 시간이 시작보다 늦어야 합니다.'); return; }
@@ -2591,6 +2662,14 @@
                 <select value=${slotId} onChange=${(e) => setSlotId(e.target.value)} class=${inputCls}>
                   ${day.slots.map((s) => html`<option key=${s.id} value=${s.id}>${slotName(s)}</option>`)}
                 </select><//>`
+            : bandMode
+            ? html`<${Field} label="희망 노출분 (참고용)">
+                <div class="flex items-center rounded border border-slate-300 focus-within:border-brand px-2 w-32">
+                  <input value=${f.durationMin} onInput=${set('durationMin')} inputmode="numeric" placeholder="예: 40"
+                    class="w-full py-1.5 text-[13px] tabular-nums text-right bg-transparent outline-none" />
+                  <span class="text-[12px] text-ink-soft pl-0.5">분</span>
+                </div>
+                <div class="mt-1 text-[11px] text-ink-soft">시간이 아니라 희망 분량입니다 — PD가 편성 시 참고</div><//>`
             : html`<${Field} label="방송 시간 (24시간) *">
                 <div class="flex flex-col gap-1.5">
                   <div class="flex items-center gap-2">
@@ -2610,7 +2689,24 @@
                 </div>
                 <div class="mt-1 text-[11px] text-ink-soft">노출분 입력 → 종료시간 자동 · 시작시간을 바꾸면 노출분(${durMin || '-'}분)에 맞춰 종료도 이동</div><//>`}
         </div>
-        ${!fashion && !orderMode && bands.length > 0 && html`
+        ${bandMode && html`
+          <${Field} label="시간 띠 *">
+            <div class="flex flex-wrap gap-1.5">
+              ${bands.map((s, i) => html`<button type="button" key=${i} onClick=${() => setBandIdx(i)}
+                class=${`text-[13px] px-3 py-1.5 rounded-full border transition tabular-nums ${bandIdx === i ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-brand hover:text-brand'}`}>
+                ${s.start}~${s.end} <span class="text-[11px] font-normal">(${(U.toMin(s.end) - U.toMin(s.start) + 1440) % 1440}분)</span></button>`)}
+            </div>
+          <//>
+          <${Field} label="부(순번) * — 이 띠 안에서 몇 번째 상품인지">
+            <div class="flex flex-wrap items-center gap-1.5">
+              ${Array.from({ length: maxPart }, (_, i) => i + 1).map((pt) => html`
+                <button type="button" key=${pt} onClick=${() => setPart(pt)}
+                  class=${`text-[13px] px-3 py-1.5 rounded-full border transition ${part === pt ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-brand hover:text-brand'}`}>${pt}부</button>`)}
+              <button type="button" onClick=${() => setMaxPart(maxPart + 1)}
+                class="text-[12px] text-ink-soft hover:text-brand px-1">+ ${maxPart + 1}부 추가</button>
+            </div>
+          <//>`}
+        ${!fashion && !orderMode && !bandMode && bands.length > 0 && html`
           <div class="-mt-1 flex flex-wrap items-center gap-1">
             <span class="text-[11px] text-ink-soft">큰 띠:</span>
             ${bands.map((s) => html`<button type="button" key=${s.id}

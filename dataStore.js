@@ -742,14 +742,14 @@
 
       /* ---------- 입찰 (MD) — 입력 즉시 편성표에 자동 반영 ---------- */
       // {teamId, dayId, slotId?|(start,end), product, autoPlace=true}
-      addBid({ teamId, dayId, slotId, start, end, product, autoPlace = true, bucket = false }) {
+      addBid({ teamId, dayId, slotId, start, end, part, product, autoPlace = true, bucket = false }) {
         const day = state.days.find((d) => d.id === dayId);
         if (!day) return;
         let slot = slotId ? day.slots.find((s) => s.id === slotId) : null;
         if (!slot && bucket) slot = ensureBucketSlotOnDay(day);
         if (!slot && start && end) slot = ensureSlotOnDay(day, start, end);
         if (!slot) return;
-        const bid = stamp({ id: uid(), teamId, dayId, slotId: slot.id, product, createdAt: nowISO() });
+        const bid = stamp({ id: uid(), teamId, dayId, slotId: slot.id, part: part || null, product, createdAt: nowISO() });
         state.bids.push(bid);
         if (autoPlace) {
           state.placements.push(stamp(placementFromBid(bid, slot.id, day.programId)));
@@ -789,14 +789,18 @@
         const b = state.bids.find((x) => x.id === bidId);
         if (!b) return;
         if (patch.product) b.product = { ...b.product, ...patch.product };
+        if (patch.part !== undefined) b.part = patch.part || null;
         const day = state.days.find((d) => d.id === b.dayId);
+        const oldSlotId = b.slotId;
         if (patch.start && patch.end && day) {
           b.slotId = ensureSlotOnDay(day, patch.start, patch.end).id;
         } else if (patch.slotId) b.slotId = patch.slotId;
-        // 연결된 편성(placement) 동기화
+        // 연결된 편성(placement) 동기화 — 내용은 항상, 위치는 실제로 시간/슬롯이 바뀐 경우에만
+        // (상품 정보만 고쳤는데 PD가 세분화해 둔 편성 위치가 원래 슬롯으로 튕기는 것 방지)
         const pl = state.placements.find((p) => p.sourceBidId === bidId);
         if (pl) {
-          pl.slotId = b.slotId; pl.productName = b.product.name;
+          if (b.slotId !== oldSlotId) pl.slotId = b.slotId;
+          pl.productName = b.product.name;
           pl.detail = detailOf(b.product); pl.items = b.product.items;
           pl.durationMin = b.product.durationMin || null;
           stamp(pl);
@@ -804,6 +808,19 @@
         stamp(b);
         log({ action: '입찰수정', productName: b.product.name, teamName: teamName(b.teamId),
               to: slotLabel(b.slotId) });
+        emit();
+      },
+      // MD 입찰 전용: 입찰을 고정 띠·부(순번)로 재배치 — 편성(placement) 위치는 건드리지 않음
+      setBidBand(bidId, { start, end, part, durationMin }) {
+        const b = state.bids.find((x) => x.id === bidId);
+        if (!b) return;
+        const day = state.days.find((d) => d.id === b.dayId);
+        if (start && end && day) b.slotId = ensureSlotOnDay(day, start, end).id;
+        if (part !== undefined) b.part = part || null;
+        if (durationMin !== undefined && b.product) b.product.durationMin = durationMin || null;
+        stamp(b);
+        log({ action: '입찰띠정리', productName: (b.product && b.product.name) || '', teamName: teamName(b.teamId),
+              to: `${start || ''}~${end || ''}${b.part ? ' · ' + b.part + '부' : ''}` });
         emit();
       },
       deleteBid(bidId) {
