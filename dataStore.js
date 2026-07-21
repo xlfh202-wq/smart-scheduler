@@ -300,6 +300,7 @@
     let pendingHydrate = null; // 보류 중 도착한 서버 상태(최신 1개) — 취소 시 이걸로 복원
     let suppressDirty = false; // 월/프로그램 이동 등 자동 생성은 변경 건수로 세지 않음
     let backupAPI = null;   // Supabase 백업/복원 구현 (connectSupabase 에서 주입)
+    let snapAPI = null;     // 편성 저장본 본문 분리 저장(app_state snap_* 행) — 메인 문서 비대화 방지
     let hydratedOnce = false; // 첫 서버 로드 이후에는 화면 이동(탭·월)을 로컬 유지
     // 접속(첫 로드) 시 초기 화면 = 최유라쇼 + 현재 월 (오늘 기준)
     function defaultView() {
@@ -490,6 +491,7 @@
         action: '', productName: '', teamName: '', from: '', to: '', detail: '',
         ...entry,
       });
+      if (state.changeLog.length > 1000) state.changeLog.length = 1000; // 문서 비대화 방지 (최근 1000건 유지)
     }
     // 변경 주체/시각 기록 (카드 "마지막 수정" 표시용)
     function stamp(o) { if (o) { o.editedBy = currentUser || ''; o.editedAt = nowISO(); } return o; }
@@ -1637,7 +1639,11 @@
           id: uid(), ts: nowISO(), year, month, programId, label: label || '',
           user: currentUser || '익명', placements: pls, count: pls.length,
         };
-        state.snapshots.unshift(snap);
+        if (snapAPI) { // 서버 연결 시: 본문(placements)은 별도 행에, 메인 문서에는 메타만
+          snapAPI.put(snap.id, { placements: pls });
+          const meta = { ...snap, ext: true }; delete meta.placements;
+          state.snapshots.unshift(meta);
+        } else state.snapshots.unshift(snap);
         log({ action: '편성저장',
               detail: `${year}년 ${month}월 편성 ${pls.length}건 저장${label ? ' · ' + label : ''}` });
         emit();
@@ -1645,25 +1651,40 @@
       },
       restoreSnapshot(id) {
         const snap = (state.snapshots || []).find((s) => s.id === id);
-        if (!snap) return;
-        const ids = this.monthSlotIds(snap.year, snap.month, snap.programId);
-        state.placements = state.placements.filter((p) => !ids.has(p.slotId));
-        let restored = 0, missing = 0;
-        snap.placements.forEach((p) => {
-          if (ids.has(p.slotId)) { state.placements.push({ ...p, id: uid() }); restored++; }
-          else missing++;
-        });
-        log({ action: '편성복원',
-              detail: `${snap.year}년 ${snap.month}월 ${restored}건 복원${missing ? ` · ${missing}건 누락(시간대 변경)` : ''}` });
-        emit();
-        return { restored, missing };
+        if (!snap) return Promise.resolve({ error: '저장본을 찾을 수 없습니다.' });
+        const apply = (pls) => {
+          const ids = this.monthSlotIds(snap.year, snap.month, snap.programId);
+          state.placements = state.placements.filter((p) => !ids.has(p.slotId));
+          let restored = 0, missing = 0;
+          (pls || []).forEach((p) => {
+            if (ids.has(p.slotId)) { state.placements.push({ ...p, id: uid() }); restored++; }
+            else missing++;
+          });
+          log({ action: '편성복원',
+                detail: `${snap.year}년 ${snap.month}월 ${restored}건 복원${missing ? ` · ${missing}건 누락(시간대 변경)` : ''}` });
+          emit();
+          return { restored, missing };
+        };
+        if (snap.placements) return Promise.resolve(apply(snap.placements));
+        if (snap.ext && snapAPI) return snapAPI.get(id).then((d) =>
+          (d && d.placements) ? apply(d.placements) : { error: '저장본 본문을 불러오지 못했습니다.' });
+        return Promise.resolve({ error: '저장본 본문이 없습니다.' });
       },
       deleteSnapshot(id) {
         const snap = (state.snapshots || []).find((s) => s.id === id);
         if (!snap) return;
         state.snapshots = state.snapshots.filter((s) => s.id !== id);
+        if (snap.ext && snapAPI) snapAPI.remove(id);
         log({ action: '저장본삭제', detail: `${snap.year}년 ${snap.month}월 저장본 삭제` });
         emit();
+      },
+      // 인라인 본문을 가진 기존 저장본을 분리 저장으로 이관한 뒤 메타로 축소 (connectSupabase 1회)
+      _setSnapAPI(api) { snapAPI = api; },
+      _externalizeSnapshots(ids) {
+        const set = new Set(ids); let n = 0;
+        (state.snapshots || []).forEach((s) => { if (set.has(s.id) && s.placements) { delete s.placements; s.ext = true; n++; } });
+        if (n) emit();
+        return n;
       },
 
       /* ---------- 변경이력 초기화 ---------- */
@@ -1965,10 +1986,11 @@
           state._rev = rev; // 데이터 안에 nonce → realtime echo 식별
           myRevs.add(rev);
           if (myRevs.size > 20) myRevs.delete(myRevs.values().next().value);
-          // 전환기 이중저장: 행 모드라도 메인 문서에 bids/placements를 함께 남겨 구버전(단일문서) 클라이언트 호환.
-          // (행 모드 클라이언트는 하이드레이트 시 메인 문서의 bids/placements를 무시하고 테이블을 소스로 사용)
+          // 행 모드: bids/placements는 개별 행 테이블이 소스 — 메인 문서에는 싣지 않음(문서 ~1MB → 수십 KB).
+          // (모든 클라이언트가 행 모드 대응 버전으로 전환 완료되어 이중저장 종료 — 2026-07-21)
+          const doc = rowMode ? { ...state, bids: [], placements: [] } : state;
           const { error } = await client.from('app_state')
-            .upsert({ id: 'main', data: state, updated_at: new Date().toISOString() });
+            .upsert({ id: 'main', data: doc, updated_at: new Date().toISOString() });
           if (error) disableServer(error.message);
           else { lastServerRev = rev; status('saved'); maybeAutoBackup(); }
         } catch (e) { disableServer(e.message); }
@@ -2033,6 +2055,33 @@
       } catch (e) {}
     }
     store._setBackupAPI({ now: doBackup, list: listBackups, restore: restoreBackup });
+
+    /* ----- 편성 저장본 본문 분리 저장 (app_state snap_* 행 — 메인 문서 비대화 방지) ----- */
+    const SNAP_PREFIX = 'snap_';
+    store._setSnapAPI({
+      put: async (id, data) => { try {
+        await client.from('app_state').upsert({ id: SNAP_PREFIX + id, data, updated_at: new Date().toISOString() });
+      } catch (e) {} },
+      get: async (id) => { try {
+        const { data } = await client.from('app_state').select('data').eq('id', SNAP_PREFIX + id).maybeSingle();
+        return data && data.data;
+      } catch (e) { return null; } },
+      remove: async (id) => { try {
+        await client.from('app_state').delete().eq('id', SNAP_PREFIX + id);
+      } catch (e) {} },
+    });
+    // 기존 인라인 저장본 → 분리 행으로 1회 이관 (멱등: 같은 id upsert)
+    async function migrateSnapshots() {
+      try {
+        const inline = (store.getState().snapshots || []).filter((s) => s.placements && s.placements.length >= 0 && !s.ext);
+        if (!inline.length) return;
+        for (const s of inline) {
+          await client.from('app_state').upsert({ id: SNAP_PREFIX + s.id, data: { placements: s.placements }, updated_at: new Date().toISOString() });
+        }
+        const n = store._externalizeSnapshots(inline.map((s) => s.id));
+        if (n) console.info('[supabase] 편성 저장본 ' + n + '개 본문 분리 이관 완료 (메인 문서 축소)');
+      } catch (e) {}
+    }
 
     // bids/placements 개별 행 테이블이 있는지 감지 → 있으면 행 모드 활성(없으면 기존 단일문서 그대로)
     async function detectRowTables() {
@@ -2138,6 +2187,7 @@
         } else { status('connected'); }
         ready = true;
         maybeAutoBackup(); // 접속 시 마지막 자동백업이 오래됐으면 1회 백업
+        migrateSnapshots(); // 인라인 저장본이 남아 있으면 분리 행으로 이관(1회·멱등)
         client.channel('app_state_main')
           .on('postgres_changes',
             { event: '*', schema: 'public', table: 'app_state', filter: 'id=eq.main' },

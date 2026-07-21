@@ -2167,10 +2167,12 @@
       (fProg === 'all' || s.programId === fProg) && (fYm === 'all' || ymKey(s) === fYm));
     function restore(s) {
       if (!confirm(`[${progName(s.programId)}] ${s.year}년 ${s.month}월 — ${fmtTs(s.ts)} 저장본으로 되돌립니다.\n${progName(s.programId)}의 ${s.month}월 편성만 이 저장본 내용으로 교체됩니다. (다른 프로그램/월은 그대로) 계속할까요?`)) return;
-      const r = store.restoreSnapshot(s.id);
-      store.setView(s.year, s.month);
-      alert(`복원 완료: ${r.restored}건${r.missing ? ` (시간대 변경으로 ${r.missing}건 누락)` : ''}`);
-      onClose();
+      Promise.resolve(store.restoreSnapshot(s.id)).then((r) => {
+        if (!r || r.error) { alert((r && r.error) || '복원에 실패했습니다.'); return; }
+        store.setView(s.year, s.month);
+        alert(`복원 완료: ${r.restored}건${r.missing ? ` (시간대 변경으로 ${r.missing}건 누락)` : ''}`);
+        onClose();
+      });
     }
     return html`
       <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick=${onClose}>
