@@ -686,20 +686,34 @@
   // 확장 시간창: 스케줄의 extBefore(앞 확장 시작)·extAfter(뒤 확장 종료) — 경계는 인접 고정띠에 물림.
   // 고정띠가 아니므로 항상 표시되지 않고, 펼치거나 상품이 있을 때만 행으로 나타난다.
   function dayExtWins(state, day, bandsOpt) {
-    const sc = store.getSchedule ? store.getSchedule(day && day.programId) : null;
-    const e2 = sc && day ? sc.find((x) => x.wd === day.weekday) : null;
+    if (!day) return { before: null, after: null };
+    const sc = store.getSchedule ? store.getSchedule(day.programId) : null;
+    const e2 = sc ? sc.find((x) => x.wd === day.weekday) : null;
     const bs = (bandsOpt && bandsOpt.length) ? bandsOpt : dayBands(state, day);
-    if (!e2 || !bs.length) return { before: null, after: null };
+    if (!bs.length) return { before: null, after: null };
+    // 날짜별 수기 조정(day.extBefore/extAfter) 우선, 없으면 프로그램 기본값
+    const bStart = day.extBefore || (e2 && e2.extBefore);
+    const aEnd = day.extAfter || (e2 && e2.extAfter);
     return {
-      before: e2.extBefore ? [e2.extBefore, bs[0][0], 'ext'] : null,
-      after: e2.extAfter ? [bs[bs.length - 1][1], e2.extAfter, 'ext'] : null,
+      before: bStart ? [bStart, bs[0][0], 'ext'] : null,
+      after: aEnd ? [bs[bs.length - 1][1], aEnd, 'ext'] : null,
     };
   }
-  // 팝업 칩 목록용: [앞 확장?, ...고정띠, 뒤 확장?] — 확장 칩은 3번째 요소 'ext'
+  // 팝업 칩 목록용: [앞 확장?, ...고정띠, 뒤 확장?] + 이미 형성된 띠 밖 시간대(수기)
+  // — 한 번 만든 시간대는 다음 상품부터 칩으로 골라 재입력 없이 편성
   function dayBandsWithExt(state, day) {
     const bands = dayBands(state, day);
     const w = dayExtWins(state, day, bands);
-    return [...(w.before ? [w.before] : []), ...bands, ...(w.after ? [w.after] : [])];
+    const list = [...(w.before ? [w.before] : []), ...bands, ...(w.after ? [w.after] : [])];
+    const inList = (s, e) => list.some(([bs, be]) => U.toMin(s) >= U.toMin(bs) && U.toMin(e) <= U.toMin(be));
+    const extra = [];
+    ((day && day.slots) || []).forEach((sl) => {
+      if (!sl.start || !sl.end || sl.start === sl.end) return;
+      if (inList(sl.start, sl.end)) return;
+      if (extra.some(([bs, be]) => bs === sl.start && be === sl.end)) return;
+      extra.push([sl.start, sl.end, 'manual']);
+    });
+    return [...list, ...extra].sort((a, b) => U.toMin(a[0]) - U.toMin(b[0]));
   }
 
   // 같은 시간창 안 '경쟁 vs 분할' 판정 — 부(순번) 지정, 노출분 배분, 세부 시간 분리로
@@ -728,7 +742,7 @@
     return { compete: conflict.size, split: conflict.size < 2 };
   }
 
-  function BandRow({ state, day, band, onQuickAdd, onExtBid, onExtMove, onBandBid, onBandMove, onEditBand, onCtxMenu, simple }) {
+  function BandRow({ state, day, band, onQuickAdd, onExtBid, onExtMove, onBandBid, onBandMove, onEditBand, onEditExt, onCtxMenu, simple }) {
     const [over, setOver] = useState(false);
     const isExt = !!band.ext;
     const slots = band.slots || [];
@@ -792,9 +806,17 @@
         <div class=${`w-[104px] shrink-0 px-1.5 py-1.5 border-r border-slate-200 flex flex-col gap-0.5 ${isExt ? 'bg-slate-100/70' : 'bg-slate-50'}`}>
           ${isExt
             ? (band.win
-              ? html`<span class="text-[13.5px] font-extrabold text-ink tabular-nums leading-tight whitespace-nowrap">${band.win[0]}~${band.win[1]}</span>
+              ? html`${onEditExt
+                  ? html`<button onClick=${(e) => { e.stopPropagation(); onEditExt(); }}
+                      class="text-[13.5px] font-extrabold text-ink tabular-nums leading-tight text-left whitespace-nowrap hover:text-brand hover:underline decoration-dotted"
+                      title="클릭해 이 날짜의 확장 시간 조정 (반대쪽 경계는 고정띠에 물림)">${band.win[0]}~${band.win[1]}</button>`
+                  : html`<span class="text-[13.5px] font-extrabold text-ink tabular-nums leading-tight whitespace-nowrap">${band.win[0]}~${band.win[1]}</span>`}
                 <span class="text-[11px] font-semibold text-ink-soft">${(U.toMin(band.win[1]) - U.toMin(band.win[0]) + 1440) % 1440}분 <span class="text-[10px] font-bold text-amber-600" title="확장 — 경계는 인접 고정띠에 물려 있습니다">확장</span></span>`
-              : html`<span class="text-[12px] font-bold text-ink-soft leading-tight">확장<br/>${band.label}</span>`)
+              : (onEditExt
+                ? html`<button onClick=${(e) => { e.stopPropagation(); onEditExt(); }}
+                    class="text-[12px] font-bold text-ink-soft leading-tight text-left hover:text-brand hover:underline decoration-dotted"
+                    title="클릭해 이 날짜의 확장 시간 지정 (반대쪽 경계는 고정띠에 물림)">확장<br/>${band.label}</button>`
+                : html`<span class="text-[12px] font-bold text-ink-soft leading-tight">확장<br/>${band.label}</span>`))
             : html`${onEditBand
                 ? html`<button onClick=${(e) => { e.stopPropagation(); onEditBand(); }}
                     class="text-[13.5px] font-extrabold text-ink tabular-nums leading-tight text-left whitespace-nowrap hover:text-brand hover:underline decoration-dotted"
@@ -1096,6 +1118,14 @@
     const [dayOver, setDayOver] = useState(false);
     const [moveTimeFor, setMoveTimeFor] = useState(null); // 같은날짜 시간대 이동 팝업(라이프스타일)
     const [bidTimeFor, setBidTimeFor] = useState(null);   // 입찰카드 편성 시간 지정 팝업(라이프스타일)
+    const [extEdit, setExtEdit] = useState(null);         // 확장 시간 수기 조정 팝업 ('before'|'after')
+    // 확장 행 드롭: 시간창을 알면 그 창, 이미 만든 시간대가 있으면 첫 시간대를 자동 인식
+    const extDropInit = (row) => {
+      if (row.win) return { band: [row.win[0], row.win[1]] };
+      const timed = row.slots.filter((s) => s.start && s.end && s.start !== s.end)
+        .sort((a, b2) => U.toMin(a.start) - U.toMin(b2.start));
+      return timed.length ? { start: timed[0].start } : { ext: true };
+    };
     const nextPart = () => {
       const nums = day.slots.filter((s) => s.label).map((s) => { const m = (s.label || '').match(/(\d+)\s*부/); return m ? parseInt(m[1], 10) : 0; });
       return `${Math.max(0, ...nums) + 1}부`;
@@ -1158,9 +1188,10 @@
         <div class=${`p-1.5 flex flex-col gap-1 ${day.status === 'off' ? 'hidden' : ''}`}>
           ${useBands ? html`
             ${(showExt || extBefore.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extBefore} simple=${simple}
-              onQuickAdd=${() => { setQuickInit(extBefore.win ? extBefore.win[0] : ''); setQuickOpen(true); }}
-              onExtBid=${(id) => setBidTimeFor(extBefore.win ? { id, band: [extBefore.win[0], extBefore.win[1]] } : { id, ext: true })}
-              onExtMove=${(id) => setMoveTimeFor(extBefore.win ? { id, band: [extBefore.win[0], extBefore.win[1]] } : { id, ext: true })} />`}
+              onQuickAdd=${() => { const di = extDropInit(extBefore); setQuickInit(di.band ? di.band[0] : (di.start || '')); setQuickOpen(true); }}
+              onEditExt=${() => setExtEdit('before')}
+              onExtBid=${(id) => setBidTimeFor({ id, ...extDropInit(extBefore) })}
+              onExtMove=${(id) => setMoveTimeFor({ id, ...extDropInit(extBefore) })} />`}
             ${bands.map((bd, bi) => html`<${BandRow} key=${bi} state=${state} day=${day} band=${bd} simple=${simple}
               onQuickAdd=${(st) => { setQuickInit(st); setQuickOpen(true); }}
               onBandBid=${(id, b2) => setBidTimeFor({ id, band: [b2.start, b2.end] })}
@@ -1169,8 +1200,9 @@
               onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'band', band: bd, idx: bi })} />`)}
             ${(showExt || extAfter.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extAfter} simple=${simple}
               onQuickAdd=${() => { setQuickInit(bands[bands.length - 1].end); setQuickOpen(true); }}
-              onExtBid=${(id) => setBidTimeFor(extAfter.win ? { id, band: [extAfter.win[0], extAfter.win[1]] } : { id, ext: true })}
-              onExtMove=${(id) => setMoveTimeFor(extAfter.win ? { id, band: [extAfter.win[0], extAfter.win[1]] } : { id, ext: true })} />`}
+              onEditExt=${() => setExtEdit('after')}
+              onExtBid=${(id) => setBidTimeFor({ id, ...extDropInit(extAfter) })}
+              onExtMove=${(id) => setMoveTimeFor({ id, ...extDropInit(extAfter) })} />`}
             ${labelSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} simple=${simple}
               onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'slot', slot: s })} />`)}`
           : (sortedSlots.length === 0
@@ -1219,8 +1251,12 @@
             </div>`;
         })()}
         ${quickOpen && html`<${QuickAddModal} state=${state} day=${day} initStart=${quickInit} onClose=${() => setQuickOpen(false)} />`}
-        ${moveTimeFor && html`<${MoveTimeModal} state=${state} day=${day} placementId=${moveTimeFor.id} initBand=${moveTimeFor.band} initExt=${moveTimeFor.ext} onClose=${() => setMoveTimeFor(null)} />`}
-        ${bidTimeFor && html`<${BidTimeModal} state=${state} day=${day} bidId=${bidTimeFor.id} initBand=${bidTimeFor.band} initExt=${bidTimeFor.ext} onClose=${() => setBidTimeFor(null)} />`}
+        ${moveTimeFor && html`<${MoveTimeModal} state=${state} day=${day} placementId=${moveTimeFor.id} initBand=${moveTimeFor.band} initStart=${moveTimeFor.start} initExt=${moveTimeFor.ext} onClose=${() => setMoveTimeFor(null)} />`}
+        ${bidTimeFor && html`<${BidTimeModal} state=${state} day=${day} bidId=${bidTimeFor.id} initBand=${bidTimeFor.band} initStart=${bidTimeFor.start} initExt=${bidTimeFor.ext} onClose=${() => setBidTimeFor(null)} />`}
+        ${extEdit && useBands && html`<${ExtTimeModal} state=${state} day=${day} kind=${extEdit}
+          boundary=${extEdit === 'before' ? bands[0].start : bands[bands.length - 1].end}
+          current=${extEdit === 'before' ? (extBefore.win ? extBefore.win[0] : '') : (extAfter.win ? extAfter.win[1] : '')}
+          onClose=${() => setExtEdit(null)} />`}
       </div>`;
   }
 
@@ -1232,7 +1268,7 @@
           <div class="flex flex-wrap gap-1.5">
             ${bands.map((bd, i) => html`<button type="button" key=${i} onClick=${() => setBandIdx(i)}
               class=${`text-[13px] px-3 py-1.5 rounded-full border transition tabular-nums ${bandIdx === i ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-brand hover:text-brand'}`}>
-              ${bd[0]}~${bd[1]} <span class="text-[11px] font-normal">(${(U.toMin(bd[1]) - U.toMin(bd[0]) + 1440) % 1440}분${bd[2] === 'ext' ? '·확장' : ''})</span></button>`)}
+              ${bd[0]}~${bd[1]} <span class="text-[11px] font-normal">(${(U.toMin(bd[1]) - U.toMin(bd[0]) + 1440) % 1440}분${bd[2] === 'ext' ? '·확장' : bd[2] === 'manual' ? '·수기' : ''})</span></button>`)}
             <button type="button" onClick=${() => setBandIdx(-1)}
               class=${`text-[13px] px-3 py-1.5 rounded-full border transition ${bandIdx === -1 ? 'bg-slate-600 text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-slate-500'}`}>직접 입력</button>
           </div>
@@ -1256,12 +1292,34 @@
     return bands.length ? 0 : -1;
   }
 
+  // 확장 시간 수기 조정(이 날짜만) — 반대쪽 경계는 인접 고정띠에 물림
+  function ExtTimeModal({ state, day, kind, boundary, current, onClose }) {
+    const before = kind === 'before';
+    const [t, setT] = useState(current || '');
+    function save() {
+      const v = t.trim();
+      if (v && !/^\d{1,2}:\d{2}$/.test(v)) { alert('시간을 24시간 형식(예: 07:35)으로 입력하세요.'); return; }
+      store.setDayExt(day.id, before ? { before: v || null } : { after: v || null });
+      onClose();
+    }
+    return html`
+      <${Modal} title=${`${fmtDay(day)} · ${before ? '앞' : '뒤'} 확장 시간 조정`} onClose=${onClose} onSave=${save}>
+        <${Field} label=${before ? `확장 시작 시간 (종료는 ${boundary}에 물림) *` : `확장 종료 시간 (시작은 ${boundary}에 물림) *`}>
+          <${TimeInput} value=${t} onChange=${setT} />
+        <//>
+        <div class="text-[12px] text-ink-soft">
+          저장하면 이 날짜의 확장이 <b class="tabular-nums">${before ? `${t.trim() || 'HH:MM'}~${boundary}` : `${boundary}~${t.trim() || 'HH:MM'}`}</b> 로 표시되고,
+          카드를 놓으면 이 창이 자동 인식됩니다. 비우고 저장하면 프로그램 기본값으로 돌아갑니다.
+        </div>
+      <//>`;
+  }
+
   // 입찰카드를 날짜/띠에 놓았을 때 — 편성 위치 지정 팝업 (띠 프로그램은 놓은 띠 자동 인식 + 노출분)
-  function BidTimeModal({ state, day, bidId, initBand, initExt, onClose }) {
+  function BidTimeModal({ state, day, bidId, initBand, initStart, initExt, onClose }) {
     const b = state.bids.find((x) => x.id === bidId);
     const bands = dayBandsWithExt(state, day);
-    const [bandIdx, setBandIdx] = useState(() => initExt ? -1 : bandInitIdx(bands, initBand || null, null));
-    const [start, setStart] = useState('');
+    const [bandIdx, setBandIdx] = useState(() => initExt ? -1 : bandInitIdx(bands, initBand || null, initStart || null));
+    const [start, setStart] = useState(initStart || '');
     const [dur, setDur] = useState(String((b && b.product && b.product.durationMin) || ''));
     function save() {
       const dm = dur.trim() ? parseInt(dur, 10) : null;
@@ -1284,10 +1342,10 @@
   }
 
   // 같은 날짜 안에서 다른 시간대로 이동 — 놓은 위치(띠)를 자동 인식해 미리 선택
-  function MoveTimeModal({ state, day, placementId, initSlot, initBand, initExt, onClose }) {
+  function MoveTimeModal({ state, day, placementId, initSlot, initBand, initStart, initExt, onClose }) {
     const p = state.placements.find((x) => x.id === placementId);
     const bands = dayBandsWithExt(state, day);
-    const autoStart = (initSlot && initSlot.start) || (initBand && initBand[0]) || '';
+    const autoStart = (initSlot && initSlot.start) || (initBand && initBand[0]) || initStart || '';
     const [bandIdx, setBandIdx] = useState(() => initExt ? -1 : bandInitIdx(bands, initBand || null, autoStart || null));
     const [start, setStart] = useState(autoStart);
     const [dur, setDur] = useState(String((p && p.durationMin) || ''));
@@ -1781,11 +1839,13 @@
       const std = (e2 && e2.slots) || null;
       const ov = (d.bands && d.bands.length) ? d.bands : null;
       const base = (ov && (!std || ov.length <= std.length)) ? ov : (std || ov);
-      if (!base || !base.length || !e2) return base;
+      if (!base || !base.length) return base;
       // 확장 창(경계는 인접 띠에 물림): 그 시간의 상품 행이 있을 때만 '확장' 띠로 묶여 보임
       const out = base.slice();
-      if (e2.extBefore) out.unshift([e2.extBefore, base[0][0], 'ext']);
-      if (e2.extAfter) out.push([base[base.length - 1][1], e2.extAfter, 'ext']);
+      const bStart = d.extBefore || (e2 && e2.extBefore);
+      const aEnd = d.extAfter || (e2 && e2.extAfter);
+      if (bStart) out.unshift([bStart, base[0][0], 'ext']);
+      if (aEnd) out.push([base[base.length - 1][1], aEnd, 'ext']);
       return out;
     };
     const COLS = (readOnly && !full ? 8 : 16) + (hasBandCol ? 1 : 0); // 표 전체 열 수 (colspan용)
@@ -2853,9 +2913,11 @@
       const defs = (day && day.bands && day.bands.length) ? day.bands : (e2 && e2.slots);
       if (defs && defs.length) {
         const list = defs.map((bd) => ({ id: 'band_' + bd[0], start: bd[0], end: bd[1], extBand: bd[2] === 'ext' }));
-        // 확장 창(경계는 인접 띠에 물림)도 선택지로 — 고정띠는 아니므로 '확장' 표기
-        if (e2 && e2.extBefore) list.unshift({ id: 'band_extb', start: e2.extBefore, end: defs[0][0], extBand: true });
-        if (e2 && e2.extAfter) list.push({ id: 'band_exta', start: defs[defs.length - 1][1], end: e2.extAfter, extBand: true });
+        // 확장 창(경계는 인접 띠에 물림)도 선택지로 — 고정띠는 아니므로 '확장' 표기 (날짜별 조정 우선)
+        const bStart = (day && day.extBefore) || (e2 && e2.extBefore);
+        const aEnd = (day && day.extAfter) || (e2 && e2.extAfter);
+        if (bStart) list.unshift({ id: 'band_extb', start: bStart, end: defs[0][0], extBand: true });
+        if (aEnd) list.push({ id: 'band_exta', start: defs[defs.length - 1][1], end: aEnd, extBand: true });
         return list;
       }
       return (day ? day.slots : []).filter((s) => s.start && s.end);

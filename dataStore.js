@@ -1452,6 +1452,16 @@
               detail: `${day.date} 시간띠 조정(이 날짜만)${made.length ? ` · 남는 구간 띠 생성: ${made.join(', ')}` : ''}` });
         emit();
       },
+      // 확장 시간 수기 조정(이 날짜만) — before: 앞 확장 시작(HH:MM)·null=기본, after: 뒤 확장 종료·null=기본
+      // 반대쪽 경계는 인접 고정띠에 물려 있으므로 저장하지 않음
+      setDayExt(dayId, patch) {
+        const day = state.days.find((d) => d.id === dayId);
+        if (!day) return;
+        if (patch.before !== undefined) { if (patch.before) day.extBefore = patch.before; else delete day.extBefore; }
+        if (patch.after !== undefined) { if (patch.after) day.extAfter = patch.after; else delete day.extAfter; }
+        log({ action: '확장조정', detail: `${day.date} 확장 ${patch.before !== undefined ? `시작 ${patch.before || '기본값'}` : ''}${patch.after !== undefined ? `종료 ${patch.after || '기본값'}` : ''} (이 날짜만)` });
+        emit();
+      },
       // 시간띠 삭제(이 날짜만) — 이 띠 구간의 상품은 삭제하지 않고 입찰 풀로 복귀
       removeDayBand(dayId, idx) {
         const day = state.days.find((d) => d.id === dayId);
