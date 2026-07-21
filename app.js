@@ -178,6 +178,7 @@
    * ===================================================================== */
   function PlacementCard({ state, p, subTime, subSlot, simple }) {
     const team = teamOf(state, p.teamId);
+    const srcPart = p.sourceBidId ? ((state.bids.find((b2) => b2.id === p.sourceBidId) || {}).part || null) : null; // MD 입찰의 부(순번)
     const [info, setInfo] = useState(false);
     const [startEdit, setStartEdit] = useState(false);
     const [subEdit, setSubEdit] = useState(false);   // 세부 시간(⏱) 클릭 → 시간 조정
@@ -201,6 +202,7 @@
                   title="MD 입찰의 세부 시간 — 클릭해 시간 조정">⏱ ${subTime}</button>`
               : html`<div class="text-[10px] font-semibold text-amber-700 tabular-nums" title="MD 입찰의 세부 시간 (고정 띠 안에 자동 귀속)">⏱ ${subTime}</div>`)}
             <div class="mt-0.5 flex flex-wrap items-center gap-1">
+              ${srcPart && html`<${Badge} color="#0891b2" title="MD 입찰의 부(순번)">${srcPart}부<//>`}
               <${Badge} color=${team.color}>${team.name}<//>
               ${!simple && items.length > 1 && html`<${Badge} color="#7c3aed" title="동시 노출 착장 수">동시 ${items.length}착장<//>`}
               ${!simple && det.isNew && html`<${Badge} color="#0891b2">신상품<//>`}
@@ -655,7 +657,12 @@
     const placements = state.placements.filter((p) => slotIds.has(p.slotId))
       .sort((a, b) => {
         const sa = slots.find((sl) => sl.id === a.slotId), sb = slots.find((sl) => sl.id === b.slotId);
-        return U.toMin((sa && sa.start) || '00:00') - U.toMin((sb && sb.start) || '00:00');
+        const d = U.toMin((sa && sa.start) || '00:00') - U.toMin((sb && sb.start) || '00:00');
+        if (d) return d;
+        // 같은 시간(띠) 안에서는 MD 입찰의 부(순번) 순
+        const pa = parseInt((state.bids.find((x) => x.id === a.sourceBidId) || {}).part, 10) || 99;
+        const pb = parseInt((state.bids.find((x) => x.id === b.sourceBidId) || {}).part, 10) || 99;
+        return pa - pb;
       });
     const teamsIn = new Set(placements.map((p) => p.teamId));
     const compete = teamsIn.size;
