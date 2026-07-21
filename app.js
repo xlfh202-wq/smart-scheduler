@@ -9,6 +9,31 @@
   window.__store = store; // 관리자 콘솔 유지보수용 (데이터 점검·일괄 작업)
   const U = store.util;
 
+  // ── 새 버전 감지 → 자동 새로고침 ──────────────────────────────────────
+  // 배포 후 구버전 세션이 오래 남지 않도록: 몇 분마다(그리고 탭이 다시 보일 때)
+  // 서버의 index.html 버전을 확인해, 새 버전이면 입력·팝업 중이 아닐 때 새로고침.
+  (function versionWatch() {
+    const m0 = ((document.querySelector('script[src*="app.js"]') || {}).src || '').match(/v=(\d+)/);
+    const cur = m0 ? Number(m0[1]) : 0;
+    if (!cur) return;
+    async function check() {
+      try {
+        const html = await fetch('/?vchk=' + Date.now(), { cache: 'no-store' }).then((r) => r.text());
+        const m = html.match(/app\.js\?v=(\d+)/);
+        if (!m || Number(m[1]) <= cur) return;
+        // 사용 중 보호: 팝업 열림·입력 포커스·저장 전 초안이면 이번엔 건너뛰고 다음 체크 때
+        const typing = /INPUT|TEXTAREA|SELECT/.test((document.activeElement || {}).tagName || '');
+        const modalOpen = !!document.querySelector('.fixed.inset-0');
+        const drafting = store.draftCount && store.draftCount() > 0;
+        if (typing || modalOpen || drafting) return;
+        console.info('[version] 새 버전 v' + m[1] + ' 감지 → 새로고침');
+        window.location.reload();
+      } catch (e) {}
+    }
+    setInterval(check, 4 * 60 * 1000);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+  })();
+
   /* ---------- 공용 훅 ---------- */
   function useStore() {
     const [, setTick] = useState(0);
