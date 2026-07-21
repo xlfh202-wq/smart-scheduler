@@ -1218,6 +1218,20 @@
               from: slotLabel(p.slotId), detail: p.sourceBidId ? '원본 입찰 포함 완전 삭제' : '완전 삭제(수기추가)' });
         emit();
       },
+      // 편성 카드의 부(순번) 지정/해제 — PD·관리자용. 원본 입찰이 있으면 함께 동기화
+      setPlacementPart(placementId, part) {
+        const p = state.placements.find((x) => x.id === placementId);
+        if (!p) return;
+        p.part = part || null;
+        stamp(p);
+        if (p.sourceBidId) {
+          const b = state.bids.find((x) => x.id === p.sourceBidId);
+          if (b) { b.part = part || null; stamp(b); }
+        }
+        log({ action: '부지정', productName: p.productName, teamName: teamName(p.teamId),
+              detail: part ? `${part}부로 지정` : '부(순번) 지정 해제' });
+        emit();
+      },
       updatePlacementMeta(placementId, patch) {
         const p = state.placements.find((x) => x.id === placementId);
         if (!p) return;

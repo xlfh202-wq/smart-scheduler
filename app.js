@@ -201,13 +201,21 @@
   /* =====================================================================
    *  편성 카드 (PD 편성표 내부, 드래그 가능)
    * ===================================================================== */
+  // 편성 카드의 부(순번): 원본 입찰(MD)의 part 우선, 없으면 편성 자체의 part(PD·관리자 직접 지정)
+  function placementPart(state, p) {
+    if (!p) return null;
+    const b = p.sourceBidId ? state.bids.find((x) => x.id === p.sourceBidId) : null;
+    return (b && parseInt(b.part, 10)) || parseInt(p.part, 10) || null;
+  }
+
   function PlacementCard({ state, p, subTime, subSlot, simple }) {
     const team = teamOf(state, p.teamId);
-    const srcPart = p.sourceBidId ? ((state.bids.find((b2) => b2.id === p.sourceBidId) || {}).part || null) : null; // MD 입찰의 부(순번)
+    const srcPart = placementPart(state, p); // 부(순번)
     const [info, setInfo] = useState(false);
     const [startEdit, setStartEdit] = useState(false);
     const [subEdit, setSubEdit] = useState(false);   // 세부 시간(⏱) 클릭 → 시간 조정
     const [castOpen, setCastOpen] = useState(false); // 🎤 빠른 캐스팅 입력
+    const [partSet, setPartSet] = useState(false);   // 부(순번) 지정 팝업
     const [ctx, setCtx] = useState(null);            // 우클릭 메뉴 {x, y}
     const det = p.detail || {};
     const items = p.items || [];
@@ -254,6 +262,7 @@
         ${info && html`<${PlacementDetailModal} state=${state} p=${p} startEdit=${startEdit} onClose=${(e) => { e && e.stopPropagation && e.stopPropagation(); setInfo(false); }} />`}
         ${subEdit && subSlot && html`<${EditSlotTimeModal} slot=${subSlot} placement=${p} rippleDefault=${true} onClose=${() => setSubEdit(false)} />`}
         ${castOpen && html`<${CastQuickModal} state=${state} p=${p} onClose=${() => setCastOpen(false)} />`}
+        ${partSet && html`<${PartSetModal} state=${state} p=${p} onClose=${(e) => { e && e.stopPropagation && e.stopPropagation(); setPartSet(false); }} />`}
         ${ctx && (() => {
           const close = () => setCtx(null);
           const item = (label, fn, danger) => html`
@@ -266,6 +275,7 @@
                 style=${{ left: Math.min(ctx.x, window.innerWidth - 272) + 'px', top: Math.min(ctx.y, window.innerHeight - 140) + 'px' }}
                 onClick=${(e) => e.stopPropagation()}>
                 <div class="px-3 py-1 text-[11px] text-ink-soft border-b border-slate-100 truncate">${p.productName}</div>
+                ${item(`🔢 부(순번) 지정${srcPart ? ` — 현재 ${srcPart}부` : ''}`, () => setPartSet(true))}
                 ${item('🚫 편성 제외 (입찰 풀로 복귀)', () => {
                   if (confirm(`'${p.productName}'을(를) 편성에서 제외할까요?\n상품은 삭제되지 않고 입찰 풀(미편성)로 돌아갑니다.`)) store.removePlacement(p.id);
                 })}
@@ -276,6 +286,25 @@
             </div>`;
         })()}
       </div>`;
+  }
+
+  // 편성 카드의 부(순번) 지정 — PD·관리자용: 같은 띠·같은 팀 상품을 1·2·3부 묶음으로 (클릭 즉시 적용)
+  function PartSetModal({ state, p, onClose }) {
+    const cur = placementPart(state, p);
+    const [maxPart, setMaxPart] = useState(Math.max(4, cur || 1));
+    const pick = (pt) => { store.setPlacementPart(p.id, pt); onClose(); };
+    return html`
+      <${Modal} title=${`부(순번) 지정 · ${p.productName}`} onClose=${onClose} onSave=${onClose}>
+        <div class="flex flex-wrap items-center gap-1.5">
+          <button type="button" onClick=${() => pick(null)}
+            class=${`text-[13px] px-3 py-1.5 rounded-full border transition ${cur == null ? 'bg-slate-600 text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-slate-500'}`}>지정 안 함</button>
+          ${Array.from({ length: maxPart }, (_, i) => i + 1).map((pt) => html`
+            <button type="button" key=${pt} onClick=${() => pick(pt)}
+              class=${`text-[13px] px-3 py-1.5 rounded-full border transition ${cur === pt ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-brand hover:text-brand'}`}>${pt}부</button>`)}
+          <button type="button" onClick=${() => setMaxPart(maxPart + 1)} class="text-[12px] text-ink-soft hover:text-brand px-1">+ ${maxPart + 1}부 추가</button>
+        </div>
+        <div class="text-[12px] text-ink-soft">부를 클릭하면 바로 적용됩니다. 같은 띠 안 같은 팀의 부(순번) 상품은 점선 묶음으로 붙어 표시되고, 원본 입찰(MD 화면)에도 함께 반영됩니다.</div>
+      <//>`;
   }
 
   /* =====================================================================
@@ -724,7 +753,7 @@
     if (teams.size < 2) return { compete: 0, split: false };
     const meta = placements.map((p) => {
       const b = p.sourceBidId ? state.bids.find((x) => x.id === p.sourceBidId) : null;
-      return { team: p.teamId, part: (b && parseInt(b.part, 10)) || null,
+      return { team: p.teamId, part: (b && parseInt(b.part, 10)) || parseInt(p.part, 10) || null,
         dur: p.durationMin || (b && b.product && b.product.durationMin) || null,
         range: rangeOf ? rangeOf(p) : null };
     });
@@ -753,8 +782,8 @@
         const d = U.toMin((sa && sa.start) || '00:00') - U.toMin((sb && sb.start) || '00:00');
         if (d) return d;
         // 같은 시간(띠) 안에서는 MD 입찰의 부(순번) 순
-        const pa = parseInt((state.bids.find((x) => x.id === a.sourceBidId) || {}).part, 10) || 99;
-        const pb = parseInt((state.bids.find((x) => x.id === b.sourceBidId) || {}).part, 10) || 99;
+        const pa = placementPart(state, a) || 99;
+        const pb = placementPart(state, b) || 99;
         return pa - pb;
       });
     const teamsIn = new Set(placements.map((p) => p.teamId));
@@ -852,7 +881,7 @@
                     subSlot=${slots.find((x) => x.id === p.slotId)} simple=${simple} />
                 </div>`;
               // 부(순번)로 나눈 같은 팀 상품은 한 묶음으로 붙여 표시 (카드는 개별 드래그·수정 가능)
-              const partOf = (p) => p.sourceBidId ? (parseInt((state.bids.find((x) => x.id === p.sourceBidId) || {}).part, 10) || null) : null;
+              const partOf = (p) => placementPart(state, p);
               const groupMap = {}; const entries = [];
               placements.forEach((p) => {
                 const pt = partOf(p);
@@ -1896,7 +1925,7 @@
         const p = r.p; const det = (p && p.detail) || {};
         const dnum = Number(r.day.date.slice(8)); const mm = Number(r.day.date.slice(5, 7));
         const items = (p && p.items && p.items.length > 1) ? '\n· ' + p.items.join('\n· ') : '';
-        const srcPartX = p && p.sourceBidId ? ((state.bids.find((x) => x.id === p.sourceBidId) || {}).part || null) : null;
+        const srcPartX = placementPart(state, p);
         const bandCell = hasBandCol ? [r.band && r.firstOfBand ? `${r.band[0]}~${r.band[1]}${r.band[2] === 'ext' ? ' (확장)' : ''}` : ''] : [];
         const timeCell = (srcPartX ? `[${srcPartX}부] ` : '') + slotName(r.slot) + (r.slot.start && r.slot.end ? ` (${U.slotDuration(r.slot)}분)` : '');
         aoa.push(['', ''].map((_, ci) => (r.firstOfDay ? (ci === 0 ? `${mm}/${dnum}` : U.WEEKDAY_KO[r.day.weekday]) : ''))
@@ -2046,7 +2075,7 @@
       });
       // 2) 정렬: 실제 시간순 — 띠에 속한 행은 띠 시작시간을 앵커로 묶고(rowSpan 병합 유지),
       //    띠 밖 슬롯(수기 +시간대·확장 등)은 자기 시작시간 위치에 끼워 넣는다
-      const partOfP = (p) => (p && p.sourceBidId) ? (parseInt((state.bids.find((x) => x.id === p.sourceBidId) || {}).part, 10) || null) : null;
+      const partOfP = (p) => placementPart(state, p);
       const startOf = (it) => U.toMin(it.slot.start || '00:00');
       const bandTime = (it) => { const bi = bandOf(it.slot);
         if (bi >= 0) return U.toMin(dBands[bi][0]);
@@ -2259,7 +2288,7 @@
                 const wd = U.WEEKDAY_KO[r.day.weekday];
                 const wdColor = r.day.weekday === 6 ? 'text-blue-600' : r.day.weekday === 0 ? 'text-red-500' : 'text-ink';
                 const pend = p && p.pending;
-                const srcPart = p && p.sourceBidId ? ((state.bids.find((x) => x.id === p.sourceBidId) || {}).part || null) : null;
+                const srcPart = placementPart(state, p);
                 if (r.off) return html`
                   <tr key=${i} data-adj=${adj ? '1' : undefined} class=${`border-t-2 border-t-slate-300 bg-slate-50 ${adj ? 'opacity-60' : ''}`}
                     onContextMenu=${readOnly ? undefined : ((e) => { e.preventDefault(); setStatusDay(r.day); })}>
