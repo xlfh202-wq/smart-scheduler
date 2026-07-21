@@ -2278,12 +2278,16 @@
   /* =====================================================================
    *  MD 입찰 보드
    * ===================================================================== */
-  function BidBoard({ state, readOnly, lockTeam }) {
+  function BidBoard({ state, readOnly, lockTeam, canLock }) {
     const teams = state.teams || []; // MD 입찰은 전체 팀 대상(부문별 그룹 표시)
     const [detailBid, setDetailBid] = useState(null); // 조회 전용: 칩 클릭 → 읽기 상세
     const [importOpen, setImportOpen] = useState(false); // 지난 입찰 가져오기(2차 편성)
     const schema = programSchema(state);
     const fashion = schema === 'fashion';
+    // 입찰 잠금(프리징): PD·관리자가 이 프로그램·월을 잠그면 MD는 조회만 가능
+    const lockYm = `${state.view.year}-${String(state.view.month).padStart(2, '0')}`;
+    const bidLock = (state.bidLocks || {})[`${state.activeProgram}|${lockYm}`] || null;
+    if (bidLock && !canLock) readOnly = true;
     const [teamSel, setTeamSel] = useState(null);
     // MD 로그인: 자기 팀으로 고정 (팀 선택 없이 내 팀 입찰만 표시) — 팀명이 목록에 없으면 기존 방식 유지
     const lockedTeam = lockTeam ? teams.find((t) => t.name === lockTeam) : null;
@@ -2333,6 +2337,12 @@
         <div class="p-4 space-y-3 max-w-[1100px]">
           <div class="flex items-center justify-between gap-2 flex-wrap">
             <h2 class="text-base font-bold text-ink">${teamOf(state, team).name} 입찰 · ${state.view.year}년 ${state.view.month}월 — 총 ${teamBids.length}건</h2>
+            ${canLock && html`<button onClick=${() => {
+                if (!bidLock && !confirm(`${state.view.month}월 ${activeProgramObj(state).name} MD 입찰을 잠글까요?\n잠그면 MD는 조회만 가능하고, 등록·수정이 차단됩니다.`)) return;
+                store.setBidLock(state.activeProgram, lockYm, !bidLock);
+              }}
+              class=${`text-xs px-2.5 py-1 rounded border whitespace-nowrap shrink-0 ${bidLock ? 'border-amber-400 text-amber-800 bg-amber-50' : 'border-slate-300 bg-white hover:border-amber-500 hover:text-amber-700'}`}
+              title="편성 조정 중 MD 기입을 막습니다 (프로그램·월 단위)">${bidLock ? '🔓 입찰 잠금 해제' : '🔒 입찰 잠금'}</button>`}
             ${!readOnly && html`<div class="flex items-center gap-2">
               <button onClick=${() => setImportOpen(true)}
                 class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand"
@@ -2341,6 +2351,9 @@
                 class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand">+ 편성일 추가</button>
             </div>`}
           </div>
+          ${bidLock && html`<div class="text-[12px] font-semibold text-amber-800 bg-amber-50 border border-amber-300 rounded px-3 py-2 -mt-1">
+            🔒 ${state.view.month}월 MD 입찰이 잠겨 있습니다 — PD·편성 조정 중${bidLock.by ? ` (${bidLock.by})` : ''}.
+            ${canLock ? ' 조정이 끝나면 위 "입찰 잠금 해제"를 눌러주세요.' : ' 수정이 필요하면 담당 PD에게 문의하세요.'}</div>`}
           ${readOnly
             ? html`<div class="text-[11px] text-ink-soft -mt-1">🔎 조회 전용 — 입찰 카드를 클릭하면 상세 정보를 볼 수 있습니다.</div>`
             : html`<div class="text-[11px] text-ink-soft -mt-1">💡 날짜 변경: 입찰 카드를 <b>드래그해 다른 날짜 칸에 놓거나</b>, 카드 클릭 → <b>희망 편성일</b>을 바꿔 저장하면 이동됩니다.</div>`}
@@ -3796,7 +3809,8 @@
             : curTab === 'finalview' ? html`<${FinalScheduleView} state=${state} readOnly=${true} />`
             : curTab === 'finalpgm' ? html`<${FinalScheduleView} state=${state} readOnly=${true} full=${true} />`
             : html`<${BidBoard} state=${state} readOnly=${!!roleCfg.viewOnly}
-                lockTeam=${auth.role === 'md' ? (auth.team || '') : ''} />`}
+                lockTeam=${auth.role === 'md' ? (auth.team || '') : ''}
+                canLock=${!!roleCfg.canManage} />`}
         </main>
 
         ${history && html`<${HistoryModal} state=${state} isAdmin=${roleCfg.isAdmin} onClose=${() => setHistory(false)} />`}

@@ -1000,6 +1000,15 @@
         emit();
         return { added, newDays, programs: progs.size };
       },
+      // MD 입찰 잠금(프리징): PD·관리자가 편성 조정 중일 때 해당 프로그램·월의 MD 기입을 차단
+      setBidLock(programId, ym, locked) {
+        state.bidLocks = state.bidLocks || {};
+        const key = programId + '|' + ym;
+        if (locked) state.bidLocks[key] = { by: currentUser || '', ts: nowISO() };
+        else delete state.bidLocks[key];
+        log({ action: locked ? '입찰잠금' : '입찰잠금해제', detail: `${ym} MD 입찰 ${locked ? '잠금 (편성 조정 중)' : '잠금 해제'}` });
+        emit();
+      },
       // 날짜 운영 상태: null(정상) | 'off'(미운영·결방) | 'general'(테마PGM 대신 일반프로그램 운영)
       // 'off' 표기 시 이 날의 편성 상품은 입찰 풀(미편성)로 복귀 (수기추가 상품은 입찰로 변환해 보존)
       setDayStatus(dayId, { status, reason }) {
