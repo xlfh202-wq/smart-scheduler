@@ -927,6 +927,8 @@
           if (!slot) { slot = { id: 'slot_' + uid(), start: '', end: '', label: part, manual: true }; day.slots.push(slot); }
         } else if (start) {
           const dur = durationMin ? Number(durationMin) : ((b.product && b.product.durationMin) || null);
+          // 노출분을 함께 지정하면 입찰 상품 정보에도 반영 (편성 카드에 희망 노출분 표시)
+          if (durationMin) { b.product = b.product || {}; b.product.durationMin = Number(durationMin); }
           const e = end || (dur ? toHHMM(toMin(start) + dur) : start);
           slot = ensureSlotOnDay(day, start, e); slot.manual = true;
         } else {
@@ -1174,7 +1176,15 @@
           slot = ensureSlotOnDay(day, start, e); slot.manual = true;
         } else return;
         const fromLabel = slotLabel(p.slotId);
-        if (p.slotId === slot.id) return;
+        // 노출분을 함께 지정하면 편성·원본 입찰에 반영 (띠 안 시간 배분 참고용)
+        if (durationMin) {
+          p.durationMin = Number(durationMin);
+          if (p.sourceBidId) {
+            const b = state.bids.find((x) => x.id === p.sourceBidId);
+            if (b) { b.product = b.product || {}; b.product.durationMin = Number(durationMin); stamp(b); }
+          }
+        }
+        if (p.slotId === slot.id) { if (durationMin) { stamp(p); emit(); } return; }
         p.slotId = slot.id;
         p.moveCount = (p.moveCount || 0) + 1;
         stamp(p);

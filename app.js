@@ -674,7 +674,42 @@
   /* =====================================================================
    *  고정 시간띠 행 — MD가 잘게 쪼갠 시간대도 이 띠 아래에 자동 귀속 표시
    * ===================================================================== */
-  function BandRow({ state, day, band, onQuickAdd, onExtBid, onExtMove, onEditBand, onCtxMenu, simple }) {
+  // 날짜의 고정 시간띠 정의: 날짜별 조정(day.bands) 우선, 없으면 프로그램 고정 스케줄
+  function dayBands(state, day) {
+    if (!day) return [];
+    if (day.bands && day.bands.length) return day.bands;
+    const sc = store.getSchedule ? store.getSchedule(day.programId) : null;
+    const e2 = sc ? sc.find((x) => x.wd === day.weekday) : null;
+    return (e2 && e2.slots) || [];
+  }
+
+  // 같은 시간창 안 '경쟁 vs 분할' 판정 — 부(순번) 지정, 노출분 배분, 세부 시간 분리로
+  // 시간을 나눠 놓은 상품들은 경쟁이 아니라 띠 안 분할로 인식한다.
+  // rangeOf(p) → [startMin, endMin] (상대분) 또는 null(시간 미상 = 같은 창 전체 점유로 간주)
+  function competeInfo(state, placements, rangeOf) {
+    const teams = new Set(placements.map((p) => p.teamId));
+    if (teams.size < 2) return { compete: 0, split: false };
+    const meta = placements.map((p) => {
+      const b = p.sourceBidId ? state.bids.find((x) => x.id === p.sourceBidId) : null;
+      return { team: p.teamId, part: (b && parseInt(b.part, 10)) || null,
+        dur: p.durationMin || (b && b.product && b.product.durationMin) || null,
+        range: rangeOf ? rangeOf(p) : null };
+    });
+    const conflict = new Set();
+    for (let i = 0; i < meta.length; i++) for (let j = i + 1; j < meta.length; j++) {
+      const A = meta[i], B = meta[j];
+      if (A.team === B.team) continue;
+      if (A.range && B.range && !(A.range[0] < B.range[1] && B.range[0] < A.range[1])) continue; // 시간을 서로 나눠 놓음
+      if (A.part && B.part && A.part !== B.part) continue; // 부(순번)를 나눠 놓음
+      const win = (A.range && B.range)
+        ? Math.min(A.range[1], B.range[1]) - Math.max(A.range[0], B.range[0]) : 0;
+      if (A.dur && B.dur && win > 0 && A.dur + B.dur <= win) continue; // 노출분 합이 창 안 → 나눠 쓰기
+      conflict.add(A.team); conflict.add(B.team);
+    }
+    return { compete: conflict.size, split: conflict.size < 2 };
+  }
+
+  function BandRow({ state, day, band, onQuickAdd, onExtBid, onExtMove, onBandBid, onBandMove, onEditBand, onCtxMenu, simple }) {
     const [over, setOver] = useState(false);
     const isExt = !!band.ext;
     const slots = band.slots || [];
@@ -690,8 +725,18 @@
         return pa - pb;
       });
     const teamsIn = new Set(placements.map((p) => p.teamId));
-    const compete = teamsIn.size;
+    // 경쟁 판정: 부·노출분·세부시간으로 시간을 나눠 놓은 팀들은 경쟁이 아니라 '분할'
+    const relBase = U.toMin((!isExt && band.start) || ((slots[0] && slots[0].start) || '00:00'));
+    const ci = competeInfo(state, placements, (p) => {
+      const sl = slots.find((x) => x.id === p.slotId);
+      if (!sl || !sl.start || !sl.end) return null;
+      let s = (U.toMin(sl.start) - relBase + 1440) % 1440, e2 = (U.toMin(sl.end) - relBase + 1440) % 1440;
+      if (e2 <= s) e2 += 1440;
+      return [s, e2];
+    });
+    const compete = ci.compete;
     const compColor = compete >= 3 ? '#dc2626' : compete === 2 ? '#f59e0b' : null;
+    const splitShare = !compColor && teamsIn.size >= 2; // 여러 팀이 시간을 나눠 쓰는 중
     const dur = isExt ? 0 : (U.toMin(band.end) - U.toMin(band.start) + 1440) % 1440;
     // 카드에 표시할 세부 시간 (띠와 완전히 같으면 생략)
     const subTimeOf = (p) => {
@@ -709,9 +754,14 @@
         else if (pl.kind === 'placement' && onExtMove) onExtMove(pl.id);
         return;
       }
-      // 고정 띠에 놓으면 띠 시간대로 편성 (PD 수기 조정은 카드 이동/수정으로)
-      if (pl.kind === 'bid') store.assignBidToDay(pl.id, day.id, { start: band.start, end: band.end });
-      else if (pl.kind === 'placement') store.movePlacementToSlotSpec(pl.id, day.id, { start: band.start, end: band.end });
+      // 고정 띠에 놓으면 놓은 띠를 자동 인식한 확인 팝업(노출분 입력) — 핸들러 없으면 즉시 띠 시간으로 편성
+      if (pl.kind === 'bid') {
+        if (onBandBid) onBandBid(pl.id, band);
+        else store.assignBidToDay(pl.id, day.id, { start: band.start, end: band.end });
+      } else if (pl.kind === 'placement') {
+        if (onBandMove) onBandMove(pl.id, band);
+        else store.movePlacementToSlotSpec(pl.id, day.id, { start: band.start, end: band.end });
+      }
     }
     return html`
       <div class=${`flex rounded-lg border overflow-hidden ${isExt ? 'bg-slate-50/70' : 'bg-white'} ${over ? 'drop-active' : ''}`}
@@ -731,6 +781,9 @@
               <span class="text-[11px] font-semibold text-ink-soft">${dur}분</span>`}
           ${compColor && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: compColor + '22', color: compColor }}>
             <span class="w-1.5 h-1.5 rounded-full shrink-0" style=${{ background: compColor }}></span>경쟁 ${compete}팀</span>`}
+          ${splitShare && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: '#0284c722', color: '#0284c7' }}
+            title="여러 팀이 부(순번)·노출분으로 시간을 나눠 쓰는 띠 — 경쟁이 아닙니다">
+            <span class="w-1.5 h-1.5 rounded-full shrink-0" style=${{ background: '#0284c7' }}></span>분할 ${teamsIn.size}팀</span>`}
         </div>
         <div class=${`flex-1 flex flex-wrap items-stretch content-start gap-1 p-1.5 min-h-[56px] ${placements.length === 0 ? 'cursor-copy' : ''}`}
           onDoubleClick=${placements.length === 0 && onQuickAdd ? (() => onQuickAdd(band.start || '')) : undefined}
@@ -792,9 +845,11 @@
     const dur = U.slotDuration(slot);
     const placements = state.placements.filter((p) => p.slotId === slot.id);
     const teamsIn = new Set(placements.map((p) => p.teamId));
-    // 경쟁: 같은 시간대에 2팀 이상 → 노란불, 3팀+ → 빨간불
-    const compete = teamsIn.size;
+    // 경쟁: 같은 시간대에 2팀 이상 → 노란불, 3팀+ → 빨간불 (부·노출분으로 나눈 팀들은 분할로 인식)
+    const ci = competeInfo(state, placements, () => (slot.start && slot.end) ? [0, dur] : null);
+    const compete = ci.compete;
     const compColor = compete >= 3 ? '#dc2626' : compete === 2 ? '#f59e0b' : null;
+    const splitShare = !compColor && teamsIn.size >= 2;
 
     function onDrop(e) {
       e.preventDefault(); e.stopPropagation(); setOver(false); // 슬롯에 놓으면 여기서 처리(날짜 드롭존과 분리)
@@ -818,6 +873,9 @@
           ${slot.start && slot.end && html`<span class="text-[11px] font-semibold text-ink-soft">${dur}분</span>`}
           ${compColor && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: compColor + '22', color: compColor }}>
             <span class="w-1.5 h-1.5 rounded-full shrink-0" style=${{ background: compColor }}></span>경쟁 ${compete}팀</span>`}
+          ${splitShare && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: '#0284c722', color: '#0284c7' }}
+            title="여러 팀이 부(순번)·노출분으로 시간을 나눠 쓰는 시간대 — 경쟁이 아닙니다">
+            <span class="w-1.5 h-1.5 rounded-full shrink-0" style=${{ background: '#0284c7' }}></span>분할 ${teamsIn.size}팀</span>`}
           <div class="mt-auto flex items-center gap-0.5 text-ink-soft">
             ${slot.start && slot.end && html`<button title="시간 분할" onClick=${() => setSplitOpen(true)} class="hover:text-brand text-xs px-0.5">⊟</button>`}
             <button title="시간대 삭제" onClick=${() => { const n = state.placements.filter((x) => x.slotId === slot.id).length;
@@ -1030,7 +1088,7 @@
       if (!pl) return;
       if (pl.kind === 'bid') {
         if (fashion) setPartPick({ bidId: pl.id }); // 어느 부에 넣을지 선택
-        else setBidTimeFor(pl.id);
+        else setBidTimeFor({ id: pl.id });
         return;
       }
       if (pl.kind !== 'placement') return;
@@ -1039,7 +1097,7 @@
       const sameDay = curDay && curDay.id === day.id;
       if (!sameDay && !fashion) { store.movePlacementToDay(pl.id, day.id); return; }
       if (fashion) setPartPick({ pid: pl.id }); // 어느 부에 넣을지 선택 (다른 날짜에서 와도 동일)
-      else setMoveTimeFor(pl.id);
+      else setMoveTimeFor({ id: pl.id });
     }
     return html`
       <div class=${`rounded-xl border bg-white shadow-sm overflow-hidden ${dayOver ? 'ring-2 ring-brand' : 'border-slate-200'}`}
@@ -1058,7 +1116,7 @@
             ${fashion && html`<button onClick=${() => setPartOpen(true)} class="hover:text-brand" title="이 날짜의 상품을 1부·2부…로 한번에 배분">🧩 부 나누기</button>`}
             ${useBands && html`<button onClick=${() => setShowExt(!showExt)} class="hover:text-brand" title="고정 시간띠 앞뒤의 확장 시간대 보기/숨기기">확장 ${showExt ? '▴' : '▾'}</button>`}
             <button onClick=${() => setAddOpen(true)} class="hover:text-brand">+ 시간대</button>
-            <button onClick=${() => store.addSlot(day.id, { order: true })} class="hover:text-brand">+ 순번</button>
+            ${fashion && html`<button onClick=${() => store.addSlot(day.id, { order: true })} class="hover:text-brand" title="순번(1부·2부…) 슬롯 추가 — 부 편성 프로그램용">+ 순번</button>`}
             <button onClick=${() => {
                 const nP = state.placements.filter((x) => day.slots.some((sl) => sl.id === x.slotId)).length;
                 const placedIds = new Set(state.placements.map((x) => x.sourceBidId).filter(Boolean));
@@ -1078,14 +1136,16 @@
           ${useBands ? html`
             ${(showExt || extBefore.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extBefore} simple=${simple}
               onQuickAdd=${() => { setQuickInit(''); setQuickOpen(true); }}
-              onExtBid=${setBidTimeFor} onExtMove=${setMoveTimeFor} />`}
+              onExtBid=${(id) => setBidTimeFor({ id, ext: true })} onExtMove=${(id) => setMoveTimeFor({ id, ext: true })} />`}
             ${bands.map((bd, bi) => html`<${BandRow} key=${bi} state=${state} day=${day} band=${bd} simple=${simple}
               onQuickAdd=${(st) => { setQuickInit(st); setQuickOpen(true); }}
+              onBandBid=${(id, b2) => setBidTimeFor({ id, band: [b2.start, b2.end] })}
+              onBandMove=${(id, b2) => setMoveTimeFor({ id, band: [b2.start, b2.end] })}
               onEditBand=${() => setBandEdit({ idx: bi, start: bd.start, end: bd.end })}
               onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'band', band: bd, idx: bi })} />`)}
             ${(showExt || extAfter.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extAfter} simple=${simple}
               onQuickAdd=${() => { setQuickInit(bands[bands.length - 1].end); setQuickOpen(true); }}
-              onExtBid=${setBidTimeFor} onExtMove=${setMoveTimeFor} />`}
+              onExtBid=${(id) => setBidTimeFor({ id, ext: true })} onExtMove=${(id) => setMoveTimeFor({ id, ext: true })} />`}
             ${labelSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} simple=${simple}
               onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'slot', slot: s })} />`)}`
           : (sortedSlots.length === 0
@@ -1134,67 +1194,125 @@
             </div>`;
         })()}
         ${quickOpen && html`<${QuickAddModal} state=${state} day=${day} initStart=${quickInit} onClose=${() => setQuickOpen(false)} />`}
-        ${moveTimeFor && html`<${MoveTimeModal} state=${state} day=${day} placementId=${moveTimeFor} onClose=${() => setMoveTimeFor(null)} />`}
-        ${bidTimeFor && html`<${BidTimeModal} state=${state} day=${day} bidId=${bidTimeFor} onClose=${() => setBidTimeFor(null)} />`}
+        ${moveTimeFor && html`<${MoveTimeModal} state=${state} day=${day} placementId=${moveTimeFor.id} initBand=${moveTimeFor.band} initExt=${moveTimeFor.ext} onClose=${() => setMoveTimeFor(null)} />`}
+        ${bidTimeFor && html`<${BidTimeModal} state=${state} day=${day} bidId=${bidTimeFor.id} initBand=${bidTimeFor.band} initExt=${bidTimeFor.ext} onClose=${() => setBidTimeFor(null)} />`}
       </div>`;
   }
 
-  // 입찰카드를 라이프스타일 날짜 영역에 놓았을 때 — 편성 시간 지정 팝업
-  function BidTimeModal({ state, day, bidId, onClose }) {
-    const b = state.bids.find((x) => x.id === bidId);
-    const [start, setStart] = useState('');
-    const dur = b && b.product && b.product.durationMin ? b.product.durationMin : '';
-    function save() {
-      if (!/^\d{1,2}:\d{2}$/.test(start)) { alert('시작 시간을 24시간 형식(예: 21:00)으로 입력하세요.'); return; }
-      store.assignBidToDay(bidId, day.id, { start, durationMin: dur || null });
-      onClose();
-    }
+  // 편성 위치 선택 UI 공통부: 고정 띠 칩(+직접 입력) — 띠 프로그램은 시간 수기 입력 없이 띠를 고르고 노출분만 적는다
+  function BandPickFields({ bands, bandIdx, setBandIdx, start, setStart, dur, setDur, durHint }) {
     return html`
-      <${Modal} title=${`${fmtDay(day)} · 편성 시간 지정${b && b.product ? ' · ' + b.product.name : ''}`} onClose=${onClose} onSave=${save}>
-        <${Field} label="편성할 시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${setStart} /><//>
-        <div class="text-[12px] text-ink-soft">${dur ? `노출분 ${dur}분 → 시작~시작+${dur}분 시간대로 생성되어 편성됩니다.` : '입력한 시각으로 새 시간대가 생성되어 편성됩니다.'}</div>
+      ${bands.length > 0 && html`
+        <${Field} label="편성할 시간 띠 *">
+          <div class="flex flex-wrap gap-1.5">
+            ${bands.map(([bs, be], i) => html`<button type="button" key=${i} onClick=${() => setBandIdx(i)}
+              class=${`text-[13px] px-3 py-1.5 rounded-full border transition tabular-nums ${bandIdx === i ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-brand hover:text-brand'}`}>
+              ${bs}~${be} <span class="text-[11px] font-normal">(${(U.toMin(be) - U.toMin(bs) + 1440) % 1440}분)</span></button>`)}
+            <button type="button" onClick=${() => setBandIdx(-1)}
+              class=${`text-[13px] px-3 py-1.5 rounded-full border transition ${bandIdx === -1 ? 'bg-slate-600 text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-slate-500'}`}>직접 입력</button>
+          </div>
+        <//>`}
+      ${(bandIdx === -1 || bands.length === 0) && html`
+        <${Field} label="시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${setStart} /><//>`}
+      <${Field} label=${bandIdx >= 0 ? '희망 노출분 (참고용)' : '노출분'}>
+        <div class="flex items-center rounded border border-slate-300 focus-within:border-brand px-2 w-32">
+          <input value=${dur} onInput=${(e) => setDur(e.target.value.replace(/[^\d]/g, ''))} inputmode="numeric" placeholder="예: 40"
+            class="w-full py-1.5 text-[13px] tabular-nums text-right bg-transparent outline-none" />
+          <span class="text-[12px] text-ink-soft pl-0.5">분</span>
+        </div>
+        ${durHint && html`<div class="mt-1 text-[11px] text-ink-soft">${durHint}</div>`}
       <//>`;
   }
 
-  // 같은 날짜 안에서 다른 시간대로 이동 (라이프스타일) — 시간 설정 팝업
-  function MoveTimeModal({ state, day, placementId, initSlot, initBand, onClose }) {
-    const p = state.placements.find((x) => x.id === placementId);
-    // 놓은 위치(행)의 시간을 자동 인식해 미리 채움 — 맞으면 그대로 저장, 다르면 고쳐서 저장
-    const autoStart = (initSlot && initSlot.start) || (initBand && initBand[0]) || '';
-    const [start, setStart] = useState(autoStart);
-    const dur = p && p.durationMin ? p.durationMin : '';
+  // 놓은 위치와 띠 목록으로 초기 선택 인덱스 계산 (일치하는 띠 없으면 첫 띠, 띠가 없으면 직접 입력)
+  function bandInitIdx(bands, initBand, initStart) {
+    if (initBand) { const i = bands.findIndex(([s, e]) => s === initBand[0] && e === initBand[1]); if (i >= 0) return i; }
+    if (initStart) { const i = bands.findIndex(([s, e]) => U.toMin(initStart) >= U.toMin(s) && U.toMin(initStart) < U.toMin(e)); if (i >= 0) return i; }
+    return bands.length ? 0 : -1;
+  }
+
+  // 입찰카드를 날짜/띠에 놓았을 때 — 편성 위치 지정 팝업 (띠 프로그램은 놓은 띠 자동 인식 + 노출분)
+  function BidTimeModal({ state, day, bidId, initBand, initExt, onClose }) {
+    const b = state.bids.find((x) => x.id === bidId);
+    const bands = dayBands(state, day);
+    const [bandIdx, setBandIdx] = useState(() => initExt ? -1 : bandInitIdx(bands, initBand || null, null));
+    const [start, setStart] = useState('');
+    const [dur, setDur] = useState(String((b && b.product && b.product.durationMin) || ''));
     function save() {
-      if (!/^\d{1,2}:\d{2}$/.test(start)) { alert('시작 시간을 24시간 형식(예: 21:00)으로 입력하세요.'); return; }
-      store.movePlacementToSlotSpec(placementId, day.id, { start, durationMin: dur || null });
+      const dm = dur.trim() ? parseInt(dur, 10) : null;
+      if (bandIdx >= 0 && bands[bandIdx]) {
+        store.assignBidToDay(bidId, day.id, { start: bands[bandIdx][0], end: bands[bandIdx][1], durationMin: dm });
+      } else {
+        if (!/^\d{1,2}:\d{2}$/.test(start)) { alert('시작 시간을 24시간 형식(예: 21:00)으로 입력하세요.'); return; }
+        store.assignBidToDay(bidId, day.id, { start, durationMin: dm });
+      }
+      onClose();
+    }
+    return html`
+      <${Modal} title=${`${fmtDay(day)} · 편성 위치 지정${b && b.product ? ' · ' + b.product.name : ''}`} onClose=${onClose} onSave=${save}>
+        ${initBand && html`<div class="text-[12px] bg-sky-50 border border-sky-200 text-sky-800 rounded px-2.5 py-1.5">
+          📍 놓은 위치 자동 인식: <b>${initBand[0]}~${initBand[1]} 띠</b> — 맞으면 노출분만 적고 저장하세요.</div>`}
+        <${BandPickFields} bands=${bands} bandIdx=${bandIdx} setBandIdx=${setBandIdx}
+          start=${start} setStart=${setStart} dur=${dur} setDur=${setDur}
+          durHint=${bandIdx >= 0 ? '선택한 띠 전체로 편성되고, 노출분은 띠 안 시간 배분 참고용으로 표시됩니다.' : '노출분을 넣으면 시작~시작+노출분 시간대로 생성됩니다.'} />
+      <//>`;
+  }
+
+  // 같은 날짜 안에서 다른 시간대로 이동 — 놓은 위치(띠)를 자동 인식해 미리 선택
+  function MoveTimeModal({ state, day, placementId, initSlot, initBand, initExt, onClose }) {
+    const p = state.placements.find((x) => x.id === placementId);
+    const bands = dayBands(state, day);
+    const autoStart = (initSlot && initSlot.start) || (initBand && initBand[0]) || '';
+    const [bandIdx, setBandIdx] = useState(() => initExt ? -1 : bandInitIdx(bands, initBand || null, autoStart || null));
+    const [start, setStart] = useState(autoStart);
+    const [dur, setDur] = useState(String((p && p.durationMin) || ''));
+    function save() {
+      const dm = dur.trim() ? parseInt(dur, 10) : null;
+      if (bandIdx >= 0 && bands[bandIdx]) {
+        store.movePlacementToSlotSpec(placementId, day.id, { start: bands[bandIdx][0], end: bands[bandIdx][1], durationMin: dm });
+      } else {
+        if (!/^\d{1,2}:\d{2}$/.test(start)) { alert('시작 시간을 24시간 형식(예: 21:00)으로 입력하세요.'); return; }
+        store.movePlacementToSlotSpec(placementId, day.id, { start, durationMin: dm });
+      }
       onClose();
     }
     return html`
       <${Modal} title=${`${fmtDay(day)} · 시간대 이동${p ? ' · ' + p.productName : ''}`} onClose=${onClose} onSave=${save}>
-        ${autoStart && html`<div class="text-[12px] bg-sky-50 border border-sky-200 text-sky-800 rounded px-2.5 py-1.5">
+        ${(initBand || (initSlot && initSlot.start)) && html`<div class="text-[12px] bg-sky-50 border border-sky-200 text-sky-800 rounded px-2.5 py-1.5">
           📍 놓은 위치 자동 인식: <b>${initBand ? `${initBand[0]}~${initBand[1]} 띠` : ''}${initSlot && initSlot.start ? `${initBand ? ' · ' : ''}${initSlot.start}~${initSlot.end}` : ''}</b>
-          — 이 시간이 맞으면 그대로 저장하세요.</div>`}
-        <${Field} label="이동할 시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${setStart} /><//>
-        <div class="text-[12px] text-ink-soft">${dur ? `노출분 ${dur}분 → 시작~시작+${dur}분 시간대로 생성됩니다.` : '입력한 시각으로 새 시간대가 생성되어 이동합니다.'}</div>
+          — 맞으면 그대로 저장하세요.</div>`}
+        <${BandPickFields} bands=${bands} bandIdx=${bandIdx} setBandIdx=${setBandIdx}
+          start=${start} setStart=${setStart} dur=${dur} setDur=${setDur}
+          durHint=${bandIdx >= 0 ? '선택한 띠 전체로 이동하고, 노출분은 띠 안 시간 배분 참고용으로 표시됩니다.' : '노출분을 넣으면 시작~시작+노출분 시간대로 생성됩니다.'} />
       <//>`;
   }
 
-  // 수기 상품 추가 — 날짜가 시간대형이면 시간 입력, 순번(1·2·3부)형이면 부 입력
+  // 수기 상품 추가 — 순번(1·2·3부)형은 부 입력, 띠형은 띠 선택 + 노출분, 그 외는 시간 입력
   function QuickAddModal({ state, day, onClose, initStart }) {
     const teams = programTeams(state);
     // 순번형: 패션 프로그램이거나, 이 날짜에 순번 슬롯(1부 등)이 있으면
     const orderMode = programSchema(state) === 'fashion' || day.slots.some((s) => s.label && !s.start);
+    const bands = orderMode ? [] : dayBands(state, day);
     const [name, setName] = useState('');
     const [dur, setDur] = useState('');
     const [start, setStart] = useState(initStart || '');
+    // 더블클릭·우클릭한 띠를 자동 인식해 선택 — 띠 밖(확장 등)에서 열었으면 직접 입력
+    const [bandIdx, setBandIdx] = useState(() => {
+      if (!bands.length || !initStart) return -1;
+      return bands.findIndex(([s, e]) => U.toMin(initStart) >= U.toMin(s) && U.toMin(initStart) < U.toMin(e));
+    });
     const [part, setPart] = useState('1부');
     const [team, setTeam] = useState(teams[0] ? teams[0].id : 'etc');
     function save() {
       if (!name.trim()) { alert('상품명을 입력하세요.'); return; }
+      const dm = String(dur || '').trim() ? parseInt(dur, 10) : null;
       if (orderMode) {
         store.addQuickPlacement({ dayId: day.id, part, productName: name.trim(), teamId: team });
+      } else if (bandIdx >= 0 && bands[bandIdx]) {
+        store.addQuickPlacement({ dayId: day.id, start: bands[bandIdx][0], end: bands[bandIdx][1], durationMin: dm, productName: name.trim(), teamId: team });
       } else {
         if (!/^\d{1,2}:\d{2}$/.test(start)) { alert('시간을 24시간 형식(예: 21:00)으로 입력하세요.'); return; }
-        store.addQuickPlacement({ dayId: day.id, start, durationMin: dur ? parseInt(dur, 10) : null, productName: name.trim(), teamId: team });
+        store.addQuickPlacement({ dayId: day.id, start, durationMin: dm, productName: name.trim(), teamId: team });
       }
       onClose();
     }
@@ -1203,25 +1321,17 @@
         <${Field} label="상품명 *">
           <input value=${name} onInput=${(e) => setName(e.target.value)} class=${inputCls} autofocus placeholder="예: 롯데호텔김치" />
         <//>
+        <${Field} label="팀명">
+          <select value=${team} onChange=${(e) => setTeam(e.target.value)} class=${inputCls}>
+            ${teamOptions(state)}
+          </select>
+        <//>
         ${orderMode
-          ? html`
-            <${Field} label="팀명">
-              <select value=${team} onChange=${(e) => setTeam(e.target.value)} class=${inputCls}>
-                ${teamOptions(state)}
-              </select>
-            <//>
-            <${Field} label="부(순번) *"><${PartChipPicker} state=${state} day=${day} sel=${part} onSel=${setPart} /><//>`
-          : html`
-            <div class="grid grid-cols-2 gap-3">
-              <${Field} label="시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${setStart} /><//>
-              <${Field} label="노출분"><input type="number" value=${dur} onInput=${(e) => setDur(e.target.value)} class=${inputCls} placeholder="예: 20" /><//>
-            </div>
-            <${Field} label="팀명">
-              <select value=${team} onChange=${(e) => setTeam(e.target.value)} class=${inputCls}>
-                ${teamOptions(state)}
-              </select>
-            <//>`}
-        <div class="text-[12px] text-ink-soft">${orderMode ? '선택한 부에 바로 편성됩니다. (괄호 숫자 = 현재 그 부의 상품 수) 방송시간은 날짜 옆에서 수정하세요.' : '시간을 입력하면 해당 시간대(시작~시작+노출분)로 자동 반영됩니다.'} 구성·가격 등은 최종편성안에서 보강하세요.</div>
+          ? html`<${Field} label="부(순번) *"><${PartChipPicker} state=${state} day=${day} sel=${part} onSel=${setPart} /><//>`
+          : html`<${BandPickFields} bands=${bands} bandIdx=${bandIdx} setBandIdx=${setBandIdx}
+              start=${start} setStart=${setStart} dur=${dur} setDur=${setDur}
+              durHint=${bandIdx >= 0 ? '선택한 띠 전체로 편성되고, 노출분은 띠 안 시간 배분 참고용으로 표시됩니다.' : '시간을 입력하면 해당 시간대(시작~시작+노출분)로 반영됩니다.'} />`}
+        <div class="text-[12px] text-ink-soft">${orderMode ? '선택한 부에 바로 편성됩니다. (괄호 숫자 = 현재 그 부의 상품 수) 방송시간은 날짜 옆에서 수정하세요.' : ''} 구성·가격 등은 최종편성안에서 보강하세요.</div>
       <//>`;
   }
 
@@ -1825,7 +1935,9 @@
           if (slots.some((o) => o.id !== s.id && hasContent(o.id) && ovl(s, o))) return;
           items.push({ slot: s, p: null, compete: false });
         } else {
-          pls.forEach((p) => items.push({ slot: s, p, compete: pls.length > 1 }));
+          // 경쟁 표시: 부·노출분으로 시간을 나눠 놓은 상품들은 경쟁이 아니라 분할로 인식
+          const ci = pls.length > 1 ? competeInfo(state, pls, () => (s.start && s.end) ? [0, U.slotDuration(s)] : null) : null;
+          pls.forEach((p) => items.push({ slot: s, p, compete: !!ci && ci.compete >= 2 }));
         }
       });
       // 2) 정렬: 띠 순 → 같은 띠 안에서는 부(순번) 묶음(같은 팀)을 인접 배치, 나머지는 시간순
@@ -2473,7 +2585,6 @@
                 </span>
                 ${!readOnly && html`<div class="flex items-center gap-2 text-[11px] text-ink-soft">
                   ${!fashion && html`<button onClick=${() => setSlotModalDay(day.id)} class="hover:text-brand">+ 시간대</button>`}
-                  ${!fashion && html`<button onClick=${() => store.addSlot(day.id, { order: true })} class="hover:text-brand">+ 순번</button>`}
                   <button onClick=${() => { const n = state.bids.filter((b) => b.dayId === day.id).length;
                     if (confirm(`${fmtDay(day)} 편성일을 삭제할까요?${n ? `\n이 날의 입찰 ${n}건은 삭제되지 않고 가까운 다른 날짜로 옮겨집니다.` : ''}`)) store.removeDay(day.id); }}
                     class="hover:text-brand">편성일 삭제</button>
@@ -2538,7 +2649,7 @@
               </div>`
               : html`
               <div class="divide-y divide-slate-100">
-                ${shownSlots.length === 0 && html`<div class="text-[12px] text-slate-400 text-center py-3">시간대가 없습니다. “+ 시간대” 또는 “+ 순번”으로 추가하세요.</div>`}
+                ${shownSlots.length === 0 && html`<div class="text-[12px] text-slate-400 text-center py-3">시간대가 없습니다. “+ 시간대”로 추가하세요.</div>`}
                 ${shownSlots.map((slot) => {
                   const bids = teamBids.filter((b) => b.slotId === slot.id);
                   return html`
