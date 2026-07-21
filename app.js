@@ -1582,6 +1582,17 @@
     const [ctxMenu, setCtxMenu] = useState(null); // 우클릭 메뉴 {x, y, r(행)}
     const [partAssignDay, setPartAssignDay] = useState(null); // 부 나누기(패션)
     const isFashionProg = programSchema(state) === 'fashion';
+    // 띠 프로그램(비패션·고정 스케줄 있음): 시간 열 앞에 '띠' 열을 세로 병합으로 표시
+    const progSchedF = !isFashionProg && store.getSchedule ? store.getSchedule(state.activeProgram) : null;
+    const hasBandCol = !!(progSchedF && progSchedF.length);
+    const bandsOfDay = (d) => {
+      if (!hasBandCol) return null;
+      const e2 = progSchedF.find((x) => x.wd === d.weekday);
+      const std = (e2 && e2.slots) || null;
+      const ov = (d.bands && d.bands.length) ? d.bands : null;
+      return (ov && (!std || ov.length <= std.length)) ? ov : (std || ov);
+    };
+    const COLS = (readOnly && !full ? 8 : 16) + (hasBandCol ? 1 : 0); // 표 전체 열 수 (colspan용)
     const [quickAddDay, setQuickAddDay] = useState(null); // 행 추가(시간·상품)
     const [addSlotDay, setAddSlotDay] = useState(null);   // 시간대만 추가
     const [statusDay, setStatusDay] = useState(null);     // 미운영(결방) 표기 팝업
@@ -1595,16 +1606,18 @@
     function saveExcel() {
       if (!window.XLSX) { alert('엑셀 라이브러리를 불러오지 못했습니다. 새로고침 후 다시 시도하세요.'); return; }
       // MD(조회 전용)는 민감 항목(구성·준비물량·가격·마진·달성률·비고) 제외한 축약본으로 출력
-      const header = slim
-        ? ['방송일', '요일', '시간', '상품명', '그룹코드', 'PD', '쇼호스트', '스튜디오']
-        : ['방송일', '요일', '시간', '상태', '상품명', '그룹코드', 'PD', '쇼호스트', '스튜디오', '내용/타이틀', '구성', '준비물량', '가격', '마진', '최근달성률', '비고(PD)'];
+      const bandH = hasBandCol ? ['띠'] : [];
+      const header = ['방송일', '요일'].concat(bandH, slim
+        ? ['시간', '상품명', '그룹코드', 'PD', '쇼호스트', '스튜디오']
+        : ['시간', '상태', '상품명', '그룹코드', 'PD', '쇼호스트', '스튜디오', '내용/타이틀', '구성', '준비물량', '가격', '마진', '최근달성률', '비고(PD)']);
       const aoa = [header]; const merges = []; let ri = 1;
       rows.forEach((r) => {
-        if (r.mhead || r.day.date.slice(0, 7) !== centerKey) return; // 엑셀은 이번 달만
+        if (r.mhead || r.mcollapse || r.day.date.slice(0, 7) !== centerKey) return; // 엑셀은 이번 달만
         if (r.off) {
           const dn = Number(r.day.date.slice(8)); const mm2 = Number(r.day.date.slice(5, 7));
           const label = '미운영(결방)' + (r.day.statusReason ? ' — ' + r.day.statusReason : '');
-          aoa.push([`${mm2}/${dn}`, U.WEEKDAY_KO[r.day.weekday], label].concat(Array((slim ? 8 : 16) - 3).fill('')));
+          const row = [`${mm2}/${dn}`, U.WEEKDAY_KO[r.day.weekday]].concat(hasBandCol ? [''] : [], [label]);
+          aoa.push(row.concat(Array(COLS - row.length).fill('')));
           if (r.firstOfDay) {
             const span = dayCount[r.day.date];
             if (span > 1) { merges.push({ s: { r: ri, c: 0 }, e: { r: ri + span - 1, c: 0 } }); merges.push({ s: { r: ri, c: 1 }, e: { r: ri + span - 1, c: 1 } }); }
@@ -1614,32 +1627,39 @@
         const p = r.p; const det = (p && p.detail) || {};
         const dnum = Number(r.day.date.slice(8)); const mm = Number(r.day.date.slice(5, 7));
         const items = (p && p.items && p.items.length > 1) ? '\n· ' + p.items.join('\n· ') : '';
-        aoa.push(slim
+        const srcPartX = p && p.sourceBidId ? ((state.bids.find((x) => x.id === p.sourceBidId) || {}).part || null) : null;
+        const bandCell = hasBandCol ? [r.band && r.firstOfBand ? `${r.band[0]}~${r.band[1]}` : ''] : [];
+        const timeCell = (srcPartX ? `[${srcPartX}부] ` : '') + slotName(r.slot) + (r.slot.start && r.slot.end ? ` (${U.slotDuration(r.slot)}분)` : '');
+        aoa.push(['', ''].map((_, ci) => (r.firstOfDay ? (ci === 0 ? `${mm}/${dnum}` : U.WEEKDAY_KO[r.day.weekday]) : ''))
+          .concat(bandCell, slim
           ? [
-            r.firstOfDay ? `${mm}/${dnum}` : '', r.firstOfDay ? U.WEEKDAY_KO[r.day.weekday] : '',
-            slotName(r.slot) + (r.slot.start && r.slot.end ? ` (${U.slotDuration(r.slot)}분)` : ''), p ? ((p.productName || '') + items) : '', p ? (det.groupCode || '') : '',
+            timeCell, p ? ((p.productName || '') + items) : '', p ? (det.groupCode || '') : '',
             p ? (p.pd || '') : '', p ? (p.host || '') : '', p ? (p.studio || '') : '',
           ]
           : [
-            r.firstOfDay ? `${mm}/${dnum}` : '', r.firstOfDay ? U.WEEKDAY_KO[r.day.weekday] : '',
-            slotName(r.slot) + (r.slot.start && r.slot.end ? ` (${U.slotDuration(r.slot)}분)` : ''), p ? (p.pending ? '미정' : '확정') : '',
+            timeCell, p ? (p.pending ? '미정' : '확정') : '',
             p ? ((p.productName || '') + items) : '', p ? (det.groupCode || '') : '',
             p ? (p.pd || '') : '', p ? (p.host || '') : '', p ? (p.studio || '') : '',
             p ? (det.note || '') : '', p ? (det.comp || '') : '',
             p ? (det.prep || '') : '', p ? (det.price || '') : '', p ? (det.margin || '') : '',
             p ? recentText(det.recent) : '', p ? (p.memo || '') : '',
-          ]);
+          ]));
         if (r.firstOfDay) {
           const span = dayCount[r.day.date];
           if (span > 1) { merges.push({ s: { r: ri, c: 0 }, e: { r: ri + span - 1, c: 0 } }); merges.push({ s: { r: ri, c: 1 }, e: { r: ri + span - 1, c: 1 } }); }
+        }
+        if (hasBandCol && r.firstOfBand && r.bandKey) {
+          const bspan = bandCount[r.bandKey];
+          if (bspan > 1) merges.push({ s: { r: ri, c: 2 }, e: { r: ri + bspan - 1, c: 2 } });
         }
         ri++;
       });
       const ws = window.XLSX.utils.aoa_to_sheet(aoa);
       ws['!merges'] = merges;
-      ws['!cols'] = slim
-        ? [{ wch: 7 }, { wch: 5 }, { wch: 12 }, { wch: 30 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }]
-        : [{ wch: 7 }, { wch: 5 }, { wch: 12 }, { wch: 6 }, { wch: 26 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 24 }, { wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 22 }];
+      const bandW = hasBandCol ? [{ wch: 12 }] : [];
+      ws['!cols'] = [{ wch: 7 }, { wch: 5 }].concat(bandW, slim
+        ? [{ wch: 14 }, { wch: 30 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }]
+        : [{ wch: 14 }, { wch: 6 }, { wch: 26 }, { wch: 12 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 24 }, { wch: 20 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 22 }]);
       const wb = window.XLSX.utils.book_new();
       window.XLSX.utils.book_append_sheet(wb, ws, `${year}년${month}월`);
       window.XLSX.writeFile(wb, `${prog.name}_${year}-${String(month).padStart(2, '0')}_최종편성안.xlsx`);
@@ -1733,6 +1753,11 @@
       const hasContent = (sid) => state.placements.some((p) => p.slotId === sid);
       const ovl = (a, b) => a.start && a.end && b.start && b.end
         && U.toMin(a.start) < U.toMin(b.end) && U.toMin(b.start) < U.toMin(a.end);
+      const dBands = bandsOfDay(d);
+      const bandOf = (s) => { if (!dBands || !s || !s.start || !s.end) return -1;
+        return dBands.findIndex(([bs, be]) => U.toMin(s.start) >= U.toMin(bs) && U.toMin(s.end) <= U.toMin(be)); };
+      const push = (row) => { const bi = bandOf(row.slot);
+        rows.push({ ...row, band: bi >= 0 ? dBands[bi] : null, bandKey: bi >= 0 ? d.date + '|' + bi : null }); };
       slots.forEach((s) => {
         const pls = state.placements.filter((p) => p.slotId === s.id);
         if (pls.length === 0) {
@@ -1743,15 +1768,24 @@
           if (s.start && s.start === s.end) return; // 0분 잔재 슬롯은 빈 행으로 표시하지 않음
           // 그 시간 구간에 이미 상품이 편성된 시간대가 겹쳐 있으면(예: 65분 띠를 2행으로 분할) 빈 행 숨김
           if (slots.some((o) => o.id !== s.id && hasContent(o.id) && ovl(s, o))) return;
-          rows.push({ day: d, slot: s, p: null, firstOfDay }); firstOfDay = false;
+          push({ day: d, slot: s, p: null, firstOfDay }); firstOfDay = false;
         } else {
-          pls.forEach((p) => { rows.push({ day: d, slot: s, p, firstOfDay, compete: pls.length > 1 }); firstOfDay = false; });
+          pls.forEach((p) => { push({ day: d, slot: s, p, firstOfDay, compete: pls.length > 1 }); firstOfDay = false; });
         }
       });
     }
     const total = rows.filter((r) => r.p && r.day.date.slice(0, 7) === centerKey).length; // 집계는 이번 달만
     const dayCount = {};
     rows.forEach((r) => { if (!r.mhead && !r.mcollapse) dayCount[r.day.date] = (dayCount[r.day.date] || 0) + 1; });
+    // 띠 병합(rowSpan)용: 같은 날짜·같은 띠에 속한 연속 행 수 + 첫 행 표시
+    const bandCount = {};
+    const seenBand = new Set();
+    rows.forEach((r) => {
+      if (r.bandKey) {
+        bandCount[r.bandKey] = (bandCount[r.bandKey] || 0) + 1;
+        if (!seenBand.has(r.bandKey)) { r.firstOfBand = true; seenBand.add(r.bandKey); }
+      }
+    });
     // PD·쇼호스트별 이 달 캐스팅 횟수 (콤마 등으로 여러 명 기입 시 각각 집계 — 이번 달만)
     const castCounts = (field) => {
       const map = new Map();
@@ -1869,6 +1903,7 @@
               <tr>
                 <th class=${th} style=${{ minWidth: '70px' }}>방송일</th>
                 <th class=${th} style=${{ minWidth: '36px' }}>요일</th>
+                ${hasBandCol && html`<th class=${th} style=${{ minWidth: '86px' }} data-col="time">띠</th>`}
                 <th class=${th} style=${{ minWidth: '104px' }} data-col="time">시간</th>
                 ${!slim && html`<th class=${th} style=${{ minWidth: '58px' }} data-col="status">상태</th>`}
                 <th class=${th} style=${{ minWidth: '150px' }} data-col="product">상품명</th>
@@ -1887,7 +1922,7 @@
               </tr>
             </thead>
             <tbody>
-              ${rows.filter((r) => !r.mhead).length === 0 && html`<tr><td class=${td} colspan=${slim ? 8 : 16}><div class="text-center text-slate-400 py-8">편성이 없습니다.</div></td></tr>`}
+              ${rows.filter((r) => !r.mhead).length === 0 && html`<tr><td class=${td} colspan=${COLS}><div class="text-center text-slate-400 py-8">편성이 없습니다.</div></td></tr>`}
               ${rows.map((r, i) => {
                 const adj = r.day.date.slice(0, 7) !== centerKey; // 이전/다음 달 행 (흐리게 · 이미지 저장 제외)
                 if (r.mcollapse) {
@@ -1895,7 +1930,7 @@
                   const ids = new Set(r.mdays.flatMap((d) => d.slots.map((s) => s.id)));
                   const nP = state.placements.filter((p) => ids.has(p.slotId)).length;
                   return html`<tr key=${i} data-adj="1">
-                    <td colspan=${slim ? 8 : 16} class="p-0 border border-slate-300">
+                    <td colspan=${COLS} class="p-0 border border-slate-300">
                       <button onClick=${() => setExpandedMonths((s) => new Set([...s, r.mcollapse]))} title="클릭해 이 달 펼치기"
                         class="w-full px-2 py-1 text-center text-[12px] font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 hover:text-brand">
                         ▸ ${my}년 ${mm2}월 — 방송일 ${r.mdays.length}일 · 편성 ${nP}건 <span class="font-normal text-[11px]">(펼치기)</span></button></td>
@@ -1904,7 +1939,7 @@
                 if (r.mhead) {
                   const my = r.mhead.slice(0, 4), mm2 = Number(r.mhead.slice(5, 7));
                   return html`<tr key=${i} data-adj="1" id=${!adj ? 'final-month-center' : undefined} class="scroll-mt-9">
-                    <td colspan=${slim ? 8 : 16}
+                    <td colspan=${COLS}
                       class=${`${r.win ? 'px-2 py-1' : 'p-0'} text-center text-[12px] font-extrabold border border-slate-300 ${!adj ? 'bg-brand/10 text-brand' : 'bg-slate-200/70 text-slate-500'}`}>
                       ${r.win
                         ? html`${my}년 ${mm2}월${adj ? (r.mhead < centerKey ? ' (이전달)' : ' (다음달)') : ''}`
@@ -1918,12 +1953,13 @@
                 const wd = U.WEEKDAY_KO[r.day.weekday];
                 const wdColor = r.day.weekday === 6 ? 'text-blue-600' : r.day.weekday === 0 ? 'text-red-500' : 'text-ink';
                 const pend = p && p.pending;
+                const srcPart = p && p.sourceBidId ? ((state.bids.find((x) => x.id === p.sourceBidId) || {}).part || null) : null;
                 if (r.off) return html`
                   <tr key=${i} data-adj=${adj ? '1' : undefined} class=${`border-t-2 border-t-slate-300 bg-slate-50 ${adj ? 'opacity-60' : ''}`}
                     onContextMenu=${readOnly ? undefined : ((e) => { e.preventDefault(); setStatusDay(r.day); })}>
                     <td class=${`${tdMerge} font-semibold tabular-nums text-slate-500`}>${m}/${dnum}</td>
                     <td class=${`${tdMerge} font-semibold ${wdColor}`}>${wd}</td>
-                    <td class=${`${td} text-slate-500`} colspan=${slim ? 6 : 14}>
+                    <td class=${`${td} text-slate-500`} colspan=${COLS - 2}>
                       <span class="font-bold">🚫 미운영 (결방)</span>${r.day.statusReason ? html` — ${r.day.statusReason}` : ''}
                       ${!readOnly && html`<span class="no-capture text-[11px] text-slate-400 ml-2">우클릭으로 수정/해제</span>`}
                     </td>
@@ -1945,7 +1981,12 @@
                     ${r.firstOfDay && html`
                       <td class=${`${tdMerge} font-semibold tabular-nums text-ink`} rowSpan=${dayCount[r.day.date]}>${m}/${dnum}${r.day.airTime ? html`<div class="text-[10px] font-normal text-ink-soft mt-0.5 whitespace-nowrap">${r.day.airTime}</div>` : ''}</td>
                       <td class=${`${tdMerge} font-semibold ${wdColor}`} rowSpan=${dayCount[r.day.date]}>${wd}</td>`}
+                    ${hasBandCol && (r.band
+                      ? (r.firstOfBand ? html`<td class=${`${tdMerge} font-semibold tabular-nums text-ink whitespace-nowrap`} data-col="time" rowSpan=${bandCount[r.bandKey]}>
+                            ${r.band[0]}~${r.band[1]}<div class="text-[10px] font-normal text-ink-soft">${(U.toMin(r.band[1]) - U.toMin(r.band[0]) + 1440) % 1440}분 띠</div></td>` : '')
+                      : html`<td class=${td} data-col="time"></td>`)}
                     <td class=${`${td} tabular-nums font-medium ${r.compete ? 'text-amber-700' : ''}`} data-col="time">
+                      ${srcPart && html`<span class="inline-block align-middle text-[10px] font-bold text-sky-700 bg-sky-50 border border-sky-200 rounded px-1 mr-1" title="MD 입찰의 부(순번)">${srcPart}부</span>`}
                       ${readOnly ? slotName(r.slot)
                         : isFashionProg ? html`<button onClick=${() => setPartAssignDay(r.day)}
                             title="클릭해 부 나누기 (이 날짜의 상품을 1부~N부로 배분)"
