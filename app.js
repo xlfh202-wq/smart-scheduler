@@ -2212,11 +2212,11 @@
                 ${hasBandCol && html`<th class=${th} style=${{ minWidth: '86px' }} data-col="time">띠</th>`}
                 <th class=${th} style=${{ minWidth: '104px' }} data-col="time">시간</th>
                 ${!slim && html`<th class=${th} style=${{ minWidth: '58px' }} data-col="status">상태</th>`}
-                <th class=${th} style=${{ minWidth: '150px' }} data-col="product">상품명</th>
+                <th class=${th} style=${{ minWidth: '230px' }} data-col="product">상품명</th>
                 <th class=${th} style=${{ minWidth: '92px' }} data-col="group">그룹코드</th>
-                <th class=${th} style=${{ minWidth: '100px' }} data-col="pd">PD</th>
-                <th class=${th} style=${{ minWidth: '100px' }} data-col="host">쇼호스트</th>
-                <th class=${th} style=${{ minWidth: '80px' }} data-col="studio">스튜디오</th>
+                <th class=${th} style=${{ minWidth: '54px', width: '54px' }} data-col="pd">PD</th>
+                <th class=${th} style=${{ minWidth: '62px', width: '62px' }} data-col="host">쇼호스트</th>
+                <th class=${th} style=${{ minWidth: '62px', width: '62px' }} data-col="studio">스튜디오</th>
                 ${!slim && html`
                   <th class=${th} style=${{ minWidth: '170px' }} data-col="note">내용 / 타이틀</th>
                   <th class=${th} style=${{ minWidth: '130px' }} data-col="comp">구성</th>
