@@ -48,6 +48,8 @@
     .card-drag { cursor: grab; }
     .card-drag:active { cursor: grabbing; }
     [draggable="true"] { -webkit-user-drag: element; }
+    /* 추천목록(datalist) 입력의 ▼ 화살표 숨김 — 좁은 열(PD·쇼호스트·스튜디오)에서 이름 가림 방지. 포커스 시 자동완성은 그대로 동작 */
+    input[list]::-webkit-calendar-picker-indicator { display: none !important; }
     /* 전체 폰트 확대 (작은 글씨 가독성 ↑) */
     body .text-\[10px\]{font-size:11px}
     body .text-\[11px\]{font-size:12.5px}
@@ -62,20 +64,20 @@
   <div id="root"></div>
 
   <!-- Supabase 연결 설정 -->
-  <script src="supabaseConfig.js?v=162"></script>
+  <script src="supabaseConfig.js?v=163"></script>
   <!-- 역할별 공용 비밀번호 / 권한 -->
-  <script src="authConfig.js?v=162"></script>
+  <script src="authConfig.js?v=163"></script>
   <!-- 데이터 계층 (클래식 스크립트) -->
-  <script src="dataStore.js?v=162"></script>
+  <script src="dataStore.js?v=163"></script>
   <!-- 엑셀: 최유라쇼 MD 입찰 시드 -->
-  <script src="bidSeed.js?v=162"></script>
+  <script src="bidSeed.js?v=163"></script>
   <!-- 엑셀: 2026년 8월 프로그램별 입찰 데이터 -->
-  <script src="bidImport.js?v=162"></script>
+  <script src="bidImport.js?v=163"></script>
   <!-- 엑셀: 14개 테마PGM 확정편성안 시드 -->
-  <script src="programSeed.js?v=162"></script>
+  <script src="programSeed.js?v=163"></script>
   <!-- 프로그램별 입찰팀 + 작성항목 스키마 -->
-  <script src="programConfig.js?v=162"></script>
+  <script src="programConfig.js?v=163"></script>
   <!-- 앱 (htm, 클래식 스크립트) -->
-  <script src="app.js?v=162"></script>
+  <script src="app.js?v=163"></script>
 </body>
 </html>

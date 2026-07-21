@@ -1756,7 +1756,7 @@
         onBlur=${() => { if (v !== (value || '')) onCommit(v); }}
         onKeyDown=${(e) => { if (e.key === 'Enter') e.target.blur(); }}
         placeholder=${placeholder || ''}
-        class=${`w-full px-2 py-1.5 text-[12px] bg-transparent outline-none focus:bg-amber-50 ${color || ''}`} />`;
+        class=${`w-full px-1 py-1.5 text-[12px] bg-transparent outline-none focus:bg-amber-50 ${color || ''}`} />`;
     }
     return html`<textarea ref=${ref} value=${v} rows="1"
       onInput=${(e) => setV(e.target.value)}
@@ -2214,9 +2214,9 @@
                 ${!slim && html`<th class=${th} style=${{ minWidth: '58px' }} data-col="status">상태</th>`}
                 <th class=${th} style=${{ minWidth: '230px' }} data-col="product">상품명</th>
                 <th class=${th} style=${{ minWidth: '92px' }} data-col="group">그룹코드</th>
-                <th class=${th} style=${{ minWidth: '54px', width: '54px' }} data-col="pd">PD</th>
-                <th class=${th} style=${{ minWidth: '62px', width: '62px' }} data-col="host">쇼호스트</th>
-                <th class=${th} style=${{ minWidth: '62px', width: '62px' }} data-col="studio">스튜디오</th>
+                <th class=${th} style=${{ minWidth: '66px', width: '66px' }} data-col="pd">PD</th>
+                <th class=${th} style=${{ minWidth: '68px', width: '68px' }} data-col="host">쇼호스트</th>
+                <th class=${th} style=${{ minWidth: '68px', width: '68px' }} data-col="studio">스튜디오</th>
                 ${!slim && html`
                   <th class=${th} style=${{ minWidth: '170px' }} data-col="note">내용 / 타이틀</th>
                   <th class=${th} style=${{ minWidth: '130px' }} data-col="comp">구성</th>
