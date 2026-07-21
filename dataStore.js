@@ -1901,6 +1901,7 @@
     let serverOk = true;   // 테이블 미생성 등으로 실패하면 false → 로컬 모드
     let timer = null;
     const myRevs = new Set(); // 내가 보낸 저장의 nonce (echo 식별용)
+    let lastServerRev = null; // 마지막으로 서버에서 반영(하이드레이트/저장)한 문서 rev — 낡은 세션 덮어쓰기 가드용
     const status = (s) => global.__SB_STATUS && global.__SB_STATUS(s);
     // ----- 개별 행 동기화(bids/placements) -----
     const ROW_TABLES = ['bids', 'placements'];
@@ -1936,6 +1937,22 @@
         try {
           // 행 모드: bids/placements는 개별 행으로 동기화, 메인 문서에서는 비움(문서 비대화 방지)
           if (rowMode) { syncRows('bids', state.bids); syncRows('placements', state.placements); }
+          // ── 낡은 세션 가드 ──────────────────────────────────────────────
+          // 절전/네트워크 단절 등으로 실시간 하이드레이트를 놓친 세션이 옛 상태로
+          // 메인 문서(날짜·시간대)를 통째로 덮어쓰는 사고 방지: 저장 직전에 서버 rev를
+          // 확인해 내가 못 본 최신 문서가 있으면 저장을 버리고 서버 상태를 먼저 반영.
+          try {
+            const { data: head } = await client.from('app_state').select('data->_rev').eq('id', 'main').maybeSingle();
+            const srvRev = head ? head._rev : null;
+            if (srvRev && srvRev !== lastServerRev && !myRevs.has(srvRev)) {
+              const { data: full } = await client.from('app_state').select('data').eq('id', 'main').maybeSingle();
+              if (full && full.data) { lastServerRev = full.data._rev || lastServerRev; store._hydrate(full.data); }
+              console.warn('[guard] 낡은 화면의 저장 차단 → 서버 최신으로 갱신');
+              status(rowMode ? 'rows' : 'connected');
+              alert('다른 접속자가 먼저 저장한 최신 편성이 있어 화면을 최신으로 갱신했습니다.\n방금 하신 수정이 반영됐는지 확인 후 필요하면 다시 시도해주세요.');
+              return;
+            }
+          } catch (e) {}
           const rev = uid() + uid();
           state._rev = rev; // 데이터 안에 nonce → realtime echo 식별
           myRevs.add(rev);
@@ -1945,7 +1962,7 @@
           const { error } = await client.from('app_state')
             .upsert({ id: 'main', data: state, updated_at: new Date().toISOString() });
           if (error) disableServer(error.message);
-          else { status('saved'); maybeAutoBackup(); }
+          else { lastServerRev = rev; status('saved'); maybeAutoBackup(); }
         } catch (e) { disableServer(e.message); }
       }, 600);
     });
@@ -2103,7 +2120,7 @@
         if (error) { disableServer(error.message); ready = true; return; }
         const rowTablesExist = await detectRowTables();
         // 1) 먼저 메인 문서를 그대로 하이드레이트(권위 있는 bids/placements 채택 — 아직 행모드 OFF)
-        if (data && data.data) store._hydrate(data.data);
+        if (data && data.data) { lastServerRev = data.data._rev || null; store._hydrate(data.data); }
         else await client.from('app_state').upsert({ id: 'main', data: store._snapshot(), updated_at: new Date().toISOString() });
         // 2) 행 테이블이 있으면: 테이블 채택 or 최초 이관 → 이후 행 모드 ON
         if (rowTablesExist) {
@@ -2119,11 +2136,25 @@
             (payload) => {
               const incoming = payload.new && payload.new.data;
               if (!incoming) return;
+              if (incoming._rev) lastServerRev = incoming._rev; // 에코 포함 — 서버의 최신 rev 추적
               if (incoming._rev && myRevs.has(incoming._rev)) return; // 내가 보낸 변경(echo) 무시
               store._hydrate(incoming);
             })
           .subscribe();
         if (rowMode) ROW_TABLES.forEach(subscribeRows);
+        // 절전·오프라인 복귀 시: 놓친 변경을 서버에서 먼저 당겨와 반영 (낡은 화면 방지)
+        const refreshFromServer = async () => {
+          try {
+            const { data: cur } = await client.from('app_state').select('data').eq('id', 'main').maybeSingle();
+            if (cur && cur.data && cur.data._rev !== lastServerRev) {
+              lastServerRev = cur.data._rev || lastServerRev;
+              if (!(cur.data._rev && myRevs.has(cur.data._rev))) store._hydrate(cur.data);
+            }
+            if (rowMode) await initRows();
+          } catch (e) {}
+        };
+        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshFromServer(); });
+        window.addEventListener('online', refreshFromServer);
       } catch (e) { disableServer(e.message); ready = true; }
     })();
     return store;
