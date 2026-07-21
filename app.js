@@ -712,22 +712,47 @@
           title=${placements.length === 0 && onQuickAdd ? '더블클릭하면 상품 추가' : ''}>
           ${placements.length === 0
             ? html`<div class="text-[11px] text-slate-300 self-center px-2 select-none">${isExt ? '확장 시간대 — 더블클릭해 시간을 지정해 추가하거나, 카드를 놓으면 시간 지정 팝업' : '입찰 카드를 끌어다 놓거나 더블클릭해 추가'}</div>`
-            : placements.map((p) => html`
-              <div key=${p.id} onDrop=${(e) => {
-                  // 같은 띠·같은 시간 카드 위에 놓으면 → 그 카드 앞으로 순서 변경
-                  // (시간이 다르면 시간순 정렬이 우선이므로 기존 띠 드롭 동작에 맡김)
-                  const pl = drag.read(e);
-                  if (!pl || pl.kind !== 'placement' || pl.id === p.id) return;
-                  const dragged = state.placements.find((x) => x.id === pl.id);
-                  if (!dragged || !slotIds.has(dragged.slotId)) return;
-                  const sa = slots.find((x) => x.id === dragged.slotId), sb = slots.find((x) => x.id === p.slotId);
-                  if (!sa || !sb || (sa.start || '') !== (sb.start || '')) return;
-                  e.preventDefault(); e.stopPropagation(); setOver(false);
-                  store.reorderPlacement(pl.id, p.id);
-                }}>
-                <${PlacementCard} state=${state} p=${p} subTime=${subTimeOf(p)}
-                  subSlot=${slots.find((x) => x.id === p.slotId)} simple=${simple} />
-              </div>`)}
+            : (() => {
+              const cardBox = (p) => html`
+                <div key=${p.id} onDrop=${(e) => {
+                    // 같은 띠·같은 시간 카드 위에 놓으면 → 그 카드 앞으로 순서 변경
+                    // (시간이 다르면 시간순 정렬이 우선이므로 기존 띠 드롭 동작에 맡김)
+                    const pl = drag.read(e);
+                    if (!pl || pl.kind !== 'placement' || pl.id === p.id) return;
+                    const dragged = state.placements.find((x) => x.id === pl.id);
+                    if (!dragged || !slotIds.has(dragged.slotId)) return;
+                    const sa = slots.find((x) => x.id === dragged.slotId), sb = slots.find((x) => x.id === p.slotId);
+                    if (!sa || !sb || (sa.start || '') !== (sb.start || '')) return;
+                    e.preventDefault(); e.stopPropagation(); setOver(false);
+                    store.reorderPlacement(pl.id, p.id);
+                  }}>
+                  <${PlacementCard} state=${state} p=${p} subTime=${subTimeOf(p)}
+                    subSlot=${slots.find((x) => x.id === p.slotId)} simple=${simple} />
+                </div>`;
+              // 부(순번)로 나눈 같은 팀 상품은 한 묶음으로 붙여 표시 (카드는 개별 드래그·수정 가능)
+              const partOf = (p) => p.sourceBidId ? (parseInt((state.bids.find((x) => x.id === p.sourceBidId) || {}).part, 10) || null) : null;
+              const groupMap = {}; const entries = [];
+              placements.forEach((p) => {
+                const pt = partOf(p);
+                if (pt) {
+                  if (!groupMap[p.teamId]) { groupMap[p.teamId] = { type: 'group', teamId: p.teamId, items: [] }; entries.push(groupMap[p.teamId]); }
+                  groupMap[p.teamId].items.push({ p, pt });
+                } else entries.push({ type: 'single', p });
+              });
+              return entries.map((en) => {
+                if (en.type === 'single') return cardBox(en.p);
+                en.items.sort((a, b) => a.pt - b.pt);
+                if (en.items.length < 2) return cardBox(en.items[0].p);
+                const tc = (teamOf(state, en.teamId) || {}).color || '#94a3b8';
+                return html`
+                  <div key=${'grp_' + en.teamId} title="부(순번)로 나눈 묶음 — 카드는 개별로 옮기거나 부를 해제할 수 있습니다"
+                    class="flex flex-wrap gap-1 items-stretch rounded-lg border border-dashed p-1 bg-slate-50/50"
+                    style=${{ borderColor: tc }}>
+                    <span class="self-center text-[10px] font-bold px-0.5 whitespace-nowrap" style=${{ color: tc }}>1~${en.items[en.items.length - 1].pt}부</span>
+                    ${en.items.map(({ p }) => cardBox(p))}
+                  </div>`;
+              });
+            })()}
         </div>
       </div>`;
   }
