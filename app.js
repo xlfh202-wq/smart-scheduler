@@ -2615,16 +2615,8 @@
       return i >= 0 ? i : 0;
     };
     const [bandIdx, setBandIdx] = useState(bandIdxInit);
-    const [part, setPart] = useState(() => {
-      if (b && b.part) return parseInt(b.part, 10) || 1;
-      const bd = bands[bandIdxInit()];
-      if (!bd) return 1;
-      const used = state.bids.filter((x) => x.teamId === team && x.dayId === ctx.dayId && (!b || x.id !== b.id))
-        .map((x) => { const sl = state.days.flatMap((d) => d.slots).find((s) => s.id === x.slotId);
-          return (sl && sl.start && sl.end && U.toMin(sl.start) >= U.toMin(bd.start) && U.toMin(sl.end) <= U.toMin(bd.end))
-            ? (parseInt(x.part, 10) || 0) : 0; });
-      return Math.max(0, ...used) + 1;
-    });
+    // 부(순번)는 선택 사항 — 한 띠에 여러 상품을 나눠 넣을 때만 지정 (기본: 지정 안 함)
+    const [part, setPart] = useState(() => (b && b.part) ? (parseInt(b.part, 10) || null) : null);
     const [maxPart, setMaxPart] = useState(() => Math.max(4, (b && parseInt(b.part, 10)) || 1));
 
     function save() {
@@ -2745,8 +2737,10 @@
                 ${s.start}~${s.end} <span class="text-[11px] font-normal">(${(U.toMin(s.end) - U.toMin(s.start) + 1440) % 1440}분)</span></button>`)}
             </div>
           <//>
-          <${Field} label="부(순번) * — 이 띠 안에서 몇 번째 상품인지">
+          <${Field} label="부(순번) — 한 띠에 여러 상품을 나눠 넣을 때만 선택">
             <div class="flex flex-wrap items-center gap-1.5">
+              <button type="button" onClick=${() => setPart(null)}
+                class=${`text-[13px] px-3 py-1.5 rounded-full border transition ${part == null ? 'bg-slate-600 text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-slate-500'}`}>지정 안 함</button>
               ${Array.from({ length: maxPart }, (_, i) => i + 1).map((pt) => html`
                 <button type="button" key=${pt} onClick=${() => setPart(pt)}
                   class=${`text-[13px] px-3 py-1.5 rounded-full border transition ${part === pt ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-brand hover:text-brand'}`}>${pt}부</button>`)}
