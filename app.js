@@ -683,6 +683,25 @@
     return (e2 && e2.slots) || [];
   }
 
+  // 확장 시간창: 스케줄의 extBefore(앞 확장 시작)·extAfter(뒤 확장 종료) — 경계는 인접 고정띠에 물림.
+  // 고정띠가 아니므로 항상 표시되지 않고, 펼치거나 상품이 있을 때만 행으로 나타난다.
+  function dayExtWins(state, day, bandsOpt) {
+    const sc = store.getSchedule ? store.getSchedule(day && day.programId) : null;
+    const e2 = sc && day ? sc.find((x) => x.wd === day.weekday) : null;
+    const bs = (bandsOpt && bandsOpt.length) ? bandsOpt : dayBands(state, day);
+    if (!e2 || !bs.length) return { before: null, after: null };
+    return {
+      before: e2.extBefore ? [e2.extBefore, bs[0][0], 'ext'] : null,
+      after: e2.extAfter ? [bs[bs.length - 1][1], e2.extAfter, 'ext'] : null,
+    };
+  }
+  // 팝업 칩 목록용: [앞 확장?, ...고정띠, 뒤 확장?] — 확장 칩은 3번째 요소 'ext'
+  function dayBandsWithExt(state, day) {
+    const bands = dayBands(state, day);
+    const w = dayExtWins(state, day, bands);
+    return [...(w.before ? [w.before] : []), ...bands, ...(w.after ? [w.after] : [])];
+  }
+
   // 같은 시간창 안 '경쟁 vs 분할' 판정 — 부(순번) 지정, 노출분 배분, 세부 시간 분리로
   // 시간을 나눠 놓은 상품들은 경쟁이 아니라 띠 안 분할로 인식한다.
   // rangeOf(p) → [startMin, endMin] (상대분) 또는 null(시간 미상 = 같은 창 전체 점유로 간주)
@@ -772,7 +791,10 @@
         onContextMenu=${(!isExt && onCtxMenu) ? ((e) => { e.preventDefault(); e.stopPropagation(); onCtxMenu(e.clientX, e.clientY); }) : undefined}>
         <div class=${`w-[104px] shrink-0 px-1.5 py-1.5 border-r border-slate-200 flex flex-col gap-0.5 ${isExt ? 'bg-slate-100/70' : 'bg-slate-50'}`}>
           ${isExt
-            ? html`<span class="text-[12px] font-bold text-ink-soft leading-tight">확장<br/>${band.label}</span>`
+            ? (band.win
+              ? html`<span class="text-[13.5px] font-extrabold text-ink tabular-nums leading-tight whitespace-nowrap">${band.win[0]}~${band.win[1]}</span>
+                <span class="text-[11px] font-semibold text-ink-soft">${(U.toMin(band.win[1]) - U.toMin(band.win[0]) + 1440) % 1440}분 <span class="text-[10px] font-bold text-amber-600" title="확장 — 경계는 인접 고정띠에 물려 있습니다">확장</span></span>`
+              : html`<span class="text-[12px] font-bold text-ink-soft leading-tight">확장<br/>${band.label}</span>`)
             : html`${onEditBand
                 ? html`<button onClick=${(e) => { e.stopPropagation(); onEditBand(); }}
                     class="text-[13.5px] font-extrabold text-ink tabular-nums leading-tight text-left whitespace-nowrap hover:text-brand hover:underline decoration-dotted"
@@ -1047,8 +1069,9 @@
     let bands = [], extBefore = null, extAfter = null, labelSlots = [];
     if (useBands) {
       bands = bandDefs.map((bd) => ({ start: bd[0], end: bd[1], extBand: bd[2] === 'ext', slots: [] }));
-      extBefore = { ext: 'before', label: `~${bands[0].start}`, slots: [] };
-      extAfter = { ext: 'after', label: `${bands[bands.length - 1].end}~`, slots: [] };
+      const extW = dayExtWins(state, day, bandDefs);
+      extBefore = { ext: 'before', label: `~${bands[0].start}`, win: extW.before, slots: [] };
+      extAfter = { ext: 'after', label: `${bands[bands.length - 1].end}~`, win: extW.after, slots: [] };
       const firstStart = U.toMin(bands[0].start);
       const rel = (m) => (m - firstStart + 1440) % 1440; // 첫 띠 시작 기준 상대분(자정 넘김 대응)
       const lastEndR = (() => { let r = rel(U.toMin(bands[bands.length - 1].end)); return r === 0 ? 1440 : r; })();
@@ -1135,8 +1158,9 @@
         <div class=${`p-1.5 flex flex-col gap-1 ${day.status === 'off' ? 'hidden' : ''}`}>
           ${useBands ? html`
             ${(showExt || extBefore.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extBefore} simple=${simple}
-              onQuickAdd=${() => { setQuickInit(''); setQuickOpen(true); }}
-              onExtBid=${(id) => setBidTimeFor({ id, ext: true })} onExtMove=${(id) => setMoveTimeFor({ id, ext: true })} />`}
+              onQuickAdd=${() => { setQuickInit(extBefore.win ? extBefore.win[0] : ''); setQuickOpen(true); }}
+              onExtBid=${(id) => setBidTimeFor(extBefore.win ? { id, band: [extBefore.win[0], extBefore.win[1]] } : { id, ext: true })}
+              onExtMove=${(id) => setMoveTimeFor(extBefore.win ? { id, band: [extBefore.win[0], extBefore.win[1]] } : { id, ext: true })} />`}
             ${bands.map((bd, bi) => html`<${BandRow} key=${bi} state=${state} day=${day} band=${bd} simple=${simple}
               onQuickAdd=${(st) => { setQuickInit(st); setQuickOpen(true); }}
               onBandBid=${(id, b2) => setBidTimeFor({ id, band: [b2.start, b2.end] })}
@@ -1145,7 +1169,8 @@
               onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'band', band: bd, idx: bi })} />`)}
             ${(showExt || extAfter.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extAfter} simple=${simple}
               onQuickAdd=${() => { setQuickInit(bands[bands.length - 1].end); setQuickOpen(true); }}
-              onExtBid=${(id) => setBidTimeFor({ id, ext: true })} onExtMove=${(id) => setMoveTimeFor({ id, ext: true })} />`}
+              onExtBid=${(id) => setBidTimeFor(extAfter.win ? { id, band: [extAfter.win[0], extAfter.win[1]] } : { id, ext: true })}
+              onExtMove=${(id) => setMoveTimeFor(extAfter.win ? { id, band: [extAfter.win[0], extAfter.win[1]] } : { id, ext: true })} />`}
             ${labelSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} simple=${simple}
               onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'slot', slot: s })} />`)}`
           : (sortedSlots.length === 0
@@ -1234,7 +1259,7 @@
   // 입찰카드를 날짜/띠에 놓았을 때 — 편성 위치 지정 팝업 (띠 프로그램은 놓은 띠 자동 인식 + 노출분)
   function BidTimeModal({ state, day, bidId, initBand, initExt, onClose }) {
     const b = state.bids.find((x) => x.id === bidId);
-    const bands = dayBands(state, day);
+    const bands = dayBandsWithExt(state, day);
     const [bandIdx, setBandIdx] = useState(() => initExt ? -1 : bandInitIdx(bands, initBand || null, null));
     const [start, setStart] = useState('');
     const [dur, setDur] = useState(String((b && b.product && b.product.durationMin) || ''));
@@ -1261,7 +1286,7 @@
   // 같은 날짜 안에서 다른 시간대로 이동 — 놓은 위치(띠)를 자동 인식해 미리 선택
   function MoveTimeModal({ state, day, placementId, initSlot, initBand, initExt, onClose }) {
     const p = state.placements.find((x) => x.id === placementId);
-    const bands = dayBands(state, day);
+    const bands = dayBandsWithExt(state, day);
     const autoStart = (initSlot && initSlot.start) || (initBand && initBand[0]) || '';
     const [bandIdx, setBandIdx] = useState(() => initExt ? -1 : bandInitIdx(bands, initBand || null, autoStart || null));
     const [start, setStart] = useState(autoStart);
@@ -1292,7 +1317,7 @@
     const teams = programTeams(state);
     // 순번형: 패션 프로그램이거나, 이 날짜에 순번 슬롯(1부 등)이 있으면
     const orderMode = programSchema(state) === 'fashion' || day.slots.some((s) => s.label && !s.start);
-    const bands = orderMode ? [] : dayBands(state, day);
+    const bands = orderMode ? [] : dayBandsWithExt(state, day);
     const [name, setName] = useState('');
     const [dur, setDur] = useState('');
     const [start, setStart] = useState(initStart || '');
@@ -1755,7 +1780,13 @@
       const e2 = progSchedF.find((x) => x.wd === d.weekday);
       const std = (e2 && e2.slots) || null;
       const ov = (d.bands && d.bands.length) ? d.bands : null;
-      return (ov && (!std || ov.length <= std.length)) ? ov : (std || ov);
+      const base = (ov && (!std || ov.length <= std.length)) ? ov : (std || ov);
+      if (!base || !base.length || !e2) return base;
+      // 확장 창(경계는 인접 띠에 물림): 그 시간의 상품 행이 있을 때만 '확장' 띠로 묶여 보임
+      const out = base.slice();
+      if (e2.extBefore) out.unshift([e2.extBefore, base[0][0], 'ext']);
+      if (e2.extAfter) out.push([base[base.length - 1][1], e2.extAfter, 'ext']);
+      return out;
     };
     const COLS = (readOnly && !full ? 8 : 16) + (hasBandCol ? 1 : 0); // 표 전체 열 수 (colspan용)
     const [quickAddDay, setQuickAddDay] = useState(null); // 행 추가(시간·상품)
@@ -2185,7 +2216,7 @@
                       <td class=${`${tdMerge} font-semibold ${wdColor}`} rowSpan=${dayCount[r.day.date]}>${wd}</td>`}
                     ${hasBandCol && (r.band
                       ? (r.firstOfBand ? html`<td class=${`${tdMerge} font-semibold tabular-nums text-ink whitespace-nowrap`} data-col="time" rowSpan=${bandCount[r.bandKey]}>
-                            ${r.band[0]}~${r.band[1]}<div class="text-[10px] font-normal text-ink-soft">${(U.toMin(r.band[1]) - U.toMin(r.band[0]) + 1440) % 1440}분 띠${r.band[2] === 'ext' ? html` <span class="font-bold text-amber-600">확장</span>` : ''}</div></td>` : '')
+                            ${r.band[0]}~${r.band[1]}<div class="text-[10px] font-normal text-ink-soft">${(U.toMin(r.band[1]) - U.toMin(r.band[0]) + 1440) % 1440}분 ${r.band[2] === 'ext' ? html`<span class="font-bold text-amber-600">확장</span>` : '띠'}</div></td>` : '')
                       : html`<td class=${td} data-col="time"></td>`)}
                     <td class=${`${td} tabular-nums font-medium ${r.compete ? 'text-amber-700' : ''}`} data-col="time">
                       ${srcPart && html`<span class="inline-block align-middle text-[10px] font-bold text-sky-700 bg-sky-50 border border-sky-200 rounded px-1 mr-1" title="MD 입찰의 부(순번)">${srcPart}부</span>`}
@@ -2614,20 +2645,28 @@
                 </div>`
               : (bandDefs && bandDefs.length) ? html`
               <div class="divide-y divide-slate-100">
-                ${bandDefs.map(([bs, be], bi) => {
-                  const slotIn = (b) => { if (b.dayId !== day.id) return false;
+                ${(() => {
+                  const slotInW = (b, bs, be) => { if (b.dayId !== day.id) return false;
                     const sl = day.slots.find((s) => s.id === b.slotId);
                     return sl && sl.start && sl.end && U.toMin(sl.start) >= U.toMin(bs) && U.toMin(sl.end) <= U.toMin(be); };
-                  const inBand = teamBids.filter(slotIn).sort((a, b2) =>
-                    ((parseInt(a.part, 10) || 99) - (parseInt(b2.part, 10) || 99))
-                    || (U.toMin((day.slots.find((s) => s.id === a.slotId) || {}).start || '00:00')
-                      - U.toMin((day.slots.find((s) => s.id === b2.slotId) || {}).start || '00:00')));
-                  const durB = (U.toMin(be) - U.toMin(bs) + 1440) % 1440;
-                  return html`
+                  // 확장 창은 고정띠가 아님 — 그 안에 입찰이 있을 때만 행으로 표시
+                  const extW = dayExtWins(state, day, bandDefs);
+                  const rowBands = [
+                    ...(extW.before && teamBids.some((b) => slotInW(b, extW.before[0], extW.before[1])) ? [extW.before] : []),
+                    ...bandDefs,
+                    ...(extW.after && teamBids.some((b) => slotInW(b, extW.after[0], extW.after[1])) ? [extW.after] : []),
+                  ];
+                  const rows = rowBands.map(([bs, be], bi) => {
+                    const inBand = teamBids.filter((b) => slotInW(b, bs, be)).sort((a, b2) =>
+                      ((parseInt(a.part, 10) || 99) - (parseInt(b2.part, 10) || 99))
+                      || (U.toMin((day.slots.find((s) => s.id === a.slotId) || {}).start || '00:00')
+                        - U.toMin((day.slots.find((s) => s.id === b2.slotId) || {}).start || '00:00')));
+                    const durB = (U.toMin(be) - U.toMin(bs) + 1440) % 1440;
+                    return html`
                     <div key=${bi} class="flex gap-3 px-3 py-2">
                       <div class="w-28 shrink-0 pt-0.5">
                         <div class="text-[13px] font-bold tabular-nums">${bs}~${be}</div>
-                        <div class="text-[11px] text-ink-soft">${durB}분 띠${bandDefs[bi][2] === 'ext' ? html` <span class="text-[10px] font-bold text-amber-600">확장</span>` : ''}</div>
+                        <div class="text-[11px] text-ink-soft">${durB}분 ${rowBands[bi][2] === 'ext' ? html`<span class="text-[10px] font-bold text-amber-600">확장</span>` : '띠'}</div>
                       </div>
                       <div class="flex-1 flex flex-wrap gap-1.5 items-start">
                         ${inBand.map((b) => html`<${BidChip} key=${b.id} state=${state} b=${b} readOnly=${readOnly}
@@ -2638,19 +2677,17 @@
                         </button>`}
                       </div>
                     </div>`;
-                })}
-                ${(() => { // 띠에 담기지 않은 입찰 (시간 미정·띠 밖 시간)
-                  const anyIn = (b) => bandDefs.some(([bs, be]) => { const sl = day.slots.find((s) => s.id === b.slotId);
-                    return sl && sl.start && sl.end && U.toMin(sl.start) >= U.toMin(bs) && U.toMin(sl.end) <= U.toMin(be); });
-                  const un = teamBids.filter((b) => b.dayId === day.id && !anyIn(b));
-                  if (!un.length) return '';
-                  return html`<div class="flex gap-3 px-3 py-2 bg-amber-50/60">
+                  });
+                  // 어느 행에도 담기지 않은 입찰 (시간 미정·띠 밖 시간)
+                  const un = teamBids.filter((b) => b.dayId === day.id && !rowBands.some(([bs, be]) => slotInW(b, bs, be)));
+                  if (un.length) rows.push(html`<div class="flex gap-3 px-3 py-2 bg-amber-50/60">
                     <div class="w-28 shrink-0 pt-0.5 text-[12px] font-bold text-amber-700">띠 밖 / 미정</div>
                     <div class="flex-1 flex flex-wrap gap-1.5 items-start">
                       ${un.map((b) => html`<${BidChip} key=${b.id} state=${state} b=${b} readOnly=${readOnly}
                         onEdit=${() => (readOnly ? setDetailBid(b) : setModal({ dayId: day.id, start: bandDefs[0][0], end: bandDefs[0][1], bid: b }))} />`)}
                     </div>
-                  </div>`;
+                  </div>`);
+                  return rows;
                 })()}
               </div>`
               : html`
@@ -2814,7 +2851,13 @@
       const sc = store.getSchedule ? store.getSchedule(day && day.programId) : null;
       const e2 = sc && day ? sc.find((x) => x.wd === day.weekday) : null;
       const defs = (day && day.bands && day.bands.length) ? day.bands : (e2 && e2.slots);
-      if (defs && defs.length) return defs.map((bd) => ({ id: 'band_' + bd[0], start: bd[0], end: bd[1], extBand: bd[2] === 'ext' }));
+      if (defs && defs.length) {
+        const list = defs.map((bd) => ({ id: 'band_' + bd[0], start: bd[0], end: bd[1], extBand: bd[2] === 'ext' }));
+        // 확장 창(경계는 인접 띠에 물림)도 선택지로 — 고정띠는 아니므로 '확장' 표기
+        if (e2 && e2.extBefore) list.unshift({ id: 'band_extb', start: e2.extBefore, end: defs[0][0], extBand: true });
+        if (e2 && e2.extAfter) list.push({ id: 'band_exta', start: defs[defs.length - 1][1], end: e2.extAfter, extBand: true });
+        return list;
+      }
       return (day ? day.slots : []).filter((s) => s.start && s.end);
     })();
     // 띠 모드: 시간 수기 입력 대신 [고정 띠 + 부(순번) + 희망 노출분(참고용)] — 모든 띠 프로그램 공통
