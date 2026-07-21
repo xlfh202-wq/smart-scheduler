@@ -2287,7 +2287,20 @@
             });
             const slotOrd = (sl) => sl.start ? U.toMin(sl.start)
               : 100000 + (parseInt(((sl.label || '').match(/\d+/) || [99])[0], 10) || 99);
-            const shownSlots = rowSlots.sort((x, y) => slotOrd(x) - slotOrd(y));
+            // 팀 기준 정리 — PD가 시간을 쪼개도 MD 화면이 겹치는 빈 시간대로 어지럽지 않게:
+            //  ① 이 팀 입찰이 담긴 시간대·순번은 항상 표시
+            //  ② 고정 띠(std·가상)는 이 팀 입찰과 겹치지 않을 때만 (겹치면 이미 세분화되어 운영 중)
+            //  ③ 그 외 빈 조각은 이 팀 입찰·표시 중인 띠와 겹치지 않을 때만
+            const hasBid = (sl) => teamBids.some((b) => b.slotId === sl.id);
+            const ovl = (a, b) => a.start && a.end && b.start && b.end
+              && U.toMin(a.start) < U.toMin(b.end) && U.toMin(b.start) < U.toMin(a.end);
+            const bidSlots = rowSlots.filter(hasBid);
+            const stdShown = rowSlots.filter((sl) => (sl.std || sl.virtual) && !hasBid(sl) && !bidSlots.some((o) => ovl(sl, o)));
+            const shownSlots = rowSlots.filter((sl) => {
+              if (hasBid(sl) || (sl.label && !sl.start)) return true;
+              if (sl.std || sl.virtual) return !bidSlots.some((o) => ovl(sl, o));
+              return !bidSlots.some((o) => ovl(sl, o)) && !stdShown.some((o) => ovl(sl, o));
+            }).sort((x, y) => slotOrd(x) - slotOrd(y));
             return html`
             <div key=${day.id} class="rounded-xl border border-slate-200 bg-white overflow-hidden"
               onDragOver=${(e) => { e.preventDefault(); e.currentTarget.classList.add('drop-active'); }}
