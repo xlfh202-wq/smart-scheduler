@@ -691,9 +691,9 @@
     const e2 = sc ? sc.find((x) => x.wd === day.weekday) : null;
     const bs = (bandsOpt && bandsOpt.length) ? bandsOpt : dayBands(state, day);
     if (!bs.length) return { before: null, after: null };
-    // 날짜별 수기 조정(day.extBefore/extAfter) 우선, 없으면 프로그램 기본값
-    const bStart = day.extBefore || (e2 && e2.extBefore);
-    const aEnd = day.extAfter || (e2 && e2.extAfter);
+    // 날짜별 수기 조정(day.extBefore/extAfter) 우선, 없으면 프로그램 기본값 ('off' = 이 날짜만 확장 숨김)
+    const bStart = day.extBefore === 'off' ? null : (day.extBefore || (e2 && e2.extBefore));
+    const aEnd = day.extAfter === 'off' ? null : (day.extAfter || (e2 && e2.extAfter));
     return {
       before: bStart ? [bStart, bs[0][0], 'ext'] : null,
       after: aEnd ? [bs[bs.length - 1][1], aEnd, 'ext'] : null,
@@ -802,7 +802,7 @@
         onDragOver=${(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave=${() => setOver(false)}
         onDrop=${onDrop}
-        onContextMenu=${(!isExt && onCtxMenu) ? ((e) => { e.preventDefault(); e.stopPropagation(); onCtxMenu(e.clientX, e.clientY); }) : undefined}>
+        onContextMenu=${onCtxMenu ? ((e) => { e.preventDefault(); e.stopPropagation(); onCtxMenu(e.clientX, e.clientY); }) : undefined}>
         <div class=${`w-[104px] shrink-0 px-1.5 py-1.5 border-r border-slate-200 flex flex-col gap-0.5 ${isExt ? 'bg-slate-100/70' : 'bg-slate-50'}`}>
           ${isExt
             ? (band.win
@@ -1190,6 +1190,7 @@
             ${(showExt || extBefore.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extBefore} simple=${simple}
               onQuickAdd=${() => { const di = extDropInit(extBefore); setQuickInit(di.band ? di.band[0] : (di.start || '')); setQuickOpen(true); }}
               onEditExt=${() => setExtEdit('before')}
+              onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'ext', extKind: 'before', row: extBefore })}
               onExtBid=${(id) => setBidTimeFor({ id, ...extDropInit(extBefore) })}
               onExtMove=${(id) => setMoveTimeFor({ id, ...extDropInit(extBefore) })} />`}
             ${bands.map((bd, bi) => html`<${BandRow} key=${bi} state=${state} day=${day} band=${bd} simple=${simple}
@@ -1201,6 +1202,7 @@
             ${(showExt || extAfter.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extAfter} simple=${simple}
               onQuickAdd=${() => { setQuickInit(bands[bands.length - 1].end); setQuickOpen(true); }}
               onEditExt=${() => setExtEdit('after')}
+              onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'ext', extKind: 'after', row: extAfter })}
               onExtBid=${(id) => setBidTimeFor({ id, ...extDropInit(extAfter) })}
               onExtMove=${(id) => setMoveTimeFor({ id, ...extDropInit(extAfter) })} />`}
             ${labelSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} simple=${simple}
@@ -1225,6 +1227,8 @@
               class=${`w-full text-left px-3 py-1.5 hover:bg-slate-100 ${danger ? 'text-rose-600' : 'text-ink'}`}>${label}</button>`;
           const head = ctxMenu.kind === 'band'
             ? `${fmtDay(day)} · 띠 ${ctxMenu.band.start}~${ctxMenu.band.end}`
+            : ctxMenu.kind === 'ext'
+            ? `${fmtDay(day)} · 확장 ${ctxMenu.row.win ? `${ctxMenu.row.win[0]}~${ctxMenu.row.win[1]}` : ctxMenu.row.label}`
             : `${fmtDay(day)} · ${slotName(ctxMenu.slot)}`;
           return html`
             <div class="fixed inset-0 z-50" onClick=${close} onContextMenu=${(e) => { e.preventDefault(); close(); }}>
@@ -1238,6 +1242,15 @@
                   ${item('🗑 이 시간띠 삭제 (이 날짜만)', () => {
                     if (!confirm(`${ctxMenu.band.start}~${ctxMenu.band.end} 시간띠를 삭제할까요?\n이 구간의 상품은 삭제되지 않고 입찰 풀로 돌아갑니다.`)) return;
                     const r = store.removeDayBand(day.id, ctxMenu.idx);
+                    if (r && r.error) alert(r.error);
+                  }, true)}`
+                : ctxMenu.kind === 'ext' ? html`
+                  ${item('➕ 상품 추가 (이 확장 시간)', () => { const di = extDropInit(ctxMenu.row); setQuickInit(di.band ? di.band[0] : (di.start || '')); setQuickOpen(true); })}
+                  ${item('⏱ 확장 시간 조정', () => setExtEdit(ctxMenu.extKind))}
+                  ${item('🗑 확장 삭제 (이 날짜만)', () => {
+                    const w = ctxMenu.row.win;
+                    if (!confirm(`${w ? `${w[0]}~${w[1]} ` : ''}확장을 삭제할까요?\n이 구간의 상품은 삭제되지 않고 입찰 풀로 돌아갑니다.`)) return;
+                    const r = store.removeDayExt(day.id, ctxMenu.extKind);
                     if (r && r.error) alert(r.error);
                   }, true)}`
                 : html`
@@ -1842,8 +1855,8 @@
       if (!base || !base.length) return base;
       // 확장 창(경계는 인접 띠에 물림): 그 시간의 상품 행이 있을 때만 '확장' 띠로 묶여 보임
       const out = base.slice();
-      const bStart = d.extBefore || (e2 && e2.extBefore);
-      const aEnd = d.extAfter || (e2 && e2.extAfter);
+      const bStart = d.extBefore === 'off' ? null : (d.extBefore || (e2 && e2.extBefore));
+      const aEnd = d.extAfter === 'off' ? null : (d.extAfter || (e2 && e2.extAfter));
       if (bStart) out.unshift([bStart, base[0][0], 'ext']);
       if (aEnd) out.push([base[base.length - 1][1], aEnd, 'ext']);
       return out;
@@ -2914,8 +2927,8 @@
       if (defs && defs.length) {
         const list = defs.map((bd) => ({ id: 'band_' + bd[0], start: bd[0], end: bd[1], extBand: bd[2] === 'ext' }));
         // 확장 창(경계는 인접 띠에 물림)도 선택지로 — 고정띠는 아니므로 '확장' 표기 (날짜별 조정 우선)
-        const bStart = (day && day.extBefore) || (e2 && e2.extBefore);
-        const aEnd = (day && day.extAfter) || (e2 && e2.extAfter);
+        const bStart = (day && day.extBefore === 'off') ? null : ((day && day.extBefore) || (e2 && e2.extBefore));
+        const aEnd = (day && day.extAfter === 'off') ? null : ((day && day.extAfter) || (e2 && e2.extAfter));
         if (bStart) list.unshift({ id: 'band_extb', start: bStart, end: defs[0][0], extBand: true });
         if (aEnd) list.push({ id: 'band_exta', start: defs[defs.length - 1][1], end: aEnd, extBand: true });
         return list;

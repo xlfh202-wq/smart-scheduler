@@ -1462,6 +1462,49 @@
         log({ action: '확장조정', detail: `${day.date} 확장 ${patch.before !== undefined ? `시작 ${patch.before || '기본값'}` : ''}${patch.after !== undefined ? `종료 ${patch.after || '기본값'}` : ''} (이 날짜만)` });
         emit();
       },
+      // 확장 삭제(이 날짜만) — 확장 구간의 상품은 삭제하지 않고 입찰 풀로 복귀.
+      // 프로그램 기본 확장이 있는 요일은 'off'로 숨김(다시 시간을 지정하면 되살아남)
+      removeDayExt(dayId, kind) {
+        const day = state.days.find((d) => d.id === dayId);
+        if (!day) return { error: '날짜를 찾을 수 없습니다.' };
+        const sched = progSchedule(day.programId);
+        const entry = sched && sched.find((sc) => sc.wd === day.weekday);
+        const defs = (day.bands && day.bands.length) ? day.bands : ((entry && entry.slots) || []);
+        if (!defs.length) return { error: '고정 시간띠가 없는 날짜입니다.' };
+        // 확장 구간 판정: 첫 띠 시작 기준 상대분(자정 넘김 대응) — 띠 밖 앞/뒤 구분
+        const firstStart = toMin(defs[0][0]);
+        const rel = (m) => (m - firstStart + 1440) % 1440;
+        const lastEndR = (() => { const r = rel(toMin(defs[defs.length - 1][1])); return r === 0 ? 1440 : r; })();
+        const inExt = (sl) => {
+          if (!sl.start) return false;
+          const r = rel(toMin(sl.start));
+          const inBand = defs.some(([bs, be]) => { let b1 = rel(toMin(bs)), b2 = rel(toMin(be)); if (b2 <= b1) b2 += 1440; return r >= b1 && r < b2; });
+          if (inBand) return false;
+          const isAfter = r >= lastEndR && r - lastEndR <= 720;
+          return kind === 'after' ? isAfter : !isAfter;
+        };
+        const gone = day.slots.filter(inExt);
+        let saved = 0;
+        gone.forEach((sl) => {
+          state.placements.filter((p) => p.slotId === sl.id).forEach((p) => {
+            if (!p.sourceBidId) {
+              const product = { name: p.productName, ...(p.detail || {}), durationMin: p.durationMin, items: p.items };
+              state.bids.push(stamp({ id: uid(), teamId: p.teamId, dayId: day.id, slotId: null, product, createdAt: nowISO() }));
+            }
+            saved++;
+          });
+          state.placements = state.placements.filter((p) => p.slotId !== sl.id);
+        });
+        const goneIds = new Set(gone.map((s) => s.id));
+        day.slots = day.slots.filter((s) => !goneIds.has(s.id));
+        const fb = day.slots[0] ? day.slots[0].id : null;
+        state.bids.forEach((b) => { if (goneIds.has(b.slotId)) b.slotId = fb; });
+        if (kind === 'before') { if (entry && entry.extBefore) day.extBefore = 'off'; else delete day.extBefore; }
+        else { if (entry && entry.extAfter) day.extAfter = 'off'; else delete day.extAfter; }
+        log({ action: '확장삭제', detail: `${day.date} ${kind === 'before' ? '앞' : '뒤'} 확장 삭제(이 날짜만)${saved ? ` · 상품 ${saved}건 입찰 풀로 복귀` : ''}` });
+        emit();
+        return { ok: true, saved };
+      },
       // 시간띠 삭제(이 날짜만) — 이 띠 구간의 상품은 삭제하지 않고 입찰 풀로 복귀
       removeDayBand(dayId, idx) {
         const day = state.days.find((d) => d.id === dayId);
