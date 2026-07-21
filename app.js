@@ -1132,9 +1132,11 @@
   }
 
   // 같은 날짜 안에서 다른 시간대로 이동 (라이프스타일) — 시간 설정 팝업
-  function MoveTimeModal({ state, day, placementId, onClose }) {
+  function MoveTimeModal({ state, day, placementId, initSlot, initBand, onClose }) {
     const p = state.placements.find((x) => x.id === placementId);
-    const [start, setStart] = useState('');
+    // 놓은 위치(행)의 시간을 자동 인식해 미리 채움 — 맞으면 그대로 저장, 다르면 고쳐서 저장
+    const autoStart = (initSlot && initSlot.start) || (initBand && initBand[0]) || '';
+    const [start, setStart] = useState(autoStart);
     const dur = p && p.durationMin ? p.durationMin : '';
     function save() {
       if (!/^\d{1,2}:\d{2}$/.test(start)) { alert('시작 시간을 24시간 형식(예: 21:00)으로 입력하세요.'); return; }
@@ -1143,6 +1145,9 @@
     }
     return html`
       <${Modal} title=${`${fmtDay(day)} · 시간대 이동${p ? ' · ' + p.productName : ''}`} onClose=${onClose} onSave=${save}>
+        ${autoStart && html`<div class="text-[12px] bg-sky-50 border border-sky-200 text-sky-800 rounded px-2.5 py-1.5">
+          📍 놓은 위치 자동 인식: <b>${initBand ? `${initBand[0]}~${initBand[1]} 띠` : ''}${initSlot && initSlot.start ? `${initBand ? ' · ' : ''}${initSlot.start}~${initSlot.end}` : ''}</b>
+          — 이 시간이 맞으면 그대로 저장하세요.</div>`}
         <${Field} label="이동할 시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${setStart} /><//>
         <div class="text-[12px] text-ink-soft">${dur ? `노출분 ${dur}분 → 시작~시작+${dur}분 시간대로 생성됩니다.` : '입력한 시각으로 새 시간대가 생성되어 이동합니다.'}</div>
       <//>`;
@@ -1781,8 +1786,8 @@
       const dBands = bandsOfDay(d);
       const bandOf = (s) => { if (!dBands || !s || !s.start || !s.end) return -1;
         return dBands.findIndex(([bs, be]) => U.toMin(s.start) >= U.toMin(bs) && U.toMin(s.end) <= U.toMin(be)); };
-      const push = (row) => { const bi = bandOf(row.slot);
-        rows.push({ ...row, band: bi >= 0 ? dBands[bi] : null, bandKey: bi >= 0 ? d.date + '|' + bi : null }); };
+      // 1) 이 날의 표시 후보(슬롯·상품) 수집
+      const items = [];
       slots.forEach((s) => {
         const pls = state.placements.filter((p) => p.slotId === s.id);
         if (pls.length === 0) {
@@ -1793,10 +1798,38 @@
           if (s.start && s.start === s.end) return; // 0분 잔재 슬롯은 빈 행으로 표시하지 않음
           // 그 시간 구간에 이미 상품이 편성된 시간대가 겹쳐 있으면(예: 65분 띠를 2행으로 분할) 빈 행 숨김
           if (slots.some((o) => o.id !== s.id && hasContent(o.id) && ovl(s, o))) return;
-          push({ day: d, slot: s, p: null, firstOfDay }); firstOfDay = false;
+          items.push({ slot: s, p: null, compete: false });
         } else {
-          pls.forEach((p) => { push({ day: d, slot: s, p, firstOfDay, compete: pls.length > 1 }); firstOfDay = false; });
+          pls.forEach((p) => items.push({ slot: s, p, compete: pls.length > 1 }));
         }
+      });
+      // 2) 정렬: 띠 순 → 같은 띠 안에서는 부(순번) 묶음(같은 팀)을 인접 배치, 나머지는 시간순
+      const partOfP = (p) => (p && p.sourceBidId) ? (parseInt((state.bids.find((x) => x.id === p.sourceBidId) || {}).part, 10) || null) : null;
+      const startOf = (it) => U.toMin(it.slot.start || '00:00');
+      const anchor = {}; // (띠|팀) 부 묶음의 가장 이른 시작
+      items.forEach((it) => { const pt = partOfP(it.p); if (!pt) return;
+        const k = bandOf(it.slot) + '|' + it.p.teamId;
+        anchor[k] = Math.min(anchor[k] === undefined ? 9999 : anchor[k], startOf(it)); });
+      items.sort((a, b) => {
+        const ba = bandOf(a.slot), bb = bandOf(b.slot);
+        if (ba !== bb) return (ba < 0 ? 999 : ba) - (bb < 0 ? 999 : bb);
+        const pa = partOfP(a.p), pb = partOfP(b.p);
+        const aa = pa ? anchor[ba + '|' + a.p.teamId] : startOf(a);
+        const ab = pb ? anchor[bb + '|' + b.p.teamId] : startOf(b);
+        if (aa !== ab) return aa - ab;
+        if (!!pa !== !!pb) return pa ? -1 : 1; // 같은 시작이면 부 묶음 먼저
+        if (pa && pb) {
+          const t = String(a.p.teamId).localeCompare(String(b.p.teamId));
+          return t || (pa - pb);
+        }
+        return startOf(a) - startOf(b);
+      });
+      // 3) 행으로 확정
+      items.forEach((it) => {
+        const bi = bandOf(it.slot);
+        rows.push({ day: d, slot: it.slot, p: it.p, compete: it.compete, firstOfDay,
+          band: bi >= 0 ? dBands[bi] : null, bandKey: bi >= 0 ? d.date + '|' + bi : null });
+        firstOfDay = false;
       });
     }
     const total = rows.filter((r) => r.p && r.day.date.slice(0, 7) === centerKey).length; // 집계는 이번 달만
@@ -1871,7 +1904,8 @@
         ${memoOpen && html`<${CastingMemoModal} state=${state} onClose=${() => setMemoOpen(false)} />`}
         ${moveFor && (isFashionProg
           ? html`<${MovePartModal} state=${state} day=${moveFor.day} placementId=${moveFor.pid} onClose=${() => setMoveFor(null)} />`
-          : html`<${MoveTimeModal} state=${state} day=${moveFor.day} placementId=${moveFor.pid} onClose=${() => setMoveFor(null)} />`)}
+          : html`<${MoveTimeModal} state=${state} day=${moveFor.day} placementId=${moveFor.pid}
+              initSlot=${moveFor.slot} initBand=${moveFor.band} onClose=${() => setMoveFor(null)} />`)}
         ${quickAddDay && html`<${QuickAddModal} state=${state} day=${quickAddDay} onClose=${() => setQuickAddDay(null)} />`}
         ${partAssignDay && html`<${PartAssignModal} state=${state} day=${partAssignDay} onClose=${() => setPartAssignDay(null)} />`}
         ${addSlotDay && html`<${AddSlotModal} day=${addSlotDay} onClose=${() => setAddSlotDay(null)} />`}
@@ -1997,7 +2031,7 @@
                       const pl = drag.read(e);
                       if (!pl || pl.kind !== 'placement') return;
                       e.preventDefault(); e.stopPropagation();
-                      setMoveFor({ pid: pl.id, day: r.day }); // 놓은 행의 날짜로 이동 → 시간 지정 팝업
+                      setMoveFor({ pid: pl.id, day: r.day, slot: r.slot, band: r.band }); // 놓은 행의 시간띠 자동 인식 → 확인 팝업
                     })}
                     onContextMenu=${readOnly ? undefined : ((e) => {
                       e.preventDefault(); // 우클릭 → 행 추가/삭제 메뉴
@@ -2020,6 +2054,8 @@
                         : html`<${SlotTimeButton} slot=${r.slot} placement=${r.p} rippleDefault=${true} className="tabular-nums font-medium text-left" />`}
                       ${r.compete && html`<span class="text-[10px] text-amber-600">●경쟁</span>`}
                       ${r.slot.start && r.slot.end && html`<div class="text-[11px] text-ink-soft font-normal" data-col="dur">${U.slotDuration(r.slot)}분</div>`}
+                      ${p && p.durationMin && r.slot.start && U.slotDuration(r.slot) !== p.durationMin
+                        && html`<div class="text-[10px] text-sky-700 font-semibold whitespace-nowrap" data-col="dur" title="MD가 입찰 시 제안한 희망 노출분">희망 ${p.durationMin}분</div>`}
                     </td>
                     ${!slim && html`<td class=${`${td} text-center`} data-col="status">
                       ${p ? (readOnly
@@ -2284,9 +2320,8 @@
     const [importOpen, setImportOpen] = useState(false); // 지난 입찰 가져오기(2차 편성)
     const schema = programSchema(state);
     const fashion = schema === 'fashion';
-    // 입찰 잠금(프리징): PD·관리자가 이 프로그램·월을 잠그면 MD는 조회만 가능
-    const lockYm = `${state.view.year}-${String(state.view.month).padStart(2, '0')}`;
-    const bidLock = (state.bidLocks || {})[`${state.activeProgram}|${lockYm}`] || null;
+    // 입찰 잠금(프리징·전체 일괄): PD·관리자가 잠그면 MD는 전 프로그램·전 월 조회만 가능
+    const bidLock = state.bidLockAll || null;
     if (bidLock && !canLock) readOnly = true;
     const [teamSel, setTeamSel] = useState(null);
     // MD 로그인: 자기 팀으로 고정 (팀 선택 없이 내 팀 입찰만 표시) — 팀명이 목록에 없으면 기존 방식 유지
@@ -2337,12 +2372,6 @@
         <div class="p-4 space-y-3 max-w-[1100px]">
           <div class="flex items-center justify-between gap-2 flex-wrap">
             <h2 class="text-base font-bold text-ink">${teamOf(state, team).name} 입찰 · ${state.view.year}년 ${state.view.month}월 — 총 ${teamBids.length}건</h2>
-            ${canLock && html`<button onClick=${() => {
-                if (!bidLock && !confirm(`${state.view.month}월 ${activeProgramObj(state).name} MD 입찰을 잠글까요?\n잠그면 MD는 조회만 가능하고, 등록·수정이 차단됩니다.`)) return;
-                store.setBidLock(state.activeProgram, lockYm, !bidLock);
-              }}
-              class=${`text-xs px-2.5 py-1 rounded border whitespace-nowrap shrink-0 ${bidLock ? 'border-amber-400 text-amber-800 bg-amber-50' : 'border-slate-300 bg-white hover:border-amber-500 hover:text-amber-700'}`}
-              title="편성 조정 중 MD 기입을 막습니다 (프로그램·월 단위)">${bidLock ? '🔓 입찰 잠금 해제' : '🔒 입찰 잠금'}</button>`}
             ${!readOnly && html`<div class="flex items-center gap-2">
               <button onClick=${() => setImportOpen(true)}
                 class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand"
@@ -2352,8 +2381,8 @@
             </div>`}
           </div>
           ${bidLock && html`<div class="text-[12px] font-semibold text-amber-800 bg-amber-50 border border-amber-300 rounded px-3 py-2 -mt-1">
-            🔒 ${state.view.month}월 MD 입찰이 잠겨 있습니다 — PD·편성 조정 중${bidLock.by ? ` (${bidLock.by})` : ''}.
-            ${canLock ? ' 조정이 끝나면 위 "입찰 잠금 해제"를 눌러주세요.' : ' 수정이 필요하면 담당 PD에게 문의하세요.'}</div>`}
+            🔒 MD 입찰이 잠겨 있습니다 — PD·편성 조정 중${bidLock.by ? ` (${bidLock.by})` : ''}.
+            ${canLock ? ' 조정이 끝나면 우측 상단 "입찰 잠금 해제"를 눌러주세요.' : ' 수정이 필요하면 담당 PD에게 문의하세요.'}</div>`}
           ${readOnly
             ? html`<div class="text-[11px] text-ink-soft -mt-1">🔎 조회 전용 — 입찰 카드를 클릭하면 상세 정보를 볼 수 있습니다.</div>`
             : html`<div class="text-[11px] text-ink-soft -mt-1">💡 날짜 변경: 입찰 카드를 <b>드래그해 다른 날짜 칸에 놓거나</b>, 카드 클릭 → <b>희망 편성일</b>을 바꿔 저장하면 이동됩니다.</div>`}
@@ -3781,6 +3810,13 @@
                   class="px-2 py-1.5 text-[13px] border-l border-slate-200 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-default"
                   title="다시 (Ctrl/Cmd+Shift+Z)">↷</button>
               </div>
+              ${roleCfg.canManage && html`<button onClick=${() => {
+                  const lk = state.bidLockAll;
+                  if (!lk && !confirm('전체 MD 입찰을 잠글까요?\n모든 프로그램·모든 월에서 MD의 입찰 등록·수정이 차단됩니다(조회는 가능).')) return;
+                  store.setBidLock(!lk);
+                }}
+                class=${`text-[13px] px-3 py-1.5 rounded border whitespace-nowrap shrink-0 ${state.bidLockAll ? 'border-amber-400 text-amber-800 bg-amber-50' : 'border-slate-300 bg-white hover:border-amber-500 hover:text-amber-700'}`}
+                title="편성 조정 중 MD 기입 차단 (전체 프로그램·전체 월 일괄)">${state.bidLockAll ? '🔓 입찰잠금 해제' : '🔒 입찰 잠금'}</button>`}
               <button onClick=${() => setHistory(true)}
                 class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0">
                 변경 이력 <span class="text-[11px] text-ink-soft">(${state.changeLog.length})</span>
