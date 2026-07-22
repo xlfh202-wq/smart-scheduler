@@ -1186,7 +1186,7 @@
             <button onClick=${() => setStatusOpen(true)} class="hover:text-brand" title="이 날짜를 미운영(결방)으로 표기 / 해제">${day.status === 'off' ? '미운영 해제' : '미운영'}</button>
             ${fashion && html`<button onClick=${() => setPartOpen(true)} class="hover:text-brand" title="이 날짜의 상품을 1부·2부…로 한번에 배분">🧩 부 나누기</button>`}
             ${useBands && html`<button onClick=${() => setShowExt(!showExt)} class="hover:text-brand" title="고정 시간띠 앞뒤의 확장 시간대 보기/숨기기">확장 ${showExt ? '▴' : '▾'}</button>`}
-            <button onClick=${() => setAddOpen(true)} class="hover:text-brand">+ 시간대</button>
+            ${!fashion && html`<button onClick=${() => setAddOpen(true)} class="hover:text-brand">+ 시간대</button>`}
             ${fashion && html`<button onClick=${() => store.addSlot(day.id, { order: true })} class="hover:text-brand" title="순번(1부·2부…) 슬롯 추가 — 부 편성 프로그램용">+ 순번</button>`}
             <button onClick=${() => {
                 const nP = state.placements.filter((x) => day.slots.some((sl) => sl.id === x.slotId)).length;
@@ -1701,12 +1701,12 @@
               <button onClick=${() => setSnapOpen(true)}
                 class="text-xs px-2.5 py-1 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0">저장본 ${snaps.length}</button>
               <button onClick=${() => setSaveOpen(true)}
-                title="현재 편성을 저장본(되돌리기 지점)으로 기록하고 최종편성안으로 이동 — 수정은 이미 실시간 반영됩니다"
-                class="text-xs font-semibold px-3 py-1 rounded bg-brand text-white hover:bg-brand-dark whitespace-nowrap shrink-0">편성 저장</button>
+                title="수정은 이미 실시간 자동 저장·공유됩니다. 이 버튼은 현재 편성을 '저장본(되돌리기 지점)'으로 기록하고 최종편성안으로 이동합니다"
+                class="text-xs font-semibold px-3 py-1 rounded bg-brand text-white hover:bg-brand-dark whitespace-nowrap shrink-0">📸 저장본 남기기</button>
             </div>
           </div>
           ${simple && html`<div class="mb-2 text-[12px] text-ink-soft bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5">
-            상품명·팀명·노출분만 간결하게 표시합니다. 드래그로 <b>순서·시간띠를 조정</b>하면 <b>실시간으로 모두에게 반영</b>됩니다. “편성 저장”은 저장본(되돌리기 지점)을 남기고 <b>최종편성안</b>으로 이동합니다.</div>`}
+            상품명·팀명·노출분만 간결하게 표시합니다. 드래그로 <b>순서·시간띠를 조정</b>하면 <b>실시간으로 모두에게 반영</b>됩니다(별도 저장 불필요). “📸 저장본 남기기”는 이 시점의 편성을 <b>되돌리기 지점</b>으로 기록하고 <b>최종편성안</b>으로 이동합니다.</div>`}
           <div class="space-y-4">
             ${monthSections.map((sec) => sec.open ? html`
               <div key=${sec.key} id=${sec.center ? 'board-month-center' : undefined}
@@ -2447,7 +2447,7 @@
           </div>
           <div class="flex-1 overflow-y-auto">
             ${snaps.length === 0
-              ? html`<div class="text-center text-slate-400 py-10 text-sm">이 프로그램·월에 저장된 편성안이 없습니다.<br/>편성표에서 “편성 저장”을 누르면 이 시점의 편성안이 기록됩니다.</div>`
+              ? html`<div class="text-center text-slate-400 py-10 text-sm">이 프로그램·월에 저장된 편성안이 없습니다.<br/>입찰보드에서 “📸 저장본 남기기”를 누르면 이 시점의 편성안이 기록됩니다.</div>`
               : html`<table class="w-full text-[13px]">
                   <thead class="sticky top-0 bg-slate-50 text-ink-soft text-left">
                     <tr>
