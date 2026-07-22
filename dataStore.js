@@ -1404,6 +1404,25 @@
           }
         }
         f.day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
+        // 확장 창 역방향 연동: 날짜별 확장 시간이 지정된 날은 확장 구간 슬롯의 시간 변경을 창 정의에도 반영
+        // (최종편성안에서 확장 시간을 고치면 입찰보드 확장 띠 헤더도 같이 바뀜)
+        {
+          const schedE = progSchedule(f.day.programId);
+          const entryE = schedE && schedE.find((sc) => sc.wd === f.day.weekday);
+          const defsE = (f.day.bands && f.day.bands.length) ? f.day.bands : ((entryE && entryE.slots) || []);
+          if (defsE.length) {
+            if (f.day.extAfter && f.day.extAfter !== 'off') {
+              const lastEnd = toMin(defsE[defsE.length - 1][1]);
+              const region = f.day.slots.filter((sl) => sl.start && sl.end && toMin(sl.start) >= lastEnd);
+              if (region.length) f.day.extAfter = toHHMM(Math.max(...region.map((sl) => toMin(sl.end))));
+            }
+            if (f.day.extBefore && f.day.extBefore !== 'off') {
+              const firstStart = toMin(defsE[0][0]);
+              const region = f.day.slots.filter((sl) => sl.start && sl.end && toMin(sl.end) <= firstStart);
+              if (region.length) f.day.extBefore = toHHMM(Math.min(...region.map((sl) => toMin(sl.start))));
+            }
+          }
+        }
         log({ action: '시간수정', from: old, to: `${start}~${end}`,
               detail: `${f.day.date} 시간 수정${moved ? ` · 뒤 시간대 ${moved}개 함께 이동` : ''}` });
         emit();
@@ -1489,9 +1508,40 @@
       setDayExt(dayId, patch) {
         const day = state.days.find((d) => d.id === dayId);
         if (!day) return;
+        // 확장 창을 조정하면 그 구간의 편성 시간대도 함께 이동 — 최종편성안과 연동
+        const sched = progSchedule(day.programId);
+        const entry = sched && sched.find((sc) => sc.wd === day.weekday);
+        const defs = (day.bands && day.bands.length) ? day.bands : ((entry && entry.slots) || []);
+        let adj = 0;
+        if (patch.before !== undefined && defs.length) {
+          const firstStart = defs[0][0];
+          const oldStart = (day.extBefore && day.extBefore !== 'off') ? day.extBefore : ((entry && entry.extBefore) || null);
+          const newStart = patch.before;
+          if (newStart) {
+            const region = day.slots.filter((sl) => sl.start && sl.end && toMin(sl.end) <= toMin(firstStart));
+            const minStart = region.length ? Math.min(...region.map((sl) => toMin(sl.start))) : null;
+            region.forEach((sl) => {
+              const bound = (oldStart && sl.start === oldStart) || (!oldStart && toMin(sl.start) === minStart) || toMin(sl.start) < toMin(newStart);
+              if (bound && toMin(newStart) < toMin(sl.end)) { sl.start = newStart; adj++; }
+            });
+          }
+        }
+        if (patch.after !== undefined && defs.length) {
+          const lastEnd = defs[defs.length - 1][1];
+          const oldEnd = (day.extAfter && day.extAfter !== 'off') ? day.extAfter : ((entry && entry.extAfter) || null);
+          const newEnd = patch.after;
+          if (newEnd) {
+            const region = day.slots.filter((sl) => sl.start && sl.end && toMin(sl.start) >= toMin(lastEnd));
+            const maxEnd = region.length ? Math.max(...region.map((sl) => toMin(sl.end))) : null;
+            region.forEach((sl) => {
+              const bound = (oldEnd && sl.end === oldEnd) || (!oldEnd && toMin(sl.end) === maxEnd) || toMin(sl.end) > toMin(newEnd);
+              if (bound && toMin(newEnd) > toMin(sl.start)) { sl.end = newEnd; adj++; }
+            });
+          }
+        }
         if (patch.before !== undefined) { if (patch.before) day.extBefore = patch.before; else delete day.extBefore; }
         if (patch.after !== undefined) { if (patch.after) day.extAfter = patch.after; else delete day.extAfter; }
-        log({ action: '확장조정', detail: `${day.date} 확장 ${patch.before !== undefined ? `시작 ${patch.before || '기본값'}` : ''}${patch.after !== undefined ? `종료 ${patch.after || '기본값'}` : ''} (이 날짜만)` });
+        log({ action: '확장조정', detail: `${day.date} 확장 ${patch.before !== undefined ? `시작 ${patch.before || '기본값'}` : ''}${patch.after !== undefined ? `종료 ${patch.after || '기본값'}` : ''} (이 날짜만)${adj ? ` · 확장 구간 시간대 ${adj}개 함께 조정` : ''}` });
         emit();
       },
       // 확장 삭제(이 날짜만) — 확장 구간의 상품은 삭제하지 않고 입찰 풀로 복귀.
