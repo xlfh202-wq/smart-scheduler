@@ -1338,6 +1338,24 @@
       },
 
       // 같은 시간띠 안에서 카드 순서 변경 (dragId 카드를 beforeId 카드 앞으로)
+      // 띠 안 앞뒤 순서 이동: 시간이 다른 두 상품은 시간대(슬롯)와 부(순번)를 맞바꿈
+      swapPlacementSlots(aId, bId) {
+        const a = state.placements.find((x) => x.id === aId);
+        const b = state.placements.find((x) => x.id === bId);
+        if (!a || !b) return;
+        const t = a.slotId; a.slotId = b.slotId; b.slotId = t;
+        const pa = a.part || null, pb = b.part || null;
+        if (pa || pb) { a.part = pb; b.part = pa; }
+        // 원본 입찰의 부(순번)도 함께 맞바꿈 (표시 순서 일관성)
+        const ba = a.sourceBidId ? state.bids.find((x) => x.id === a.sourceBidId) : null;
+        const bb = b.sourceBidId ? state.bids.find((x) => x.id === b.sourceBidId) : null;
+        const bpa = (ba && ba.part) || null, bpb = (bb && bb.part) || null;
+        if (bpa || bpb) { if (ba) { ba.part = bpb; stamp(ba); } if (bb) { bb.part = bpa; stamp(bb); } }
+        stamp(a); stamp(b);
+        log({ action: '순서변경', productName: a.productName, teamName: teamName(a.teamId),
+              detail: `'${b.productName}'와(과) 시간 순서 맞바꿈` });
+        emit();
+      },
       reorderPlacement(dragId, beforeId) {
         const i = state.placements.findIndex((p) => p.id === dragId);
         if (i < 0 || dragId === beforeId) return;
@@ -1513,8 +1531,8 @@
         day.slots = day.slots.filter((s) => !goneIds.has(s.id));
         const fb = day.slots[0] ? day.slots[0].id : null;
         state.bids.forEach((b) => { if (goneIds.has(b.slotId)) b.slotId = fb; });
-        if (kind === 'before') { if (entry && entry.extBefore) day.extBefore = 'off'; else delete day.extBefore; }
-        else { if (entry && entry.extAfter) day.extAfter = 'off'; else delete day.extAfter; }
+        // 'off' = 이 날짜의 확장을 완전히 숨김 (확장 펼침 상태에서도 행이 사라짐 — 복원 버튼으로 되살림)
+        if (kind === 'before') day.extBefore = 'off'; else day.extAfter = 'off';
         log({ action: '확장삭제', detail: `${day.date} ${kind === 'before' ? '앞' : '뒤'} 확장 삭제(이 날짜만)${saved ? ` · 상품 ${saved}건 입찰 풀로 복귀` : ''}` });
         emit();
         return { ok: true, saved };

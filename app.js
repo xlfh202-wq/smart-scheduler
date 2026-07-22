@@ -208,7 +208,7 @@
     return (b && parseInt(b.part, 10)) || parseInt(p.part, 10) || null;
   }
 
-  function PlacementCard({ state, p, subTime, subSlot, simple }) {
+  function PlacementCard({ state, p, subTime, subSlot, simple, onNudge }) {
     const team = teamOf(state, p.teamId);
     const srcPart = placementPart(state, p); // 부(순번)
     const [info, setInfo] = useState(false);
@@ -235,7 +235,6 @@
                   title="MD 입찰의 세부 시간 — 클릭해 시간 조정">⏱ ${subTime}</button>`
               : html`<div class="text-[10px] font-semibold text-amber-700 tabular-nums" title="MD 입찰의 세부 시간 (고정 띠 안에 자동 귀속)">⏱ ${subTime}</div>`)}
             <div class="mt-0.5 flex flex-wrap items-center gap-1">
-              ${srcPart && html`<${Badge} color="#0891b2" title="MD 입찰의 부(순번)">${srcPart}부<//>`}
               <${Badge} color=${team.color}>${team.name}<//>
               ${!simple && items.length > 1 && html`<${Badge} color="#7c3aed" title="동시 노출 착장 수">동시 ${items.length}착장<//>`}
               ${!simple && det.isNew && html`<${Badge} color="#0891b2">신상품<//>`}
@@ -275,6 +274,8 @@
                 style=${{ left: Math.min(ctx.x, window.innerWidth - 272) + 'px', top: Math.min(ctx.y, window.innerHeight - 140) + 'px' }}
                 onClick=${(e) => e.stopPropagation()}>
                 <div class="px-3 py-1 text-[11px] text-ink-soft border-b border-slate-100 truncate">${p.productName}</div>
+                ${onNudge && item('⬅ 앞으로 이동 (띠 안 순서)', () => onNudge(p, -1))}
+                ${onNudge && item('➡ 뒤로 이동 (띠 안 순서)', () => onNudge(p, 1))}
                 ${item(`🔢 부(순번) 지정${srcPart ? ` — 현재 ${srcPart}부` : ''}`, () => setPartSet(true))}
                 ${item('🚫 편성 제외 (입찰 풀로 복귀)', () => {
                   if (confirm(`'${p.productName}'을(를) 편성에서 제외할까요?\n상품은 삭제되지 않고 입찰 풀(미편성)로 돌아갑니다.`)) store.removePlacement(p.id);
@@ -807,6 +808,18 @@
       if (!isExt && sl.start === band.start && sl.end === band.end) return '';
       return `${sl.start}~${sl.end}`;
     };
+    // 띠 안 앞뒤 순서 이동(우클릭 메뉴): 부(순번)가 있거나 시간이 다르면 시간대·부 맞바꿈, 아니면 배열 순서
+    const nudge = (p, dir) => {
+      const idx = placements.findIndex((x) => x.id === p.id);
+      const j = idx + dir;
+      if (idx < 0 || j < 0 || j >= placements.length) return;
+      const q = placements[j];
+      const sa = slots.find((s) => s.id === p.slotId), sb = slots.find((s) => s.id === q.slotId);
+      const sameStart = sa && sb && (sa.start || '') === (sb.start || '');
+      if (sameStart && !placementPart(state, p) && !placementPart(state, q)) {
+        if (dir < 0) store.reorderPlacement(p.id, q.id); else store.reorderPlacement(q.id, p.id);
+      } else store.swapPlacementSlots(p.id, q.id);
+    };
     function onDrop(e) {
       e.preventDefault(); e.stopPropagation(); setOver(false);
       const pl = drag.read(e);
@@ -826,13 +839,13 @@
       }
     }
     return html`
-      <div class=${`flex rounded-lg border overflow-hidden ${isExt ? 'bg-slate-50/70' : 'bg-white'} ${over ? 'drop-active' : ''}`}
+      <div class=${`flex rounded-lg border overflow-hidden ${isExt ? 'bg-amber-50/60' : 'bg-white'} ${over ? 'drop-active' : ''}`}
         style=${compColor && !over ? { borderColor: compColor, boxShadow: `0 0 0 1px ${compColor}` } : (over ? {} : { borderColor: '#e2e8f0', borderStyle: isExt ? 'dashed' : 'solid' })}
         onDragOver=${(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave=${() => setOver(false)}
         onDrop=${onDrop}
         onContextMenu=${onCtxMenu ? ((e) => { e.preventDefault(); e.stopPropagation(); onCtxMenu(e.clientX, e.clientY); }) : undefined}>
-        <div class=${`w-[104px] shrink-0 px-1.5 py-1.5 border-r border-slate-200 flex flex-col gap-0.5 ${isExt ? 'bg-slate-100/70' : 'bg-slate-50'}`}>
+        <div class=${`w-[104px] shrink-0 px-1.5 py-1.5 border-r border-slate-200 flex flex-col gap-0.5 ${isExt ? 'bg-amber-100/50' : 'bg-slate-50'}`}>
           ${isExt
             ? (band.win
               ? html`${onEditExt
@@ -878,7 +891,7 @@
                     store.reorderPlacement(pl.id, p.id);
                   }}>
                   <${PlacementCard} state=${state} p=${p} subTime=${subTimeOf(p)}
-                    subSlot=${slots.find((x) => x.id === p.slotId)} simple=${simple} />
+                    subSlot=${slots.find((x) => x.id === p.slotId)} simple=${simple} onNudge=${nudge} />
                 </div>`;
               // 부(순번)로 나눈 같은 팀 상품은 한 묶음으로 붙여 표시 (카드는 개별 드래그·수정 가능)
               const partOf = (p) => placementPart(state, p);
@@ -1216,7 +1229,11 @@
           </div>`}
         <div class=${`p-1.5 flex flex-col gap-1 ${day.status === 'off' ? 'hidden' : ''}`}>
           ${useBands ? html`
-            ${(showExt || extBefore.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extBefore} simple=${simple}
+            ${day.extBefore === 'off'
+              ? (showExt && html`<div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-dashed border-amber-200 bg-amber-50/40 text-[11px] text-slate-400">
+                  앞 확장이 삭제된 날짜입니다
+                  <button onClick=${() => store.setDayExt(day.id, { before: null })} class="text-brand hover:underline font-semibold">복원</button></div>`)
+              : (showExt || extBefore.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extBefore} simple=${simple}
               onQuickAdd=${() => { const di = extDropInit(extBefore); setQuickInit(di.band ? di.band[0] : (di.start || '')); setQuickOpen(true); }}
               onEditExt=${() => setExtEdit('before')}
               onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'ext', extKind: 'before', row: extBefore })}
@@ -1228,7 +1245,11 @@
               onBandMove=${(id, b2) => setMoveTimeFor({ id, band: [b2.start, b2.end] })}
               onEditBand=${() => setBandEdit({ idx: bi, start: bd.start, end: bd.end })}
               onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'band', band: bd, idx: bi })} />`)}
-            ${(showExt || extAfter.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extAfter} simple=${simple}
+            ${day.extAfter === 'off'
+              ? (showExt && html`<div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-dashed border-amber-200 bg-amber-50/40 text-[11px] text-slate-400">
+                  뒤 확장이 삭제된 날짜입니다
+                  <button onClick=${() => store.setDayExt(day.id, { after: null })} class="text-brand hover:underline font-semibold">복원</button></div>`)
+              : (showExt || extAfter.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extAfter} simple=${simple}
               onQuickAdd=${() => { setQuickInit(bands[bands.length - 1].end); setQuickOpen(true); }}
               onEditExt=${() => setExtEdit('after')}
               onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'ext', extKind: 'after', row: extAfter })}
@@ -2288,7 +2309,6 @@
                 const wd = U.WEEKDAY_KO[r.day.weekday];
                 const wdColor = r.day.weekday === 6 ? 'text-blue-600' : r.day.weekday === 0 ? 'text-red-500' : 'text-ink';
                 const pend = p && p.pending;
-                const srcPart = placementPart(state, p);
                 if (r.off) return html`
                   <tr key=${i} data-adj=${adj ? '1' : undefined} class=${`border-t-2 border-t-slate-300 bg-slate-50 ${adj ? 'opacity-60' : ''}`}
                     onContextMenu=${readOnly ? undefined : ((e) => { e.preventDefault(); setStatusDay(r.day); })}>
@@ -2299,9 +2319,10 @@
                       ${!readOnly && html`<span class="no-capture text-[11px] text-slate-400 ml-2">우클릭으로 수정/해제</span>`}
                     </td>
                   </tr>`;
+                const extRow = !!(r.band && r.band[2] === 'ext'); // 확장 구간 행 — 옅은 배경으로 구분(확대편성 카운팅용)
                 return html`
                   <tr key=${i} data-adj=${adj ? '1' : undefined}
-                    class=${`${r.firstOfDay ? 'border-t-2 border-t-slate-300' : ''} ${pend ? 'bg-amber-100' : 'hover:bg-amber-50'} ${adj ? 'opacity-60' : ''}`}
+                    class=${`${r.firstOfDay ? 'border-t-2 border-t-slate-300' : ''} ${pend ? 'bg-amber-100' : extRow ? 'bg-amber-50/70 hover:bg-amber-100/60' : 'hover:bg-amber-50'} ${adj ? 'opacity-60' : ''}`}
                     onDragOver=${readOnly ? undefined : ((e) => e.preventDefault())}
                     onDrop=${readOnly ? undefined : ((e) => {
                       const pl = drag.read(e);
@@ -2321,7 +2342,6 @@
                             ${r.band[0]}~${r.band[1]}<div class="text-[10px] font-normal text-ink-soft">${(U.toMin(r.band[1]) - U.toMin(r.band[0]) + 1440) % 1440}분 ${r.band[2] === 'ext' ? html`<span class="font-bold text-amber-600">확장</span>` : '띠'}</div></td>` : '')
                       : html`<td class=${td} data-col="time"></td>`)}
                     <td class=${`${td} tabular-nums font-medium ${r.compete ? 'text-amber-700' : ''}`} data-col="time">
-                      ${srcPart && html`<span class="inline-block align-middle text-[10px] font-bold text-sky-700 bg-sky-50 border border-sky-200 rounded px-1 mr-1" title="MD 입찰의 부(순번)">${srcPart}부</span>`}
                       ${readOnly ? slotName(r.slot)
                         : isFashionProg ? html`<button onClick=${() => setPartAssignDay(r.day)}
                             title="클릭해 부 나누기 (이 날짜의 상품을 1부~N부로 배분)"
