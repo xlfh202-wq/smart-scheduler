@@ -924,7 +924,7 @@
   /* =====================================================================
    *  슬롯 셀 (드롭 타깃)
    * ===================================================================== */
-  function SlotCell({ state, day, slot, simple, onCtxMenu }) {
+  function SlotCell({ state, day, slot, simple, ext, onCtxMenu }) {
     const [over, setOver] = useState(false);
     const [splitOpen, setSplitOpen] = useState(false);
     const [addOpen, setAddOpen] = useState(false);
@@ -946,17 +946,17 @@
     }
 
     return html`
-      <div class=${`flex rounded-lg border bg-white overflow-hidden ${over ? 'drop-active' : ''}`}
+      <div class=${`flex rounded-lg border overflow-hidden ${ext ? 'bg-amber-50/60' : 'bg-white'} ${over ? 'drop-active' : ''}`}
         style=${compColor && !over ? { borderColor: compColor, boxShadow: `0 0 0 1px ${compColor}` } : (over ? {} : { borderColor: '#e2e8f0' })}
         onDragOver=${(e) => { e.preventDefault(); setOver(true); }}
         onDragLeave=${() => setOver(false)}
         onDrop=${onDrop}
         onContextMenu=${onCtxMenu ? ((e) => { e.preventDefault(); e.stopPropagation(); onCtxMenu(e.clientX, e.clientY); }) : undefined}>
-        <div class="w-[104px] shrink-0 px-1.5 py-1.5 bg-slate-50 border-r border-slate-200 flex flex-col gap-0.5">
+        <div class=${`w-[104px] shrink-0 px-1.5 py-1.5 border-r border-slate-200 flex flex-col gap-0.5 ${ext ? 'bg-amber-100/50' : 'bg-slate-50'}`}>
           ${(slot.label && !slot.start)
             ? html`<span class="text-[13.5px] font-extrabold text-ink leading-tight">${slotName(slot)}</span>`
             : html`<${SlotTimeButton} slot=${slot} rippleDefault=${true} className="text-[13.5px] font-extrabold text-ink tabular-nums leading-tight text-left whitespace-nowrap" />`}
-          ${slot.start && slot.end && html`<span class="text-[11px] font-semibold text-ink-soft">${dur}분</span>`}
+          ${slot.start && slot.end && html`<span class="text-[11px] font-semibold text-ink-soft">${dur}분${ext ? html` <span class="text-[10px] font-bold text-amber-600" title="고정띠 밖 확장 시간대">확장</span>` : ''}</span>`}
           ${compColor && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: compColor + '22', color: compColor }}>
             <span class="w-1.5 h-1.5 rounded-full shrink-0" style=${{ background: compColor }}></span>경쟁 ${compete}팀</span>`}
           ${splitShare && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: '#0284c722', color: '#0284c7' }}
@@ -1176,6 +1176,18 @@
         .sort((a, b2) => U.toMin(a.start) - U.toMin(b2.start));
       return timed.length ? { start: timed[0].start } : { ext: true };
     };
+    // 확장 구간 슬롯 분리: 확장 창(win) 안 슬롯은 창 행에, 창 밖 시간 슬롯은 각각 독립 확장 행으로
+    // (확장을 위아래로 계속 쌓아갈 수 있는 구조 — 시간 순 정렬)
+    const splitExt = (row) => {
+      const winSlots = [], loose = [];
+      ((row && row.slots) || []).forEach((sl) => {
+        if (!sl.start || !sl.end || sl.start === sl.end) { winSlots.push(sl); return; }
+        if (row.win && U.toMin(sl.start) >= U.toMin(row.win[0]) && U.toMin(sl.start) < U.toMin(row.win[1])) winSlots.push(sl);
+        else loose.push(sl);
+      });
+      loose.sort((a, b2) => U.toMin(a.start) - U.toMin(b2.start));
+      return { winSlots, loose };
+    };
     const nextPart = () => {
       const nums = day.slots.filter((s) => s.label).map((s) => { const m = (s.label || '').match(/(\d+)\s*부/); return m ? parseInt(m[1], 10) : 0; });
       return `${Math.max(0, ...nums) + 1}부`;
@@ -1237,32 +1249,46 @@
           </div>`}
         <div class=${`p-1.5 flex flex-col gap-1 ${day.status === 'off' ? 'hidden' : ''}`}>
           ${useBands ? html`
-            ${day.extBefore === 'off'
-              ? (showExt && html`<div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-dashed border-amber-200 bg-amber-50/40 text-[11px] text-slate-400">
-                  앞 확장이 삭제된 날짜입니다
-                  <button onClick=${() => store.setDayExt(day.id, { before: null })} class="text-brand hover:underline font-semibold">복원</button></div>`)
-              : (showExt || extBefore.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extBefore} simple=${simple}
-              onQuickAdd=${() => { const di = extDropInit(extBefore); setQuickInit(di.band ? di.band[0] : (di.start || '')); setQuickOpen(true); }}
-              onEditExt=${() => setExtEdit('before')}
-              onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'ext', extKind: 'before', row: extBefore })}
-              onExtBid=${(id) => setBidTimeFor({ id, ...extDropInit(extBefore) })}
-              onExtMove=${(id) => setMoveTimeFor({ id, ...extDropInit(extBefore) })} />`}
+            ${(() => {
+              const sp = splitExt(extBefore);
+              const rowB = { ...extBefore, slots: sp.winSlots };
+              return html`
+              ${sp.loose.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} simple=${simple} ext=${true}
+                onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'slot', slot: s })} />`)}
+              ${day.extBefore === 'off'
+                ? (showExt && html`<div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-dashed border-amber-200 bg-amber-50/40 text-[11px] text-slate-400">
+                    앞 확장이 삭제된 날짜입니다
+                    <button onClick=${() => store.setDayExt(day.id, { before: null })} class="text-brand hover:underline font-semibold">복원</button></div>`)
+                : (showExt || sp.winSlots.some((s) => s.start)) && html`<${BandRow} state=${state} day=${day} band=${rowB} simple=${simple}
+                onQuickAdd=${() => { const di = extDropInit(rowB); setQuickInit(di.band ? di.band[0] : (di.start || '')); setQuickOpen(true); }}
+                onEditExt=${() => setExtEdit('before')}
+                onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'ext', extKind: 'before', row: rowB })}
+                onExtBid=${(id) => setBidTimeFor({ id, ...extDropInit(rowB) })}
+                onExtMove=${(id) => setMoveTimeFor({ id, ...extDropInit(rowB) })} />`}`;
+            })()}
             ${bands.map((bd, bi) => html`<${BandRow} key=${bi} state=${state} day=${day} band=${bd} simple=${simple}
               onQuickAdd=${(st) => { setQuickInit(st); setQuickOpen(true); }}
               onBandBid=${(id, b2) => setBidTimeFor({ id, band: [b2.start, b2.end] })}
               onBandMove=${(id, b2) => setMoveTimeFor({ id, band: [b2.start, b2.end] })}
               onEditBand=${() => setBandEdit({ idx: bi, start: bd.start, end: bd.end })}
               onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'band', band: bd, idx: bi })} />`)}
-            ${day.extAfter === 'off'
-              ? (showExt && html`<div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-dashed border-amber-200 bg-amber-50/40 text-[11px] text-slate-400">
-                  뒤 확장이 삭제된 날짜입니다
-                  <button onClick=${() => store.setDayExt(day.id, { after: null })} class="text-brand hover:underline font-semibold">복원</button></div>`)
-              : (showExt || extAfter.slots.length > 0) && html`<${BandRow} state=${state} day=${day} band=${extAfter} simple=${simple}
-              onQuickAdd=${() => { setQuickInit(bands[bands.length - 1].end); setQuickOpen(true); }}
-              onEditExt=${() => setExtEdit('after')}
-              onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'ext', extKind: 'after', row: extAfter })}
-              onExtBid=${(id) => setBidTimeFor({ id, ...extDropInit(extAfter) })}
-              onExtMove=${(id) => setMoveTimeFor({ id, ...extDropInit(extAfter) })} />`}
+            ${(() => {
+              const sp = splitExt(extAfter);
+              const rowA = { ...extAfter, slots: sp.winSlots };
+              return html`
+              ${day.extAfter === 'off'
+                ? (showExt && html`<div class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-dashed border-amber-200 bg-amber-50/40 text-[11px] text-slate-400">
+                    뒤 확장이 삭제된 날짜입니다
+                    <button onClick=${() => store.setDayExt(day.id, { after: null })} class="text-brand hover:underline font-semibold">복원</button></div>`)
+                : (showExt || sp.winSlots.some((s) => s.start)) && html`<${BandRow} state=${state} day=${day} band=${rowA} simple=${simple}
+                onQuickAdd=${() => { setQuickInit(bands[bands.length - 1].end); setQuickOpen(true); }}
+                onEditExt=${() => setExtEdit('after')}
+                onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'ext', extKind: 'after', row: rowA })}
+                onExtBid=${(id) => setBidTimeFor({ id, ...extDropInit(rowA) })}
+                onExtMove=${(id) => setMoveTimeFor({ id, ...extDropInit(rowA) })} />`}
+              ${sp.loose.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} simple=${simple} ext=${true}
+                onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'slot', slot: s })} />`)}`;
+            })()}
             ${labelSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} simple=${simple}
               onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'slot', slot: s })} />`)}`
           : (sortedSlots.length === 0
