@@ -150,7 +150,8 @@
       ${ts.map((t) => html`<option key=${t.id} value=${t.id}>${t.name}</option>`)}
     </optgroup>`);
   // 시간 슬롯 표시: 시간이 있으면 HH:MM~HH:MM, 순번형이면 label
-  const slotName = (s) => (s.start && s.end) ? `${s.start}~${s.end}` : (s.label || '슬롯');
+  // 순번(부) 슬롯에 time(방송 시각)이 있으면 함께 표시 — 예: '08:00 아침 1부'
+  const slotName = (s) => (s.start && s.end) ? `${s.start}~${s.end}` : (s.time ? `${s.time} ${s.label || ''}`.trim() : (s.label || '슬롯'));
 
   // 최근 3회 달성률: 배열 또는 옛 문자열을 3칸 배열로 정규화 / 표시
   const recent3 = (v) => {
@@ -1096,6 +1097,7 @@
     const fashion = programSchema(state) === 'fashion';
     // 슬롯 정렬: 시간대는 시작시간순, 순번(1부…)은 번호순으로 뒤에
     const slotOrder = (sl) => sl.start ? U.toMin(sl.start)
+      : sl.time ? U.toMin(sl.time)
       : 100000 + (parseInt(((sl.label || '').match(/\d+/) || [99])[0], 10) || 99);
     const sortedSlots = day.slots.slice().sort((x, y) => slotOrder(x) - slotOrder(y));
     // ----- 고정 시간띠(밴드): 프로그램 스케줄 기반 + 날짜별 조정(day.bands) 우선. MD가 쪼갠 시간도 자동 귀속 -----
@@ -1136,6 +1138,7 @@
       labelSlots.sort((x, y) => slotOrder(x) - slotOrder(y));
     }
     const [addOpen, setAddOpen] = useState(false);
+    const [orderOpen, setOrderOpen] = useState(false);   // 순번(회차) 추가 팝업 (패션형)
     const [statusOpen, setStatusOpen] = useState(false); // 운영 상태 표기 팝업
     const [quickOpen, setQuickOpen] = useState(false);
     const [quickInit, setQuickInit] = useState('');
@@ -1193,11 +1196,7 @@
             ${fashion && html`<button onClick=${() => setPartOpen(true)} class="hover:text-brand" title="이 날짜의 상품을 1부·2부…로 한번에 배분">🧩 부 나누기</button>`}
             ${useBands && html`<button onClick=${() => setShowExt(!showExt)} class="hover:text-brand" title="고정 시간띠 앞뒤의 확장 시간대 보기/숨기기">확장 ${showExt ? '▴' : '▾'}</button>`}
             ${!fashion && html`<button onClick=${() => setAddOpen(true)} class="hover:text-brand">+ 시간대</button>`}
-            ${fashion && html`<button onClick=${() => {
-                const nm = prompt('순번(회차) 이름 — 예: 4부, 아침 1부, 2차 방송\n(아침 특별 방송 등 별도 회차도 이름으로 추가하세요)', nextPart());
-                if (nm === null) return;
-                store.addSlot(day.id, { order: true, label: nm.trim() || undefined });
-              }} class="hover:text-brand" title="순번(부)·회차 추가 — 이름 지정 가능 (예: 아침 1부)">+ 순번</button>`}
+            ${fashion && html`<button onClick=${() => setOrderOpen(true)} class="hover:text-brand" title="순번(부)·회차 추가 — 아침 특별 방송 등은 시간을 함께 지정">+ 순번</button>`}
             <button onClick=${() => {
                 const nP = state.placements.filter((x) => day.slots.some((sl) => sl.id === x.slotId)).length;
                 const placedIds = new Set(state.placements.map((x) => x.sourceBidId).filter(Boolean));
@@ -1250,6 +1249,7 @@
         </div>
         ${statusOpen && html`<${DayStatusModal} state=${state} day=${day} onClose=${() => setStatusOpen(false)} />`}
         ${addOpen && html`<${AddSlotModal} day=${day} onClose=${() => setAddOpen(false)} />`}
+        ${orderOpen && html`<${OrderSlotModal} day=${day} nextLabel=${nextPart()} onClose=${() => setOrderOpen(false)} />`}
         ${bandEdit && html`<${BandTimeModal} day=${day} idx=${bandEdit.idx} start=${bandEdit.start} end=${bandEdit.end}
           hasOverride=${!!(day.bands && day.bands.length)} onClose=${() => setBandEdit(null)} />`}
         ${slotAddFor && html`<${SlotAddModal} state=${state} slot=${slotAddFor} onClose=${() => setSlotAddFor(null)} />`}
@@ -1467,6 +1467,31 @@
               start=${start} setStart=${setStart} dur=${dur} setDur=${setDur}
               durHint=${bandIdx >= 0 ? '선택한 띠 전체로 편성되고, 노출분은 띠 안 시간 배분 참고용으로 표시됩니다.' : '시간을 입력하면 해당 시간대(시작~시작+노출분)로 반영됩니다.'} />`}
         <div class="text-[12px] text-ink-soft">${orderMode ? '선택한 부에 바로 편성됩니다. (괄호 숫자 = 현재 그 부의 상품 수) 방송시간은 날짜 옆에서 수정하세요.' : ''} 구성·가격 등은 최종편성안에서 보강하세요.</div>
+      <//>`;
+  }
+
+  // 순번(회차) 추가 — 패션형: 본방 부는 이름만, 아침 특별 방송 등 별도 회차는 방송 시각을 함께 지정
+  function OrderSlotModal({ day, nextLabel, onClose }) {
+    const [name, setName] = useState(nextLabel || '');
+    const [time, setTime] = useState('');
+    function save() {
+      const t = time.trim();
+      if (t && !/^\d{1,2}:\d{2}$/.test(t)) { alert('시간을 24시간 형식(예: 08:00)으로 입력하세요.'); return; }
+      store.addSlot(day.id, { order: true, label: name.trim() || undefined, time: t || undefined });
+      onClose();
+    }
+    return html`
+      <${Modal} title=${`${fmtDay(day)} · 순번(회차) 추가`} onClose=${onClose} onSave=${save}>
+        <div class="grid grid-cols-2 gap-3">
+          <${Field} label="회차 이름 *">
+            <input value=${name} onInput=${(e) => setName(e.target.value)} class=${inputCls} autofocus placeholder="예: 4부 / 아침 1부" />
+          <//>
+          <${Field} label="방송 시각 (별도 회차만)">
+            <${TimeInput} value=${time} onChange=${setTime} />
+          <//>
+        </div>
+        <div class="text-[12px] text-ink-soft">본방 부(4부·5부…)는 이름만 추가하세요. <b>아침 특별 방송 등 본방과 다른 시간의 회차</b>는 방송 시각을 넣으면
+          '08:00 아침 1부'처럼 시간이 함께 표시되고, 그 시각 순서로 정렬됩니다.</div>
       <//>`;
   }
 
@@ -2036,7 +2061,7 @@
     const allProgDays = state.days.filter((d) => d.programId === state.activeProgram)
       .slice().sort((a, b) => a.date.localeCompare(b.date));
     const [expandedMonths, setExpandedMonths] = useState(() => new Set());
-    const slotStart = (s) => (s.start ? U.toMin(s.start) : 9999);
+    const slotStart = (s) => (s.start ? U.toMin(s.start) : s.time ? U.toMin(s.time) : 9999);
     const topBarRef = useRef(null);
     const topBarH = useElemHeight(topBarRef, 48); // 상단 고정 도구 바 높이
     useMonthAutoScroll('final-month-center', 40, // 표 내부 스크롤 — 고정된 thead 높이만큼 보정
@@ -2693,7 +2718,8 @@
                 rowSlots.push({ id: 'virt_' + day.id + '_' + bs, start: bs, end: be, virtual: true });
             });
             const slotOrd = (sl) => sl.start ? U.toMin(sl.start)
-              : 100000 + (parseInt(((sl.label || '').match(/\d+/) || [99])[0], 10) || 99);
+              : sl.time ? U.toMin(sl.time)
+      : 100000 + (parseInt(((sl.label || '').match(/\d+/) || [99])[0], 10) || 99);
             // 팀 기준 정리 — PD가 시간을 쪼개도 MD 화면이 겹치는 빈 시간대로 어지럽지 않게:
             //  ① 이 팀 입찰이 담긴 시간대·순번은 항상 표시
             //  ② 고정 띠(std·가상)는 이 팀 입찰과 겹치지 않을 때만 (겹치면 이미 세분화되어 운영 중)

@@ -1670,8 +1670,9 @@
           const label = (opts.label || '').trim() || `${n}부`; // 이름 지정 가능 — 예: '아침 1부', '2차 방송'
           if (day.slots.some((s) => s.label === label && !s.start)) return; // 같은 이름 중복 방지
           const slot = { id: 'slot_' + uid(), start: '', end: '', label, manual: true };
+          if (opts.time && /^\d{1,2}:\d{2}$/.test(opts.time)) slot.time = opts.time; // 회차 방송 시각(표시·정렬용)
           day.slots.push(slot);
-          log({ action: '순번추가', to: slot.label, detail: `${day.date} ${slot.label} 추가` });
+          log({ action: '순번추가', to: (slot.time ? slot.time + ' ' : '') + slot.label, detail: `${day.date} ${(slot.time ? slot.time + ' ' : '')}${slot.label} 추가` });
         } else {
           const { start, end } = opts;
           const slot = { id: 'slot_' + uid(), start, end, manual: true };
