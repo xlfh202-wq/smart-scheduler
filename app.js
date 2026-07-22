@@ -210,12 +210,10 @@
 
   function PlacementCard({ state, p, subTime, subSlot, simple, onNudge }) {
     const team = teamOf(state, p.teamId);
-    const srcPart = placementPart(state, p); // 부(순번)
     const [info, setInfo] = useState(false);
     const [startEdit, setStartEdit] = useState(false);
     const [subEdit, setSubEdit] = useState(false);   // 세부 시간(⏱) 클릭 → 시간 조정
     const [castOpen, setCastOpen] = useState(false); // 🎤 빠른 캐스팅 입력
-    const [partSet, setPartSet] = useState(false);   // 부(순번) 지정 팝업
     const [ctx, setCtx] = useState(null);            // 우클릭 메뉴 {x, y}
     const det = p.detail || {};
     const items = p.items || [];
@@ -261,7 +259,6 @@
         ${info && html`<${PlacementDetailModal} state=${state} p=${p} startEdit=${startEdit} onClose=${(e) => { e && e.stopPropagation && e.stopPropagation(); setInfo(false); }} />`}
         ${subEdit && subSlot && html`<${EditSlotTimeModal} slot=${subSlot} placement=${p} rippleDefault=${true} onClose=${() => setSubEdit(false)} />`}
         ${castOpen && html`<${CastQuickModal} state=${state} p=${p} onClose=${() => setCastOpen(false)} />`}
-        ${partSet && html`<${PartSetModal} state=${state} p=${p} onClose=${(e) => { e && e.stopPropagation && e.stopPropagation(); setPartSet(false); }} />`}
         ${ctx && (() => {
           const close = () => setCtx(null);
           const item = (label, fn, danger) => html`
@@ -276,7 +273,6 @@
                 <div class="px-3 py-1 text-[11px] text-ink-soft border-b border-slate-100 truncate">${p.productName}</div>
                 ${onNudge && item('⬅ 앞으로 이동 (띠 안 순서)', () => onNudge(p, -1))}
                 ${onNudge && item('➡ 뒤로 이동 (띠 안 순서)', () => onNudge(p, 1))}
-                ${item(`🔢 부(순번) 지정${srcPart ? ` — 현재 ${srcPart}부` : ''}`, () => setPartSet(true))}
                 ${item('🚫 편성 제외 (입찰 풀로 복귀)', () => {
                   if (confirm(`'${p.productName}'을(를) 편성에서 제외할까요?\n상품은 삭제되지 않고 입찰 풀(미편성)로 돌아갑니다.`)) store.removePlacement(p.id);
                 })}
@@ -287,25 +283,6 @@
             </div>`;
         })()}
       </div>`;
-  }
-
-  // 편성 카드의 부(순번) 지정 — PD·관리자용: 같은 띠·같은 팀 상품을 1·2·3부 묶음으로 (클릭 즉시 적용)
-  function PartSetModal({ state, p, onClose }) {
-    const cur = placementPart(state, p);
-    const [maxPart, setMaxPart] = useState(Math.max(4, cur || 1));
-    const pick = (pt) => { store.setPlacementPart(p.id, pt); onClose(); };
-    return html`
-      <${Modal} title=${`부(순번) 지정 · ${p.productName}`} onClose=${onClose} onSave=${onClose}>
-        <div class="flex flex-wrap items-center gap-1.5">
-          <button type="button" onClick=${() => pick(null)}
-            class=${`text-[13px] px-3 py-1.5 rounded-full border transition ${cur == null ? 'bg-slate-600 text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-slate-500'}`}>지정 안 함</button>
-          ${Array.from({ length: maxPart }, (_, i) => i + 1).map((pt) => html`
-            <button type="button" key=${pt} onClick=${() => pick(pt)}
-              class=${`text-[13px] px-3 py-1.5 rounded-full border transition ${cur === pt ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-brand hover:text-brand'}`}>${pt}부</button>`)}
-          <button type="button" onClick=${() => setMaxPart(maxPart + 1)} class="text-[12px] text-ink-soft hover:text-brand px-1">+ ${maxPart + 1}부 추가</button>
-        </div>
-        <div class="text-[12px] text-ink-soft">부를 클릭하면 바로 적용됩니다. 같은 띠 안 같은 팀의 부(순번) 상품은 점선 묶음으로 붙어 표시되고, 원본 입찰(MD 화면)에도 함께 반영됩니다.</div>
-      <//>`;
   }
 
   /* =====================================================================
@@ -909,10 +886,9 @@
                 if (en.items.length < 2) return cardBox(en.items[0].p);
                 const tc = (teamOf(state, en.teamId) || {}).color || '#94a3b8';
                 return html`
-                  <div key=${'grp_' + en.teamId} title="부(순번)로 나눈 묶음 — 카드는 개별로 옮기거나 부를 해제할 수 있습니다"
+                  <div key=${'grp_' + en.teamId} title="시간을 나눠 쓰는 같은 팀 묶음 — 카드는 개별로 옮길 수 있습니다"
                     class="flex flex-wrap gap-1 items-stretch rounded-lg border border-dashed p-1 bg-slate-50/50"
                     style=${{ borderColor: tc }}>
-                    <span class="self-center text-[10px] font-bold px-0.5 whitespace-nowrap" style=${{ color: tc }}>1~${en.items[en.items.length - 1].pt}부</span>
                     ${en.items.map(({ p }) => cardBox(p))}
                   </div>`;
               });
@@ -1946,9 +1922,8 @@
         const p = r.p; const det = (p && p.detail) || {};
         const dnum = Number(r.day.date.slice(8)); const mm = Number(r.day.date.slice(5, 7));
         const items = (p && p.items && p.items.length > 1) ? '\n· ' + p.items.join('\n· ') : '';
-        const srcPartX = placementPart(state, p);
         const bandCell = hasBandCol ? [r.band && r.firstOfBand ? `${r.band[0]}~${r.band[1]}${r.band[2] === 'ext' ? ' (확장)' : ''}` : ''] : [];
-        const timeCell = (srcPartX ? `[${srcPartX}부] ` : '') + slotName(r.slot) + (r.slot.start && r.slot.end ? ` (${U.slotDuration(r.slot)}분)` : '');
+        const timeCell = slotName(r.slot) + (r.slot.start && r.slot.end ? ` (${U.slotDuration(r.slot)}분)` : '');
         aoa.push(['', ''].map((_, ci) => (r.firstOfDay ? (ci === 0 ? `${mm}/${dnum}` : U.WEEKDAY_KO[r.day.weekday]) : ''))
           .concat(bandCell, slim
           ? [
@@ -2880,7 +2855,6 @@
         class=${`card-drag text-left rounded-md border bg-white px-2 py-1 hover:shadow-sm ${isGroup ? 'min-w-[220px]' : ''}`}
         style=${{ borderLeft: `4px solid ${t.color}` }}>
         <div class="flex items-center gap-1">
-          ${b.part && html`<${Badge} color="#0891b2" title="띠 안 순번 (부)">${b.part}부<//>`}
           ${isGroup && html`<${Badge} color="#7c3aed" title="동시 노출 묶음">동시 ${items.length}<//>`}
           <span class="text-[12px] font-semibold text-ink leading-tight">${pr.name}</span>
         </div>
@@ -2993,9 +2967,6 @@
       return i >= 0 ? i : 0;
     };
     const [bandIdx, setBandIdx] = useState(bandIdxInit);
-    // 부(순번)는 선택 사항 — 한 띠에 여러 상품을 나눠 넣을 때만 지정 (기본: 지정 안 함)
-    const [part, setPart] = useState(() => (b && b.part) ? (parseInt(b.part, 10) || null) : null);
-    const [maxPart, setMaxPart] = useState(() => Math.max(4, (b && parseInt(b.part, 10)) || 1));
 
     function save() {
       const items = f.items.split('\n').map((s) => s.trim()).filter(Boolean);
@@ -3027,10 +2998,10 @@
         if (b) store.updateBid(b.id, { product, slotId });
         else store.addBid({ teamId: team, dayId, slotId, product });
       } else if (bandMode) {
-        // 띠 + 부(순번) 저장 — 편성(placement) 위치는 PD 조정 그대로 유지
+        // 띠 저장 — 부(순번)는 더 이상 받지 않음(띠 안 순서는 PD가 확정), 편성(placement) 위치는 그대로 유지
         const bd = bands[bandIdx] || bands[0];
-        if (b) { store.updateBid(b.id, { product }); store.setBidBand(b.id, { start: bd.start, end: bd.end, part }); }
-        else store.addBid({ teamId: team, dayId, start: bd.start, end: bd.end, part, product });
+        if (b) { store.updateBid(b.id, { product }); store.setBidBand(b.id, { start: bd.start, end: bd.end }); }
+        else store.addBid({ teamId: team, dayId, start: bd.start, end: bd.end, product });
       } else {
         if (!/^\d{1,2}:\d{2}$/.test(start) || !/^\d{1,2}:\d{2}$/.test(end)) { alert('시작/종료 시간을 입력하세요.'); return; }
         if (durMin <= 0) { alert('종료 시간이 시작보다 늦어야 합니다.'); return; }
@@ -3115,17 +3086,7 @@
                 ${s.start}~${s.end} <span class="text-[11px] font-normal">(${(U.toMin(s.end) - U.toMin(s.start) + 1440) % 1440}분${s.extBand ? '·확장' : ''})</span></button>`)}
             </div>
           <//>
-          <${Field} label="부(순번) — 한 띠에 여러 상품을 나눠 넣을 때만 선택">
-            <div class="flex flex-wrap items-center gap-1.5">
-              <button type="button" onClick=${() => setPart(null)}
-                class=${`text-[13px] px-3 py-1.5 rounded-full border transition ${part == null ? 'bg-slate-600 text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-slate-500'}`}>지정 안 함</button>
-              ${Array.from({ length: maxPart }, (_, i) => i + 1).map((pt) => html`
-                <button type="button" key=${pt} onClick=${() => setPart(pt)}
-                  class=${`text-[13px] px-3 py-1.5 rounded-full border transition ${part === pt ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-brand hover:text-brand'}`}>${pt}부</button>`)}
-              <button type="button" onClick=${() => setMaxPart(maxPart + 1)}
-                class="text-[12px] text-ink-soft hover:text-brand px-1">+ ${maxPart + 1}부 추가</button>
-            </div>
-          <//>`}
+          <div class="-mt-1 text-[11px] text-ink-soft">한 띠에 여러 상품을 나눠 넣을 때는 각각 등록하고 희망 노출분을 적으세요. 띠 안 순서는 PD가 편성 시 확정합니다.</div>`}
         ${!fashion && !orderMode && !bandMode && bands.length > 0 && html`
           <div class="-mt-1 flex flex-wrap items-center gap-1">
             <span class="text-[11px] text-ink-soft">큰 띠:</span>
