@@ -1704,18 +1704,23 @@
               detail: placed.length ? `상품 ${placed.length}건 입찰 풀로 복귀` : '' });
         emit();
       },
-      addDay(dateStr) {
+      // opts.allowDup: 같은 날짜에 추가 방송(별도 편성일 행) 생성 — airTime으로 구분 (예: 8/8 08:20~10:25 + 8/8 22:30~01:00)
+      addDay(dateStr, opts = {}) {
         const pid = state.activeProgram || MAIN_PROGRAM;
-        if (state.days.some((d) => d.programId === pid && d.date === dateStr)) return;
+        const dups = state.days.filter((d) => d.programId === pid && d.date === dateStr);
+        if (dups.length && !opts.allowDup) return;
         const dt = new Date(dateStr);
         const wd = dt.getDay();
-        const day = { id: 'day_' + pid + '_' + dateStr, programId: pid, date: dateStr, weekday: wd, slots: [] };
+        const id = 'day_' + pid + '_' + dateStr + (dups.length ? '_' + (dups.length + 1) : '');
+        const day = { id, programId: pid, date: dateStr, weekday: wd, slots: [] };
+        if (opts.airTime) day.airTime = opts.airTime;
         state.days.push(day);
         state.days.sort((a, b) => a.date.localeCompare(b.date));
         // 삭제했던 날짜를 다시 추가하면 숨김 해제(이후 nav 시 재삭제되지 않도록)
         state.hiddenDays = (state.hiddenDays || []).filter((k) => k !== pid + '|' + dateStr);
-        log({ action: '편성일추가', to: `${dateStr}(${WEEKDAY_KO[wd]})` });
+        log({ action: '편성일추가', to: `${dateStr}(${WEEKDAY_KO[wd]})${opts.airTime ? ' ' + opts.airTime : ''}${dups.length ? ' · 같은 날짜 추가 방송' : ''}` });
         emit();
+        return day;
       },
       removeDay(dayId) {
         const day = state.days.find((d) => d.id === dayId);
