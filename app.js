@@ -1366,6 +1366,7 @@
         store.assignBidToDay(bidId, day.id, { start: bands[bandIdx][0], end: bands[bandIdx][1], durationMin: dm });
       } else {
         if (!/^\d{1,2}:\d{2}$/.test(start)) { alert('시작 시간을 24시간 형식(예: 21:00)으로 입력하세요.'); return; }
+        if (!dm) { alert('노출분을 입력하세요 — 시작~시작+노출분이 시간대가 됩니다.'); return; }
         store.assignBidToDay(bidId, day.id, { start, durationMin: dm });
       }
       onClose();
@@ -1394,6 +1395,7 @@
         store.movePlacementToSlotSpec(placementId, day.id, { start: bands[bandIdx][0], end: bands[bandIdx][1], durationMin: dm });
       } else {
         if (!/^\d{1,2}:\d{2}$/.test(start)) { alert('시작 시간을 24시간 형식(예: 21:00)으로 입력하세요.'); return; }
+        if (!dm) { alert('노출분을 입력하세요 — 시작~시작+노출분이 시간대가 됩니다.'); return; }
         store.movePlacementToSlotSpec(placementId, day.id, { start, durationMin: dm });
       }
       onClose();
@@ -1434,6 +1436,7 @@
         store.addQuickPlacement({ dayId: day.id, start: bands[bandIdx][0], end: bands[bandIdx][1], durationMin: dm, productName: name.trim(), teamId: team });
       } else {
         if (!/^\d{1,2}:\d{2}$/.test(start)) { alert('시간을 24시간 형식(예: 21:00)으로 입력하세요.'); return; }
+        if (!dm) { alert('노출분을 입력하세요 — 시작~시작+노출분이 시간대가 됩니다.'); return; }
         store.addQuickPlacement({ dayId: day.id, start, durationMin: dm, productName: name.trim(), teamId: team });
       }
       onClose();
@@ -2049,7 +2052,8 @@
         && U.toMin(a.start) < U.toMin(b.end) && U.toMin(b.start) < U.toMin(a.end);
       const dBands = bandsOfDay(d);
       const bandOf = (s) => { if (!dBands || !s || !s.start || !s.end) return -1;
-        return dBands.findIndex(([bs, be]) => U.toMin(s.start) >= U.toMin(bs) && U.toMin(s.end) <= U.toMin(be)); };
+        // 띠 종료 시각에 시작하는 슬롯(예: 10:25~, 띠가 ~10:25)은 그 띠가 아니라 다음 구간
+        return dBands.findIndex(([bs, be]) => U.toMin(s.start) >= U.toMin(bs) && U.toMin(s.start) < U.toMin(be) && U.toMin(s.end) <= U.toMin(be)); };
       // 1) 이 날의 표시 후보(슬롯·상품) 수집
       const items = [];
       slots.forEach((s) => {
@@ -2746,7 +2750,7 @@
                 ${(() => {
                   const slotInW = (b, bs, be) => { if (b.dayId !== day.id) return false;
                     const sl = day.slots.find((s) => s.id === b.slotId);
-                    return sl && sl.start && sl.end && U.toMin(sl.start) >= U.toMin(bs) && U.toMin(sl.end) <= U.toMin(be); };
+                    return sl && sl.start && sl.end && U.toMin(sl.start) >= U.toMin(bs) && U.toMin(sl.start) < U.toMin(be) && U.toMin(sl.end) <= U.toMin(be); };
                   // 확장 창은 고정띠가 아님 — 그 안에 입찰이 있을 때만 행으로 표시
                   const extW = dayExtWins(state, day, bandDefs);
                   const rowBands = [
@@ -2964,7 +2968,7 @@
     const bandIdxInit = () => {
       const s0 = (initSlot && initSlot.start) || ctx.start, e0 = (initSlot && initSlot.end) || ctx.end;
       if (!s0) return 0;
-      const i = bands.findIndex((x) => U.toMin(s0) >= U.toMin(x.start) && (!e0 || U.toMin(e0) <= U.toMin(x.end)));
+      const i = bands.findIndex((x) => U.toMin(s0) >= U.toMin(x.start) && U.toMin(s0) < U.toMin(x.end) && (!e0 || U.toMin(e0) <= U.toMin(x.end)));
       return i >= 0 ? i : 0;
     };
     const [bandIdx, setBandIdx] = useState(bandIdxInit);

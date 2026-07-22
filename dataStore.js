@@ -931,7 +931,7 @@
           const dur = durationMin ? Number(durationMin) : ((b.product && b.product.durationMin) || null);
           // 노출분을 함께 지정하면 입찰 상품 정보에도 반영 (편성 카드에 희망 노출분 표시)
           if (durationMin) { b.product = b.product || {}; b.product.durationMin = Number(durationMin); }
-          const e = end || (dur ? toHHMM(toMin(start) + dur) : start);
+          const e = end || toHHMM(toMin(start) + (dur || 60)); // 0분 슬롯 방지 — 기본 60분
           slot = ensureSlotOnDay(day, start, e); slot.manual = true;
         } else {
           slot = ensureBucketSlotOnDay(day);
@@ -950,7 +950,7 @@
           if (!slot) { slot = { id: 'slot_' + uid(), start: '', end: '', label: part, manual: true }; day.slots.push(slot); }
         } else {
           if (!start) return;
-          const e = end || (dur ? toHHMM(toMin(start) + dur) : start);
+          const e = end || toHHMM(toMin(start) + (dur || 60)); // 0분 슬롯 방지 — 기본 60분
           slot = ensureSlotOnDay(day, start, e);
           slot.manual = true;
         }
@@ -1174,7 +1174,7 @@
           if (!slot) { slot = { id: 'slot_' + uid(), start: '', end: '', label: part, manual: true }; day.slots.push(slot); }
         } else if (start) {
           const dur = durationMin ? Number(durationMin) : (p.durationMin || null);
-          const e = end || (dur ? toHHMM(toMin(start) + dur) : start);
+          const e = end || toHHMM(toMin(start) + (dur || 60)); // 0분 슬롯 방지 — 기본 60분
           slot = ensureSlotOnDay(day, start, e); slot.manual = true;
         } else return;
         const fromLabel = slotLabel(p.slotId);
