@@ -2440,14 +2440,27 @@
    * ===================================================================== */
   function AddDayModal({ state, onClose }) {
     const [date, setDate] = useState(monthKey(state.view) + '-15');
-    const [airTime, setAirTime] = useState('');
+    const [start, setStart] = useState('');
+    const [end, setEnd] = useState('');
     const wdName = date && /^\d{4}-\d{2}-\d{2}$/.test(date)
       ? U.WEEKDAY_KO[new Date(date + 'T00:00:00').getDay()] : '';
     const dups = state.days.filter((d) => d.programId === state.activeProgram && d.date === date);
+    // 기존 방송 길이(없으면 2시간)를 기본 길이로 — 시작만 넣으면 종료 자동 제안
+    const defDur = (() => {
+      const at = dups.map((d) => d.airTime).find((t) => /\d{1,2}:\d{2}\s*~\s*\d{1,2}:\d{2}/.test(t || ''));
+      if (at) { const m = at.match(/(\d{1,2}:\d{2})\s*~\s*(\d{1,2}:\d{2})/);
+        const dm = (U.toMin(m[2]) - U.toMin(m[1]) + 1440) % 1440; if (dm > 0) return dm; }
+      return 120;
+    })();
+    const onStart = (v) => {
+      setStart(v);
+      if (/^\d{1,2}:\d{2}$/.test(v) && !end) setEnd(U.toHHMM((U.toMin(v) + defDur) % 1440));
+    };
     function save() {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { alert('날짜를 선택하세요.'); return; }
-      if (dups.length && !airTime.trim()) { alert('같은 날짜에 이미 방송이 있습니다 — 추가 방송의 시간대를 입력하세요. (예: 08:20~10:25)'); return; }
-      store.addDay(date, { allowDup: dups.length > 0, airTime: airTime.trim() || undefined });
+      const ok = /^\d{1,2}:\d{2}$/.test(start) && /^\d{1,2}:\d{2}$/.test(end);
+      if (dups.length && !ok) { alert('같은 날짜에 이미 방송이 있습니다 — 추가 방송의 시작·종료 시간을 입력하세요.'); return; }
+      store.addDay(date, { allowDup: dups.length > 0, airTime: ok ? `${start}~${end}` : undefined });
       onClose();
     }
     return html`
@@ -2456,10 +2469,15 @@
           <input type="date" value=${date} onInput=${(e) => setDate(e.target.value)} class=${inputCls} />
         <//>
         ${dups.length > 0 && html`<div class="text-[12px] bg-amber-50 border border-amber-200 text-amber-800 rounded px-2.5 py-1.5">
-          ⚠ ${date} (${wdName})에는 이미 방송이 있습니다${dups[0].airTime ? ` (기존 ${dups.map((d) => d.airTime || '시간 미정').join(', ')})` : ''}.<br/>
-          <b>추가 방송의 시간대를 입력하면 같은 날짜에 별도 편성일 행이 생깁니다</b> — 예: 8/8 08:20~10:25 + 8/8 22:30~01:00.</div>`}
-        <${Field} label=${dups.length ? '추가 방송 시간대 *' : '방송 시간대 (선택)'}>
-          <input value=${airTime} onInput=${(e) => setAirTime(e.target.value)} class=${inputCls} placeholder="예: 08:20~10:25" />
+          ⚠ ${date} (${wdName})에는 이미 방송이 있습니다${dups.some((d) => d.airTime) ? ` (기존 ${dups.map((d) => d.airTime || '시간 미정').join(', ')})` : ''}.<br/>
+          <b>추가 방송의 시간을 넣으면 같은 날짜에 별도 편성일 행이 생깁니다</b> — 예: 8/8 08:20~10:25 + 8/8 22:30~01:00.</div>`}
+        <${Field} label=${dups.length ? '추가 방송 시간 *' : '방송 시간 (선택)'}>
+          <div class="flex items-center gap-2">
+            <${TimeInput} value=${start} onChange=${onStart} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+            <span class="text-ink-soft shrink-0">~</span>
+            <${TimeInput} value=${end} onChange=${setEnd} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+          </div>
+          <div class="mt-1 text-[11px] text-ink-soft">숫자만 눌러도 됩니다 (0820 → 08:20). 시작을 넣으면 종료는 ${dups.length ? '기존 방송 길이' : '2시간'} 기준으로 자동 제안됩니다.</div>
         <//>
         ${wdName && !dups.length && html`<div class="text-[12px] text-ink-soft">${date} (${wdName}요일)에 편성일을 추가합니다.</div>`}
       <//>`;

@@ -1194,6 +1194,31 @@
               from: fromLabel, to: slotLabel(slot.id), detail: '같은 날짜 내 이동' });
         emit();
       },
+      // 고아 편성 복구 — 슬롯이 사라져 화면에서 안 보이는 편성을 원본 입찰의 슬롯/날짜로 재부착.
+      // (v155 행모드 이후 메인 문서에 placements가 없어 하이드레이트 시점의 repair가 잡지 못함 → 행 로드 후 호출)
+      repairOrphans() {
+        const slotSet = new Set(state.days.flatMap((d) => d.slots.map((x) => x.id)));
+        let fixed = 0;
+        state.placements.forEach((p) => {
+          if (slotSet.has(p.slotId)) return;
+          const bid = p.sourceBidId && state.bids.find((b) => b.id === p.sourceBidId);
+          if (!bid) return; // 수기 편성은 날짜 특정 불가 — 유지
+          if (slotSet.has(bid.slotId)) { p.slotId = bid.slotId; stamp(p); fixed++; return; }
+          const day = state.days.find((d) => d.id === bid.dayId);
+          if (day) {
+            let t = day.slots.find((x) => x.std) || day.slots[0];
+            if (!t) { // 슬롯이 하나도 없는 날 — 프로그램 스케줄 첫 띠(없으면 시간 미정 버킷)로 복구
+              const sc = progSchedule(day.programId);
+              const en = sc && sc.find((x2) => x2.wd === day.weekday);
+              t = (en && en.slots && en.slots[0]) ? ensureSlotOnDay(day, en.slots[0][0], en.slots[0][1])
+                : ensureBucketSlotOnDay(day);
+            }
+            if (t) { p.slotId = t.id; stamp(p); fixed++; }
+          }
+        });
+        if (fixed) { log({ action: '편성복구', detail: `슬롯이 사라진 편성 ${fixed}건을 원본 입찰 위치로 복구` }); emit(); }
+        return fixed;
+      },
       removePlacement(placementId) {
         const p = state.placements.find((x) => x.id === placementId);
         if (!p) return;
@@ -2355,6 +2380,7 @@
           status('rows');
         } else { status('connected'); }
         ready = true;
+        if (rowMode) { try { store.repairOrphans(); } catch (e) {} } // 행 로드 후 고아 편성 자동 복구
         maybeAutoBackup(); // 접속 시 마지막 자동백업이 오래됐으면 1회 백업
         migrateSnapshots(); // 인라인 저장본이 남아 있으면 분리 행으로 이관(1회·멱등)
         client.channel('app_state_main')
