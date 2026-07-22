@@ -1494,13 +1494,25 @@
         const made = [];
         if (toMin(end) < toMin(oldE)) { base.splice(idx + 1, 0, [end, oldE]); made.push(`${end}~${oldE}`); }   // 뒤 잔여 띠
         if (toMin(start) > toMin(oldS)) { base.splice(idx, 0, [oldS, start]); made.push(`${oldS}~${start}`); } // 앞 잔여 띠
+        // 시간을 늘려 이웃 띠와 겹치면 이웃을 잘라내거나(부분 겹침) 흡수(완전 겹침) — 겹침 띠가 남으면
+        // 슬롯 귀속이 꼬여 '빈 띠 삭제 시 위 띠 상품까지 삭제'되는 사고가 나므로 정의 단계에서 차단
+        const cut = [];
+        const meIdx = base.findIndex((b) => b[0] === start && b[1] === end);
+        for (let k = base.length - 1; k >= 0; k--) {
+          if (k === meIdx) continue;
+          const [s2, e2] = base[k];
+          if (!(toMin(s2) < toMin(end) && toMin(start) < toMin(e2))) continue; // 안 겹침
+          if (toMin(s2) >= toMin(start) && toMin(e2) <= toMin(end)) { cut.push(`${s2}~${e2} 흡수`); base.splice(k, 1); }
+          else if (toMin(s2) < toMin(start)) { cut.push(`${s2}~${e2}→${s2}~${start}`); base[k] = [s2, start]; }
+          else { cut.push(`${s2}~${e2}→${end}~${e2}`); base[k] = [end, e2]; }
+        }
         day.bands = base;
         day.slots.forEach((sl) => {
           if (sl.start === oldS && sl.end === oldE) { sl.start = start; sl.end = end; }
         });
         day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
         log({ action: '시간띠조정', from: `${oldS}~${oldE}`, to: `${start}~${end}`,
-              detail: `${day.date} 시간띠 조정(이 날짜만)${made.length ? ` · 남는 구간 띠 생성: ${made.join(', ')}` : ''}` });
+              detail: `${day.date} 시간띠 조정(이 날짜만)${made.length ? ` · 남는 구간 띠 생성: ${made.join(', ')}` : ''}${cut.length ? ` · 겹친 띠 정리: ${cut.join(', ')}` : ''}` });
         emit();
       },
       // 확장 시간 수기 조정(이 날짜만) — before: 앞 확장 시작(HH:MM)·null=기본, after: 뒤 확장 종료·null=기본
@@ -1601,7 +1613,9 @@
         base.splice(idx, 1);
         day.bands = base;
         // 이 띠 구간(시작시간 기준)의 슬롯 제거 + 상품 보존(removeSlot과 동일 규칙)
-        const inBand = (sl) => sl.start && toMin(sl.start) >= toMin(bs) && toMin(sl.start) < toMin(be);
+        // 단, 남은 다른 띠에 귀속되는 슬롯은 유지 — 겹친 띠 삭제 시 위 띠에 표시 중인 상품까지 지워지는 사고 방지
+        const inRemaining = (sl) => base.some(([s2, e2]) => toMin(sl.start) >= toMin(s2) && toMin(sl.start) < toMin(e2));
+        const inBand = (sl) => sl.start && toMin(sl.start) >= toMin(bs) && toMin(sl.start) < toMin(be) && !inRemaining(sl);
         const gone = day.slots.filter(inBand);
         let saved = 0;
         gone.forEach((sl) => {
