@@ -1922,7 +1922,7 @@
         const p = r.p; const det = (p && p.detail) || {};
         const dnum = Number(r.day.date.slice(8)); const mm = Number(r.day.date.slice(5, 7));
         const items = (p && p.items && p.items.length > 1) ? '\n· ' + p.items.join('\n· ') : '';
-        const bandCell = hasBandCol ? [r.band && r.firstOfBand ? `${r.band[0]}~${r.band[1]}${r.band[2] === 'ext' ? ' (확장)' : ''}` : ''] : [];
+        const bandCell = hasBandCol ? [r.band && r.firstOfBand ? `${r.band[0]}~${r.band[1]}${r.band[2] === 'ext' ? ' (확장)' : ''}` : (r.outExt ? '확장' : '')] : [];
         const timeCell = slotName(r.slot) + (r.slot.start && r.slot.end ? ` (${U.slotDuration(r.slot)}분)` : '');
         aoa.push(['', ''].map((_, ci) => (r.firstOfDay ? (ci === 0 ? `${mm}/${dnum}` : U.WEEKDAY_KO[r.day.weekday]) : ''))
           .concat(bandCell, slim
@@ -2096,11 +2096,12 @@
         }
         return startOf(a) - startOf(b);
       });
-      // 3) 행으로 확정
+      // 3) 행으로 확정 — 고정띠가 있는 날인데 어느 띠에도 안 담기는 시간 = 확장(확대편성)으로 표기
       items.forEach((it) => {
         const bi = bandOf(it.slot);
         rows.push({ day: d, slot: it.slot, p: it.p, compete: it.compete, firstOfDay,
-          band: bi >= 0 ? dBands[bi] : null, bandKey: bi >= 0 ? d.date + '|' + bi : null });
+          band: bi >= 0 ? dBands[bi] : null, bandKey: bi >= 0 ? d.date + '|' + bi : null,
+          outExt: !!(dBands && dBands.length && bi < 0 && it.slot.start) });
         firstOfDay = false;
       });
     }
@@ -2294,7 +2295,7 @@
                       ${!readOnly && html`<span class="no-capture text-[11px] text-slate-400 ml-2">우클릭으로 수정/해제</span>`}
                     </td>
                   </tr>`;
-                const extRow = !!(r.band && r.band[2] === 'ext'); // 확장 구간 행 — 옅은 배경으로 구분(확대편성 카운팅용)
+                const extRow = !!(r.band && r.band[2] === 'ext') || !!r.outExt; // 확장(확대편성) 행 — 옅은 배경으로 구분(카운팅용)
                 return html`
                   <tr key=${i} data-adj=${adj ? '1' : undefined}
                     class=${`${r.firstOfDay ? 'border-t-2 border-t-slate-300' : ''} ${pend ? 'bg-amber-100' : extRow ? 'bg-amber-50/70 hover:bg-amber-100/60' : 'hover:bg-amber-50'} ${adj ? 'opacity-60' : ''}`}
@@ -2315,7 +2316,7 @@
                     ${hasBandCol && (r.band
                       ? (r.firstOfBand ? html`<td class=${`${tdMerge} font-semibold tabular-nums text-ink whitespace-nowrap`} data-col="time" rowSpan=${bandCount[r.bandKey]}>
                             ${r.band[0]}~${r.band[1]}<div class="text-[10px] font-normal text-ink-soft">${(U.toMin(r.band[1]) - U.toMin(r.band[0]) + 1440) % 1440}분 ${r.band[2] === 'ext' ? html`<span class="font-bold text-amber-600">확장</span>` : '띠'}</div></td>` : '')
-                      : html`<td class=${td} data-col="time"></td>`)}
+                      : html`<td class=${`${td} text-center align-middle`} data-col="time">${r.outExt ? html`<span class="text-[10px] font-bold text-amber-600" title="고정띠 밖 확대편성 시간">확장</span>` : ''}</td>`)}
                     <td class=${`${td} tabular-nums font-medium ${r.compete ? 'text-amber-700' : ''}`} data-col="time">
                       ${readOnly ? slotName(r.slot)
                         : isFashionProg ? html`<button onClick=${() => setPartAssignDay(r.day)}
