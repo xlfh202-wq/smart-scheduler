@@ -228,11 +228,11 @@
         <div class="flex items-start justify-between gap-0.5">
           <div class="min-w-0 flex-1">
             <div class=${`${simple ? 'text-[14px]' : 'text-[12.5px]'} font-bold text-ink leading-snug break-words`}>${p.productName}</div>
-            ${!simple && subTime && (subSlot
+            ${subTime && (subSlot
               ? html`<button onClick=${(e) => { e.stopPropagation(); setSubEdit(true); }}
                   class="text-[10px] font-semibold text-amber-700 tabular-nums hover:underline decoration-dotted"
-                  title="MD 입찰의 세부 시간 — 클릭해 시간 조정">⏱ ${subTime}</button>`
-              : html`<div class="text-[10px] font-semibold text-amber-700 tabular-nums" title="MD 입찰의 세부 시간 (고정 띠 안에 자동 귀속)">⏱ ${subTime}</div>`)}
+                  title="세부 시간 — 클릭해 시간 조정">⏱ ${subTime}</button>`
+              : html`<div class="text-[10px] font-semibold text-amber-700 tabular-nums" title="세부 시간 (고정 띠 안에 자동 귀속)">⏱ ${subTime}</div>`)}
             <div class="mt-0.5 flex flex-wrap items-center gap-1">
               <${Badge} color=${team.color}>${team.name}<//>
               ${!simple && items.length > 1 && html`<${Badge} color="#7c3aed" title="동시 노출 착장 수">동시 ${items.length}착장<//>`}
@@ -849,11 +849,33 @@
             title="여러 팀이 부(순번)·노출분으로 시간을 나눠 쓰는 띠 — 경쟁이 아닙니다">
             <span class="w-1.5 h-1.5 rounded-full shrink-0" style=${{ background: '#0284c7' }}></span>분할 ${teamsIn.size}팀</span>`}
         </div>
+        ${(() => { // 확장 행: 편성이 비어 있는 시간대도 칩으로 표시 — 최종편성안과 동일하게 보이도록
+          const emptySlots = isExt ? slots.filter((sl) => sl.start && sl.end && sl.start !== sl.end
+            && !state.placements.some((p) => p.slotId === sl.id)) : [];
+          const emptyChip = (sl) => html`
+            <div key=${sl.id} class="flex items-center gap-1.5 self-start rounded-md border border-dashed border-amber-300 bg-amber-50/70 px-2 py-1.5 text-[11px] text-amber-700"
+              title="빈 확장 시간대 — 카드를 놓으면 이 시간으로 편성됩니다"
+              onDragOver=${(e) => e.preventDefault()}
+              onDrop=${(e) => {
+                e.preventDefault(); e.stopPropagation(); setOver(false);
+                const pl = drag.read(e);
+                if (!pl) return;
+                if (pl.kind === 'bid') store.assignBid(pl.id, sl.id);
+                else if (pl.kind === 'placement') store.movePlacement(pl.id, sl.id);
+              }}>
+              <span class="tabular-nums font-bold">${sl.start}~${sl.end}</span>
+              <span class="text-[10px]">${U.slotDuration(sl)}분 · 비어있음</span>
+              <button title="이 빈 시간대 삭제" onClick=${(e) => { e.stopPropagation();
+                if (confirm(`${sl.start}~${sl.end} 빈 시간대를 삭제할까요?`)) store.removeSlot(sl.id); }}
+                class="text-amber-400 hover:text-brand leading-none">✕</button>
+            </div>`;
+          return html`
         <div class=${`flex-1 flex flex-wrap items-stretch content-start gap-1 p-1.5 min-h-[56px] ${placements.length === 0 ? 'cursor-copy' : ''}`}
           onDoubleClick=${placements.length === 0 && onQuickAdd ? (() => onQuickAdd(band.start || '')) : undefined}
           title=${placements.length === 0 && onQuickAdd ? '더블클릭하면 상품 추가' : ''}>
+          ${emptySlots.map(emptyChip)}
           ${placements.length === 0
-            ? html`<div class="text-[11px] text-slate-300 self-center px-2 select-none">${isExt ? '확장 시간대 — 더블클릭해 시간을 지정해 추가하거나, 카드를 놓으면 시간 지정 팝업' : '입찰 카드를 끌어다 놓거나 더블클릭해 추가'}</div>`
+            ? (emptySlots.length === 0 && html`<div class="text-[11px] text-slate-300 self-center px-2 select-none">${isExt ? '확장 시간대 — 더블클릭해 시간을 지정해 추가하거나, 카드를 놓으면 시간 지정 팝업' : '입찰 카드를 끌어다 놓거나 더블클릭해 추가'}</div>`)
             : (() => {
               const cardBox = (p) => html`
                 <div key=${p.id} onDrop=${(e) => {
@@ -894,7 +916,8 @@
                   </div>`;
               });
             })()}
-        </div>
+        </div>`;
+        })()}
       </div>`;
   }
 
