@@ -1667,7 +1667,9 @@
         if (!day) return;
         if (opts && opts.order) {
           const n = day.slots.filter((s) => s.label).length + 1;
-          const slot = { id: 'slot_' + uid(), start: '', end: '', label: `${n}부`, manual: true };
+          const label = (opts.label || '').trim() || `${n}부`; // 이름 지정 가능 — 예: '아침 1부', '2차 방송'
+          if (day.slots.some((s) => s.label === label && !s.start)) return; // 같은 이름 중복 방지
+          const slot = { id: 'slot_' + uid(), start: '', end: '', label, manual: true };
           day.slots.push(slot);
           log({ action: '순번추가', to: slot.label, detail: `${day.date} ${slot.label} 추가` });
         } else {

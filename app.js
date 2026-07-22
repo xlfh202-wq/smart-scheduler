@@ -964,11 +964,17 @@
       const sl = day.slots.find((s) => s.label === pt && !s.start);
       return sl ? state.placements.filter((p) => p.slotId === sl.id).length : 0;
     };
+    // 숫자 부 외에 이름으로 추가한 회차(예: '아침 1부')도 선택지로 표시
+    const customs = day.slots.filter((s) => s.label && !s.start && !/^\d+\s*부$/.test(s.label)).map((s) => s.label);
     return html`
       <div class="flex flex-wrap items-center gap-1.5">
         ${Array.from({ length: maxPart }, (_, i) => `${i + 1}부`).map((pt) => html`
           <button key=${pt} type="button" onClick=${() => onSel(pt)}
             class=${`text-[13px] px-3 py-1.5 rounded-full border transition ${sel === pt ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-brand hover:text-brand'}`}>
+            ${pt}${countOf(pt) ? ` (${countOf(pt)})` : ''}</button>`)}
+        ${customs.map((pt) => html`
+          <button key=${'c_' + pt} type="button" onClick=${() => onSel(pt)}
+            class=${`text-[13px] px-3 py-1.5 rounded-full border transition ${sel === pt ? 'bg-brand text-white border-transparent' : 'border-amber-300 text-amber-700 hover:border-brand hover:text-brand'}`}>
             ${pt}${countOf(pt) ? ` (${countOf(pt)})` : ''}</button>`)}
         <button type="button" onClick=${() => setMaxPart(maxPart + 1)}
           class="text-[12px] text-ink-soft hover:text-brand px-1">+ ${maxPart + 1}부 추가</button>
@@ -1187,7 +1193,11 @@
             ${fashion && html`<button onClick=${() => setPartOpen(true)} class="hover:text-brand" title="이 날짜의 상품을 1부·2부…로 한번에 배분">🧩 부 나누기</button>`}
             ${useBands && html`<button onClick=${() => setShowExt(!showExt)} class="hover:text-brand" title="고정 시간띠 앞뒤의 확장 시간대 보기/숨기기">확장 ${showExt ? '▴' : '▾'}</button>`}
             ${!fashion && html`<button onClick=${() => setAddOpen(true)} class="hover:text-brand">+ 시간대</button>`}
-            ${fashion && html`<button onClick=${() => store.addSlot(day.id, { order: true })} class="hover:text-brand" title="순번(1부·2부…) 슬롯 추가 — 부 편성 프로그램용">+ 순번</button>`}
+            ${fashion && html`<button onClick=${() => {
+                const nm = prompt('순번(회차) 이름 — 예: 4부, 아침 1부, 2차 방송\n(아침 특별 방송 등 별도 회차도 이름으로 추가하세요)', nextPart());
+                if (nm === null) return;
+                store.addSlot(day.id, { order: true, label: nm.trim() || undefined });
+              }} class="hover:text-brand" title="순번(부)·회차 추가 — 이름 지정 가능 (예: 아침 1부)">+ 순번</button>`}
             <button onClick=${() => {
                 const nP = state.placements.filter((x) => day.slots.some((sl) => sl.id === x.slotId)).length;
                 const placedIds = new Set(state.placements.map((x) => x.sourceBidId).filter(Boolean));
