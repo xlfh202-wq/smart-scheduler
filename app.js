@@ -4200,6 +4200,13 @@
                 }}
                 class=${`text-[13px] px-3 py-1.5 rounded border whitespace-nowrap shrink-0 ${state.bidLockAll ? 'border-amber-400 text-amber-800 bg-amber-50' : 'border-slate-300 bg-white hover:border-amber-500 hover:text-amber-700'}`}
                 title="편성 조정 중 MD 기입 차단 (전체 프로그램·전체 월 일괄)">${state.bidLockAll ? '🔓 입찰잠금 해제' : '🔒 입찰 잠금'}</button>`}
+              ${roleCfg.isAdmin && html`<button onClick=${() => {
+                  const lk = state.boardLockAll;
+                  if (!lk && !confirm('입찰보드·최종편성안을 잠글까요?\n잠그면 관리자만 조정할 수 있고, PD·MD는 조회만 가능합니다. (전체 프로그램·전체 월)')) return;
+                  store.setBoardLock(!lk);
+                }}
+                class=${`text-[13px] px-3 py-1.5 rounded border whitespace-nowrap shrink-0 ${state.boardLockAll ? 'border-purple-400 text-purple-800 bg-purple-50' : 'border-slate-300 bg-white hover:border-purple-500 hover:text-purple-700'}`}
+                title="입찰보드·최종편성안을 관리자만 조정하도록 잠금 (전체 프로그램·전체 월)">${state.boardLockAll ? '🔓 편성잠금 해제' : '🔒 편성 잠금'}</button>`}
               <button onClick=${() => setHistory(true)}
                 class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0">
                 변경 이력 <span class="text-[11px] text-ink-soft">(${state.changeLog.length}${state.changeLog.length >= 200 ? '+' : ''})</span>
@@ -4222,14 +4229,31 @@
         <${ProgramTabs} state=${state} isAdmin=${!!roleCfg.isAdmin} />
 
         <main class="flex-1 min-h-0 flex flex-col border-t border-slate-300">
-          ${curTab === 'board' ? html`<${ScheduleView} state=${state} simple=${true} onSaved=${() => setTab('final')} />`
-            : curTab === 'schedule' ? html`<${ScheduleView} state=${state} onSaved=${() => setTab('final')} />`
-            : curTab === 'final' ? html`<${FinalScheduleView} state=${state} onOpenSchedule=${allowed.includes('schedule') ? (() => guardTab('schedule')) : undefined} />`
+          ${(() => { // 편성 잠금: 비관리자는 입찰보드·상세편성표·최종편성안 조정 불가 (조회만)
+            const boardLocked = !!state.boardLockAll && !roleCfg.isAdmin;
+            const lockBanner = boardLocked && html`<div class="shrink-0 px-4 py-2 bg-purple-50 border-b border-purple-200 text-[13px] font-semibold text-purple-800">
+              🔒 관리자가 편성을 잠갔습니다 — 잠금 해제 전까지 입찰보드·최종편성안은 조회만 가능합니다.
+              <span class="font-normal text-purple-600">(${(state.boardLockAll || {}).by || '관리자'} · ${fmtTs((state.boardLockAll || {}).ts)})</span></div>`;
+            const blockEdit = (e) => { e.stopPropagation(); e.preventDefault(); };
+            const lockedWrap = (inner) => html`${lockBanner}
+              <div class="flex-1 min-h-0 flex flex-col" onMouseDownCapture=${blockEdit} onClickCapture=${blockEdit}
+                onDoubleClickCapture=${blockEdit} onContextMenuCapture=${blockEdit}
+                onDragStartCapture=${blockEdit} onDropCapture=${blockEdit} onKeyDownCapture=${blockEdit}>${inner}</div>`;
+            return curTab === 'board' ? (boardLocked
+              ? lockedWrap(html`<${ScheduleView} state=${state} simple=${true} onSaved=${() => {}} />`)
+              : html`<${ScheduleView} state=${state} simple=${true} onSaved=${() => setTab('final')} />`)
+            : curTab === 'schedule' ? (boardLocked
+              ? lockedWrap(html`<${ScheduleView} state=${state} onSaved=${() => {}} />`)
+              : html`<${ScheduleView} state=${state} onSaved=${() => setTab('final')} />`)
+            : curTab === 'final' ? (boardLocked
+              ? html`${lockBanner}<${FinalScheduleView} state=${state} readOnly=${true} />`
+              : html`<${FinalScheduleView} state=${state} onOpenSchedule=${allowed.includes('schedule') ? (() => guardTab('schedule')) : undefined} />`)
             : curTab === 'finalview' ? html`<${FinalScheduleView} state=${state} readOnly=${true} />`
             : curTab === 'finalpgm' ? html`<${FinalScheduleView} state=${state} readOnly=${true} full=${true} />`
             : html`<${BidBoard} state=${state} readOnly=${!!roleCfg.viewOnly}
                 lockTeam=${auth.role === 'md' ? (auth.team || '') : ''}
-                canLock=${!!roleCfg.canManage} />`}
+                canLock=${!!roleCfg.canManage} />`;
+          })()}
         </main>
 
         ${history && html`<${HistoryModal} state=${state} isAdmin=${roleCfg.isAdmin} onClose=${() => setHistory(false)} />`}

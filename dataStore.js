@@ -1020,6 +1020,14 @@
               detail: locked ? '전체 MD 입찰 잠금 (편성 조정 중)' : '전체 MD 입찰 잠금 해제' });
         emit();
       },
+      // 편성 잠금(관리자 전용): 잠그면 입찰보드·최종편성안 조정을 관리자만 할 수 있음 (전체 프로그램·전체 월)
+      setBoardLock(locked) {
+        if (locked) state.boardLockAll = { by: currentUser || '', ts: nowISO() };
+        else delete state.boardLockAll;
+        log({ action: locked ? '편성잠금' : '편성잠금해제',
+              detail: locked ? '입찰보드·최종편성안 잠금 (관리자만 조정 가능)' : '입찰보드·최종편성안 잠금 해제' });
+        emit();
+      },
       // 날짜 운영 상태: null(정상) | 'off'(미운영·결방) | 'general'(테마PGM 대신 일반프로그램 운영)
       // 'off' 표기 시 이 날의 편성 상품은 입찰 풀(미편성)로 복귀 (수기추가 상품은 입찰로 변환해 보존)
       setDayStatus(dayId, { status, reason }) {
