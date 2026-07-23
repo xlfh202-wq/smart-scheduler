@@ -1213,11 +1213,12 @@
       repairOrphans() {
         const slotSet = new Set(state.days.flatMap((d) => d.slots.map((x) => x.id)));
         let fixed = 0;
+        const names = [];
         state.placements.forEach((p) => {
           if (slotSet.has(p.slotId)) return;
           const bid = p.sourceBidId && state.bids.find((b) => b.id === p.sourceBidId);
           if (!bid) return; // 수기 편성은 날짜 특정 불가 — 유지
-          if (slotSet.has(bid.slotId)) { p.slotId = bid.slotId; stamp(p); fixed++; return; }
+          if (slotSet.has(bid.slotId)) { p.slotId = bid.slotId; stamp(p); fixed++; names.push((p.productName || '').slice(0, 12)); return; }
           const day = state.days.find((d) => d.id === bid.dayId);
           if (day) {
             let t = day.slots.find((x) => x.std) || day.slots[0];
@@ -1227,10 +1228,13 @@
               t = (en && en.slots && en.slots[0]) ? ensureSlotOnDay(day, en.slots[0][0], en.slots[0][1])
                 : ensureBucketSlotOnDay(day);
             }
-            if (t) { p.slotId = t.id; stamp(p); fixed++; }
+            // manual 표시 필수: 행모드 하이드레이트의 슬롯 청소가 (문서에 bids/placements가 없어)
+            // 참조를 못 보고 무표식 슬롯을 지워버림 → 복구가 접속마다 반복되는 루프 방지
+            if (t && !t.std && !t.bucket) t.manual = true;
+            if (t) { p.slotId = t.id; stamp(p); fixed++; names.push((p.productName || '').slice(0, 12)); }
           }
         });
-        if (fixed) { log({ action: '편성복구', detail: `슬롯이 사라진 편성 ${fixed}건을 원본 입찰 위치로 복구` }); emit(); }
+        if (fixed) { log({ action: '편성복구', detail: `사라진 편성 ${fixed}건 자동 복구: ${names.slice(0, 3).join(', ')}${fixed > 3 ? ` 외 ${fixed - 3}건` : ''}` }); emit(); }
         return fixed;
       },
       removePlacement(placementId) {
