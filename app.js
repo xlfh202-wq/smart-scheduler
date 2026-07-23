@@ -2083,7 +2083,8 @@
     const allProgDays = state.days.filter((d) => d.programId === state.activeProgram)
       .slice().sort((a, b) => a.date.localeCompare(b.date));
     const [expandedMonths, setExpandedMonths] = useState(() => new Set());
-    const slotStart = (s) => (s.start ? U.toMin(s.start) : s.time ? U.toMin(s.time) : 9999);
+    const slotStart = (s) => (s.start ? U.toMin(s.start) : s.time ? U.toMin(s.time)
+      : 100000 + (parseInt(((s.label || '').match(/\d+/) || [99])[0], 10) || 99));
     const topBarRef = useRef(null);
     const topBarH = useElemHeight(topBarRef, 48); // 상단 고정 도구 바 높이
     useMonthAutoScroll('final-month-center', 40, // 표 내부 스크롤 — 고정된 thead 높이만큼 보정
@@ -2136,7 +2137,9 @@
       const startOf = (it) => U.toMin(it.slot.start || '00:00');
       const bandTime = (it) => { const bi = bandOf(it.slot);
         if (bi >= 0) return U.toMin(dBands[bi][0]);
-        return it.slot.start ? U.toMin(it.slot.start) : 100000; }; // 순번(시간 없음)은 맨 뒤
+        if (it.slot.start) return U.toMin(it.slot.start);
+        if (it.slot.time) return U.toMin(it.slot.time);
+        return 100000 + (parseInt(((it.slot.label || '').match(/\d+/) || [99])[0], 10) || 99); }; // 순번은 부 번호 순
       const anchor = {}; // (띠|팀) 부 묶음의 가장 이른 시작
       items.forEach((it) => { const pt = partOfP(it.p); if (!pt) return;
         const k = bandOf(it.slot) + '|' + it.p.teamId;
