@@ -3470,7 +3470,9 @@
     const [loadedIds, setLoadedIds] = useState([]);
     const [archDone, setArchDone] = useState(false);
     const [archLoading, setArchLoading] = useState(false);
-    const allLogs = older.length ? state.changeLog.concat(older) : state.changeLog;
+    // 시스템 자동 동작(편성복구 등)은 이력 화면에서 숨김 — 데이터에는 남아 진단용으로만 사용
+    const SYS_ACTIONS = new Set(['편성복구']);
+    const allLogs = (older.length ? state.changeLog.concat(older) : state.changeLog).filter((l) => !SYS_ACTIONS.has(l.action));
     async function loadOlder() {
       if (!store._logFetch || archLoading) return;
       setArchLoading(true);
