@@ -3465,8 +3465,23 @@
     const [prog, setProg] = useState('all');
     const [ym, setYm] = useState('all');
     const progName = (id) => { const p = (state.programs || []).find((x) => x.id === id); return p ? p.name : id; };
-    const ymList = Array.from(new Set(state.changeLog.map((l) => l.ym).filter(Boolean))).sort().reverse();
-    let logs = state.changeLog;
+    // 서버 아카이브(이전 이력) 병합 — 문서에는 최근 200건만 있고, 옛 이력은 '더 보기'로 불러옴
+    const [older, setOlder] = useState([]);
+    const [loadedIds, setLoadedIds] = useState([]);
+    const [archDone, setArchDone] = useState(false);
+    const [archLoading, setArchLoading] = useState(false);
+    const allLogs = older.length ? state.changeLog.concat(older) : state.changeLog;
+    async function loadOlder() {
+      if (!store._logFetch || archLoading) return;
+      setArchLoading(true);
+      const chunks = await store._logFetch(loadedIds);
+      setArchLoading(false);
+      if (!chunks.length) { setArchDone(true); return; }
+      setLoadedIds(loadedIds.concat(chunks.map((c) => c.id)));
+      setOlder(older.concat(chunks.flatMap((c) => c.entries)));
+    }
+    const ymList = Array.from(new Set(allLogs.map((l) => l.ym).filter(Boolean))).sort().reverse();
+    let logs = allLogs;
     if (prog !== 'all') logs = logs.filter((l) => l.programId === prog);
     if (ym !== 'all') logs = logs.filter((l) => l.ym === ym);
     if (action !== 'all') logs = logs.filter((l) => l.action === action);
@@ -3494,7 +3509,7 @@
       store.resetMoveCounts({ programId: prog, ym });
     }
 
-    const actions = ['all', ...Array.from(new Set(state.changeLog.map((l) => l.action)))];
+    const actions = ['all', ...Array.from(new Set(allLogs.map((l) => l.action)))];
     const actionColor = { 편성: '#16a34a', 이동: '#da291c', 편성제외: '#64748b', 입찰등록: '#0891b2',
       입찰수정: '#0891b2', 입찰삭제: '#64748b', 배정변경: '#7c3aed', 시간분할: '#d97706',
       시간추가: '#d97706', 시간삭제: '#64748b', 편성일추가: '#2563eb', 편성일삭제: '#64748b',
@@ -3577,6 +3592,11 @@
                   </tr>`)}
               </tbody>
             </table>
+            ${store._logFetch && !archDone && html`<div class="text-center py-2 border-t border-slate-100">
+              <button onClick=${loadOlder}
+                class="text-[12px] px-3 py-1 rounded border border-slate-300 text-ink-soft hover:border-brand hover:text-brand">
+                ${archLoading ? '불러오는 중…' : '⬇ 이전 이력 더 보기 (서버 보관분)'}</button></div>`}
+            ${archDone && html`<div class="text-center py-2 text-[11px] text-slate-400 border-t border-slate-100">보관된 이전 이력을 모두 불러왔습니다</div>`}
           </div>
         </div>
       </div>`;
@@ -4182,7 +4202,7 @@
                 title="편성 조정 중 MD 기입 차단 (전체 프로그램·전체 월 일괄)">${state.bidLockAll ? '🔓 입찰잠금 해제' : '🔒 입찰 잠금'}</button>`}
               <button onClick=${() => setHistory(true)}
                 class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0">
-                변경 이력 <span class="text-[11px] text-ink-soft">(${state.changeLog.length})</span>
+                변경 이력 <span class="text-[11px] text-ink-soft">(${state.changeLog.length}${state.changeLog.length >= 200 ? '+' : ''})</span>
               </button>
               ${roleCfg.isAdmin && html`<button onClick=${() => setTeamMgr(true)}
                 class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0"

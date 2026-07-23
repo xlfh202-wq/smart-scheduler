@@ -302,7 +302,8 @@
     let pendingHydrate = null; // 보류 중 도착한 서버 상태(최신 1개) — 취소 시 이걸로 복원
     let suppressDirty = false; // 월/프로그램 이동 등 자동 생성은 변경 건수로 세지 않음
     let backupAPI = null;   // Supabase 백업/복원 구현 (connectSupabase 에서 주입)
-    let snapAPI = null;     // 편성 저장본 본문 분리 저장(app_state snap_* 행) — 메인 문서 비대화 방지
+    let snapAPI = null;
+    let logArchive = null; // 변경 이력 아카이브 훅 (connectSupabase에서 주입)     // 편성 저장본 본문 분리 저장(app_state snap_* 행) — 메인 문서 비대화 방지
     let hydratedOnce = false; // 첫 서버 로드 이후에는 화면 이동(탭·월)을 로컬 유지
     // 접속(첫 로드) 시 초기 화면 = 최유라쇼 + 현재 월 (오늘 기준)
     function defaultView() {
@@ -493,7 +494,12 @@
         action: '', productName: '', teamName: '', from: '', to: '', detail: '',
         ...entry,
       });
-      if (state.changeLog.length > 1000) state.changeLog.length = 1000; // 문서 비대화 방지 (최근 1000건 유지)
+      // 하이브리드 이력: 문서에는 최근 200건만(팝업 즉시 표시·실시간 유지), 넘친 이력은 서버 아카이브 행으로 이동
+      const MAXL = logArchive ? 200 : 1000; // 아카이브 미연결(로컬 모드)에서는 기존 상한 유지
+      if (state.changeLog.length > MAXL) {
+        const overflow = state.changeLog.splice(MAXL);
+        if (logArchive) logArchive.push(overflow);
+      }
     }
     // 변경 주체/시각 기록 (카드 "마지막 수정" 표시용)
     function stamp(o) { if (o) { o.editedBy = currentUser || ''; o.editedAt = nowISO(); } return o; }
@@ -1874,6 +1880,14 @@
       },
       // 인라인 본문을 가진 기존 저장본을 분리 저장으로 이관한 뒤 메타로 축소 (connectSupabase 1회)
       _setSnapAPI(api) { snapAPI = api; },
+      _setLogArchive(h) { logArchive = h; },
+      // 접속 직후 1회: 문서에 쌓인 초과 이력을 아카이브로 이동 (멱등)
+      _archiveOverflowLogs() {
+        if (!logArchive || state.changeLog.length <= 200) return;
+        const overflow = state.changeLog.splice(200);
+        logArchive.push(overflow);
+        emit();
+      },
       _externalizeSnapshots(ids) {
         const set = new Set(ids); let n = 0;
         (state.snapshots || []).forEach((s) => { if (set.has(s.id) && s.placements) { delete s.placements; s.ext = true; n++; } });
@@ -1883,6 +1897,7 @@
 
       /* ---------- 변경이력 초기화 ---------- */
       clearChangeLog() {
+        if (logArchive && logArchive.clear) logArchive.clear();
         state.changeLog = [];
         emit();
       },
@@ -2252,6 +2267,44 @@
 
     /* ----- 편성 저장본 본문 분리 저장 (app_state snap_* 행 — 메인 문서 비대화 방지) ----- */
     const SNAP_PREFIX = 'snap_';
+    // ── 변경 이력 아카이브: 문서에서 넘친 이력을 log_c_<ts> 행으로 보관 ──
+    let logBuf = [];
+    let logFlushTimer = null;
+    async function flushLogBuf() {
+      if (!logBuf.length || !serverOk) return;
+      const batch = logBuf; logBuf = [];
+      const id = 'log_c_' + new Date().toISOString().replace(/[-:.TZ]/g, '') + '_' + Math.random().toString(36).slice(2, 6);
+      try {
+        const { error } = await client.from('app_state').upsert({ id, data: { entries: batch }, updated_at: new Date().toISOString() });
+        if (error) throw error;
+      } catch (e) { logBuf = batch.concat(logBuf); console.warn('[supabase] 이력 아카이브 실패(다음에 재시도):', e.message || e); }
+    }
+    store._setLogArchive({
+      push(entries) {
+        logBuf.push(...entries);
+        clearTimeout(logFlushTimer);
+        logFlushTimer = setTimeout(flushLogBuf, 5000);
+      },
+      async clear() { // 관리자 '이력 초기화' — 아카이브 행도 함께 삭제
+        try {
+          const { data } = await client.from('app_state').select('id').like('id', 'log_c_%');
+          const ids = (data || []).map((r) => r.id);
+          if (ids.length) await client.from('app_state').delete().in('id', ids);
+        } catch (e) { console.warn('[supabase] 이력 아카이브 삭제 실패:', e.message || e); }
+      },
+    });
+    // 이력 팝업 '이전 이력 더 보기' — 아카이브 행을 최신순으로 3개씩
+    store._logFetch = async (excludeIds) => {
+      try {
+        const { data, error } = await client.from('app_state').select('id').like('id', 'log_c_%').order('id', { ascending: false });
+        if (error || !data) return [];
+        const next = data.map((r) => r.id).filter((id) => !(excludeIds || []).includes(id)).slice(0, 3);
+        if (!next.length) return [];
+        const { data: rows } = await client.from('app_state').select('id,data').in('id', next);
+        return (rows || []).sort((a, b) => b.id.localeCompare(a.id))
+          .map((r) => ({ id: r.id, entries: (r.data && r.data.entries) || [] }));
+      } catch (e) { return []; }
+    };
     store._setSnapAPI({
       put: async (id, data) => { try {
         await client.from('app_state').upsert({ id: SNAP_PREFIX + id, data, updated_at: new Date().toISOString() });
@@ -2381,6 +2434,7 @@
         } else { status('connected'); }
         ready = true;
         if (rowMode) { try { store.repairOrphans(); } catch (e) {} } // 행 로드 후 고아 편성 자동 복구
+        try { store._archiveOverflowLogs(); } catch (e) {} // 문서 초과 이력 → 아카이브 (멱등)
         maybeAutoBackup(); // 접속 시 마지막 자동백업이 오래됐으면 1회 백업
         migrateSnapshots(); // 인라인 저장본이 남아 있으면 분리 행으로 이관(1회·멱등)
         client.channel('app_state_main')
