@@ -2976,6 +2976,15 @@
                     ...bandDefs,
                     ...(extW.after && teamBids.some((b) => slotInW(b, extW.after[0], extW.after[1])) ? [extW.after] : []),
                   ];
+                  // 띠 밖에 수기로 추가한 시간대(특별 편성)도 행으로 — MD가 추가하고도 안 보이던 문제 해소
+                  const inRows = (s2, e2) => rowBands.some(([bs, be]) => U.toMin(s2) >= U.toMin(bs) && U.toMin(s2) < U.toMin(be) && U.toMin(e2) <= U.toMin(be));
+                  day.slots.forEach((sl) => {
+                    if (!sl.start || !sl.end || sl.start === sl.end) return;
+                    if (inRows(sl.start, sl.end)) return;
+                    if (rowBands.some((b) => b[0] === sl.start && b[1] === sl.end)) return;
+                    rowBands.push([sl.start, sl.end, 'ext']);
+                  });
+                  rowBands.sort((a, b2) => U.toMin(a[0]) - U.toMin(b2[0]));
                   const rows = rowBands.map(([bs, be], bi) => {
                     const inBand = teamBids.filter((b) => slotInW(b, bs, be)).sort((a, b2) =>
                       ((parseInt(a.part, 10) || 99) - (parseInt(b2.part, 10) || 99))
@@ -3177,6 +3186,14 @@
         const aEnd = (day && day.extAfter === 'off') ? null : ((day && day.extAfter) || (e2 && e2.extAfter));
         if (bStart) list.unshift({ id: 'band_extb', start: bStart, end: defs[0][0], extBand: true });
         if (aEnd) list.push({ id: 'band_exta', start: defs[defs.length - 1][1], end: aEnd, extBand: true });
+        // 띠 밖 수기 시간대(특별 편성)도 칩으로
+        const inL = (s3, e4) => list.some((b2) => U.toMin(s3) >= U.toMin(b2.start) && U.toMin(s3) < U.toMin(b2.end) && U.toMin(e4) <= U.toMin(b2.end));
+        ((day && day.slots) || []).forEach((sl) => {
+          if (!sl.start || !sl.end || sl.start === sl.end) return;
+          if (inL(sl.start, sl.end) || list.some((b2) => b2.start === sl.start && b2.end === sl.end)) return;
+          list.push({ id: 'band_m_' + sl.id, start: sl.start, end: sl.end, extBand: true });
+        });
+        list.sort((a, b2) => U.toMin(a.start) - U.toMin(b2.start));
         return list;
       }
       return (day ? day.slots : []).filter((s) => s.start && s.end);
