@@ -2677,7 +2677,7 @@
       if (sel.size === 0) { alert('가져올 입찰을 선택하세요.'); return; }
       if (!targetDayId) { alert('희망 편성일을 선택하세요.'); return; }
       const r = store.copyBids([...sel], targetDayId);
-      alert(`${r.copied}건을 가져왔습니다.\n각 입찰을 클릭해 날짜·시간을 조정하세요.`);
+      alert(`${r.copied}건을 가져왔습니다.${r.skipped ? `\n(이미 가져온 중복 ${r.skipped}건은 제외)` : ''}\n각 입찰을 클릭해 날짜·시간을 조정하세요.`);
       onClose();
     }
     const progName = (id) => (programs.find((p) => p.id === id) || {}).name || id;

@@ -775,25 +775,32 @@
       // 복사본은 대상 날짜의 고정 첫 띠(또는 미정/1부)에 담기며, 이후 자유롭게 시간·날짜 조정
       copyBids(bidIds, targetDayId) {
         const day = state.days.find((d) => d.id === targetDayId);
-        if (!day) return { copied: 0 };
-        let copied = 0; let tid = null;
+        if (!day) return { copied: 0, skipped: 0 };
+        let copied = 0; let skipped = 0; let tid = null;
+        // 중복 방지: 같은 원본을 이미 가져왔거나(copiedFrom), 대상 날짜에 같은 상품명 입찰이 있으면 건너뜀
+        const dayBids = state.bids.filter((b) => b.dayId === day.id);
+        const copiedFromIds = new Set(dayBids.map((b) => b.copiedFrom).filter(Boolean));
+        const dayNames = new Set(dayBids.map((b) => (b.product && b.product.name) || '').filter(Boolean));
         (bidIds || []).forEach((id) => {
           const src = state.bids.find((b) => b.id === id);
           if (!src) return;
+          const nm = (src.product && src.product.name) || '';
+          if (copiedFromIds.has(src.id) || (nm && dayNames.has(nm))) { skipped++; return; }
           const product = JSON.parse(JSON.stringify(src.product || {}));
           const slot = ensureBucketSlotOnDay(day);
-          const bid = stamp({ id: uid(), teamId: src.teamId, dayId: day.id, slotId: slot.id, product, createdAt: nowISO() });
+          const bid = stamp({ id: uid(), teamId: src.teamId, dayId: day.id, slotId: slot.id, product, copiedFrom: src.id, createdAt: nowISO() });
           state.bids.push(bid);
           state.placements.push(stamp(placementFromBid(bid, slot.id, day.programId)));
+          copiedFromIds.add(src.id); if (nm) dayNames.add(nm);
           tid = src.teamId; copied++;
         });
         if (copied) {
           const pn = ((state.programs || []).find((p) => p.id === day.programId) || {}).name || '';
           log({ action: '입찰복사', teamName: teamName(tid),
-                detail: `지난 입찰 ${copied}건 복사 → ${pn} ${day.date} (2차 편성)` });
+                detail: `지난 입찰 ${copied}건 복사 → ${pn} ${day.date} (2차 편성)${skipped ? ` · 중복 ${skipped}건 제외` : ''}` });
           emit();
         }
-        return { copied };
+        return { copied, skipped };
       },
       updateBid(bidId, patch) {
         const b = state.bids.find((x) => x.id === bidId);
