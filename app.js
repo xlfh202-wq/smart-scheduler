@@ -241,6 +241,7 @@
               ${!simple && p.moveCount > 0 && html`<${Badge} color="#da291c" title="편성 이동 횟수">↔ ${p.moveCount}회<//>`}
               ${p.durationMin && html`<${Badge}>${p.durationMin}분<//>`}
             </div>
+            ${p.memo && html`<div class="mt-0.5 text-[10.5px] font-semibold text-violet-700 bg-violet-50 rounded px-1 py-0.5 leading-snug break-words" title="PD 코멘트 (최종편성안 연동)">💬 ${p.memo}</div>`}
             ${!simple && (p.pd || p.host || p.studio) && html`
               <div class="mt-1 text-[11px] text-ink-soft leading-tight">
                 ${p.pd && html`<span>PD ${p.pd}</span>`}
@@ -702,6 +703,13 @@
     return DAY_GRID[(weekday + 1) % 7] ? DAY_GRID[(weekday + 1) % 7][0] : g[0];
   }
   const gridDur = (weekday, start) => { const e = gridEnd(weekday, start); return e ? (U.toMin(e) - U.toMin(start) + 1440) % 1440 : null; };
+  // '20'처럼 시(時)만 넣어도 요일 그리드에서 그 시각대 시작시간(예: 20:45)을 찾아 완성
+  function gridStartFor(weekday, input) {
+    const t = (input || '').trim();
+    if (!/^\d{1,2}$/.test(t)) return null;
+    const h = parseInt(t, 10);
+    return (DAY_GRID[weekday] || []).find((x) => parseInt(x.slice(0, 2), 10) === h) || null;
+  }
 
   // 날짜의 고정 시간띠 정의: 날짜별 조정(day.bands) 우선, 없으면 프로그램 고정 스케줄
   function dayBands(state, day) {
@@ -1318,7 +1326,7 @@
               onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'slot', slot: s })} />`))}
         </div>
         ${statusOpen && html`<${DayStatusModal} state=${state} day=${day} onClose=${() => setStatusOpen(false)} />`}
-        ${addOpen && html`<${AddSlotModal} day=${day} onClose=${() => setAddOpen(false)} />`}
+        ${addOpen && html`<${AddSlotModal} day=${day} fashion=${fashion} onClose=${() => setAddOpen(false)} />`}
         ${bandEdit && html`<${BandTimeModal} day=${day} idx=${bandEdit.idx} start=${bandEdit.start} end=${bandEdit.end}
           hasOverride=${!!(day.bands && day.bands.length)} onClose=${() => setBandEdit(null)} />`}
         ${slotAddFor && html`<${SlotAddModal} state=${state} slot=${slotAddFor} onClose=${() => setSlotAddFor(null)} />`}
@@ -1383,7 +1391,7 @@
   }
 
   // 편성 위치 선택 UI 공통부: 고정 띠 칩(+직접 입력) — 띠 프로그램은 시간 수기 입력 없이 띠를 고르고 노출분만 적는다
-  function BandPickFields({ bands, bandIdx, setBandIdx, start, setStart, dur, setDur, durHint }) {
+  function BandPickFields({ bands, bandIdx, setBandIdx, start, setStart, dur, setDur, durHint, wd }) {
     return html`
       ${bands.length > 0 && html`
         <${Field} label="편성할 시간 띠 *">
@@ -1396,7 +1404,7 @@
           </div>
         <//>`}
       ${(bandIdx === -1 || bands.length === 0) && html`
-        <${Field} label="시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${setStart} /><//>`}
+        <${Field} label="시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${setStart} completeWd=${wd} /><//>`}
       <${Field} label=${bandIdx >= 0 ? '희망 노출분 (참고용)' : '노출분'}>
         <div class="flex items-center rounded border border-slate-300 focus-within:border-brand px-2 w-32">
           <input value=${dur} onInput=${(e) => setDur(e.target.value.replace(/[^\d]/g, ''))} inputmode="numeric" placeholder="예: 40"
@@ -1460,7 +1468,7 @@
       <${Modal} title=${`${fmtDay(day)} · 편성 위치 지정${b && b.product ? ' · ' + b.product.name : ''}`} onClose=${onClose} onSave=${save}>
         ${initBand && html`<div class="text-[12px] bg-sky-50 border border-sky-200 text-sky-800 rounded px-2.5 py-1.5">
           📍 놓은 위치 자동 인식: <b>${initBand[0]}~${initBand[1]} 띠</b> — 맞으면 노출분만 적고 저장하세요.</div>`}
-        <${BandPickFields} bands=${bands} bandIdx=${bandIdx} setBandIdx=${setBandIdx}
+        <${BandPickFields} bands=${bands} bandIdx=${bandIdx} setBandIdx=${setBandIdx} wd=${day.weekday}
           start=${start} setStart=${setStart} dur=${dur} setDur=${setDur}
           durHint=${bandIdx >= 0 ? '선택한 띠 전체로 편성되고, 노출분은 띠 안 시간 배분 참고용으로 표시됩니다.' : '노출분을 넣으면 시작~시작+노출분 시간대로 생성됩니다.'} />
       <//>`;
@@ -1491,7 +1499,7 @@
         ${(initBand || (initSlot && initSlot.start)) && html`<div class="text-[12px] bg-sky-50 border border-sky-200 text-sky-800 rounded px-2.5 py-1.5">
           📍 놓은 위치 자동 인식: <b>${initBand ? `${initBand[0]}~${initBand[1]} 띠` : ''}${initSlot && initSlot.start ? `${initBand ? ' · ' : ''}${initSlot.start}~${initSlot.end}` : ''}</b>
           — 맞으면 그대로 저장하세요.</div>`}
-        <${BandPickFields} bands=${bands} bandIdx=${bandIdx} setBandIdx=${setBandIdx}
+        <${BandPickFields} bands=${bands} bandIdx=${bandIdx} setBandIdx=${setBandIdx} wd=${day.weekday}
           start=${start} setStart=${setStart} dur=${dur} setDur=${setDur}
           durHint=${bandIdx >= 0 ? '선택한 띠 전체로 이동하고, 노출분은 띠 안 시간 배분 참고용으로 표시됩니다.' : '노출분을 넣으면 시작~시작+노출분 시간대로 생성됩니다.'} />
       <//>`;
@@ -1540,29 +1548,54 @@
         <//>
         ${orderMode
           ? html`<${Field} label="부(순번) *"><${PartChipPicker} state=${state} day=${day} sel=${part} onSel=${setPart} /><//>`
-          : html`<${BandPickFields} bands=${bands} bandIdx=${bandIdx} setBandIdx=${setBandIdx}
+          : html`<${BandPickFields} bands=${bands} bandIdx=${bandIdx} setBandIdx=${setBandIdx} wd=${day.weekday}
               start=${start} setStart=${setStart} dur=${dur} setDur=${setDur}
               durHint=${bandIdx >= 0 ? '선택한 띠 전체로 편성되고, 노출분은 띠 안 시간 배분 참고용으로 표시됩니다.' : '시간을 입력하면 해당 시간대(시작~시작+노출분)로 반영됩니다.'} />`}
         <div class="text-[12px] text-ink-soft">${orderMode ? '선택한 부에 바로 편성됩니다. (괄호 숫자 = 현재 그 부의 상품 수) 방송시간은 날짜 옆에서 수정하세요.' : ''} 구성·가격 등은 최종편성안에서 보강하세요.</div>
       <//>`;
   }
 
-  function AddSlotModal({ day, onClose }) {
+  function AddSlotModal({ day, fashion, onClose }) {
     const [start, setStart] = useState('');
     const [end, setEnd] = useState('');
+    const [mode, setMode] = useState('time');  // 패션형: 'time'=시간(분)으로 운영 / 'parts'=부로 나눠 운영
+    const [nParts, setNParts] = useState('2');
     // 시작 입력 → 요일 기본 편성 그리드에 매칭해 종료 자동 제안 (수기 조정 가능)
     const onStart = (v) => { setStart(v); const ge = gridEnd(day.weekday, v); if (ge) setEnd(ge); };
     function save() {
-      if (!/^\d{1,2}:\d{2}$/.test(start) || !/^\d{1,2}:\d{2}$/.test(end)) { alert('시간 형식 HH:MM 으로 입력하세요.'); return; }
-      store.addSlot(day.id, { start: start.trim(), end: end.trim() }); onClose();
+      if (!/^\d{1,2}:\d{2}$/.test(start) || !/^\d{1,2}:\d{2}$/.test(end)) { alert('시간 형식 HH:MM 으로 입력하세요. (시만 넣어도 자동 완성됩니다 — 예: 20 → 20:45)'); return; }
+      if (fashion && mode === 'parts') {
+        const n = Math.max(1, Math.min(9, parseInt(nParts, 10) || 2));
+        for (let i = 1; i <= n; i++) store.addSlot(day.id, { order: true, label: `${i}부`, time: start.trim() });
+      } else {
+        store.addSlot(day.id, { start: start.trim(), end: end.trim() });
+      }
+      onClose();
     }
     return html`
       <${Modal} title=${`${fmtDay(day)} · 시간대 추가`} onClose=${onClose} onSave=${save}>
         <div class="grid grid-cols-2 gap-3">
-          <${Field} label="시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${onStart} /><//>
+          <${Field} label="시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${onStart} completeWd=${day.weekday} /><//>
           <${Field} label="종료 시간 (24시간) *"><${TimeInput} value=${end} onChange=${setEnd} /><//>
         </div>
-        <div class="text-[12px] text-ink-soft">시작만 넣으면 ${U.WEEKDAY_KO[day.weekday]}요일 기본 편성표에 맞춰 종료가 자동 제안됩니다 (수정 가능).</div>
+        ${fashion && html`
+          <${Field} label="이 시간 운영 방식">
+            <div class="flex flex-wrap items-center gap-1.5">
+              <button type="button" onClick=${() => setMode('time')}
+                class=${`text-[13px] px-3 py-1.5 rounded-full border transition ${mode === 'time' ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-brand hover:text-brand'}`}>시간(분)으로 나눔</button>
+              <button type="button" onClick=${() => setMode('parts')}
+                class=${`text-[13px] px-3 py-1.5 rounded-full border transition ${mode === 'parts' ? 'bg-brand text-white border-transparent' : 'border-slate-300 text-ink-soft hover:border-brand hover:text-brand'}`}>부(순번)로 나눔</button>
+              ${mode === 'parts' && html`<div class="flex items-center rounded border border-slate-300 focus-within:border-brand px-2 w-20 ml-1">
+                <input value=${nParts} onInput=${(e) => setNParts(e.target.value.replace(/[^\d]/g, ''))} inputmode="numeric"
+                  class="w-full py-1 text-[13px] tabular-nums text-right bg-transparent outline-none" />
+                <span class="text-[12px] text-ink-soft pl-0.5">부</span>
+              </div>`}
+            </div>
+            <div class="mt-1 text-[11px] text-ink-soft">${mode === 'parts'
+              ? `'${start || 'HH:MM'} 1부·2부…' 회차로 만들어 상품을 부 단위로 나눠 넣습니다.`
+              : '시간대 하나로 만들고, 필요하면 ⊟ 버튼으로 분 단위 분할해 씁니다.'}</div>
+          <//>`}
+        <div class="text-[12px] text-ink-soft">시작만 넣으면 ${U.WEEKDAY_KO[day.weekday]}요일 기본 편성표에 맞춰 종료가 자동 제안됩니다. 시(時)만 입력해도 완성됩니다 (예: 20 → 20:45).</div>
       <//>`;
   }
 
@@ -2527,7 +2560,7 @@
           <b>시간을 넣으면 그 날짜 블록에 시간대로 추가됩니다</b> — 예: 영스타일 8/26에 20:45~21:45 추가.</div>`}
         <${Field} label=${dups.length ? '추가 방송 시간 *' : '방송 시간 (선택)'}>
           <div class="flex items-center gap-2 flex-wrap">
-            <${TimeInput} value=${start} onChange=${onStart} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+            <${TimeInput} value=${start} onChange=${onStart} completeWd=${wd} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
             <span class="text-ink-soft shrink-0">~</span>
             <${TimeInput} value=${end} onChange=${onEnd} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
             <div class="flex items-center rounded border border-slate-300 focus-within:border-brand px-2 w-24" title="노출분으로 기입하면 종료가 자동 계산됩니다">
@@ -3759,9 +3792,14 @@
     if (i !== -1) v = v.slice(0, i + 1) + v.slice(i + 1).replace(/:/g, '');
     return v.slice(0, 5);
   }
-  function TimeInput({ value, onChange, className }) {
+  function TimeInput({ value, onChange, className, completeWd }) {
     return html`<input type="text" inputmode="numeric" maxlength="5" value=${value || ''}
       onInput=${(e) => onChange(normTime(e.target.value))}
+      onBlur=${(e) => { // 시(時)만 입력하고 나가면 요일 그리드로 시작시간 완성 (예: '20' → 20:45)
+        if (completeWd == null) return;
+        const hit = gridStartFor(completeWd, e.target.value);
+        if (hit) onChange(hit);
+      }}
       placeholder="20:45" class=${`${className || inputCls} tabular-nums`} />`;
   }
   function Field({ label, children }) {
