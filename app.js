@@ -2940,11 +2940,11 @@
                     : html`<${AirTimeButton} day=${day} />`)}
                   <${DayStatusBadge} day=${day} />
                 </span>
-                ${!readOnly && html`<div class="flex items-center gap-2 text-[11px] text-ink-soft">
-                  ${!fashion && html`<button onClick=${() => setSlotModalDay(day.id)} class="hover:text-brand">+ 시간대</button>`}
+                ${!readOnly && canLock && html`<div class="flex items-center gap-2 text-[11px] text-ink-soft">
+                  ${!fashion && html`<button onClick=${() => setSlotModalDay(day.id)} class="hover:text-brand" title="PD·관리자 전용">+ 시간대</button>`}
                   <button onClick=${() => { const n = state.bids.filter((b) => b.dayId === day.id).length;
                     if (confirm(`${fmtDay(day)} 편성일을 삭제할까요?${n ? `\n이 날의 입찰 ${n}건은 삭제되지 않고 가까운 다른 날짜로 옮겨집니다.` : ''}`)) store.removeDay(day.id); }}
-                    class="hover:text-brand">편성일 삭제</button>
+                    class="hover:text-brand" title="PD·관리자 전용">편성일 삭제</button>
                 </div>`}
               </div>
               ${day.status === 'off' ? html`
