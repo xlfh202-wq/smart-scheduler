@@ -682,6 +682,27 @@
   /* =====================================================================
    *  고정 시간띠 행 — MD가 잘게 쪼갠 시간대도 이 띠 아래에 자동 귀속 표시
    * ===================================================================== */
+  // 요일별 기본 편성 시간 그리드 (방송사 주간편성표 기준, 2026-08-10~16 참조)
+  // 시간 입력 시 요일과 매칭해 종료시간·노출분을 자동 제안하는 데 사용 (수기 조정 가능)
+  const DAY_GRID = {
+    0: ['05:30', '06:30', '07:35', '08:50', '10:00', '11:15', '12:35', '13:45', '15:00', '16:10', '17:15', '17:35', '18:35', '19:30', '20:35', '21:35', '22:40', '23:50'],
+    1: ['05:15', '06:15', '07:15', '08:15', '09:25', '10:25', '11:35', '12:35', '13:35', '14:35', '14:40', '15:35', '16:35', '17:35', '18:35', '19:35', '20:45', '21:45', '22:55', '23:55'],
+    2: ['05:15', '06:15', '07:15', '08:15', '09:25', '10:25', '11:35', '12:35', '13:35', '14:35', '15:35', '16:35', '17:35', '18:35', '19:35', '20:45', '21:45', '22:55', '23:55'],
+    3: ['05:15', '06:15', '07:15', '08:15', '09:25', '10:25', '11:35', '12:35', '13:35', '14:35', '15:35', '16:35', '17:35', '18:35', '19:35', '20:45', '21:45', '22:55', '23:55'],
+    4: ['05:15', '06:15', '07:15', '09:25', '10:25', '11:35', '12:35', '13:35', '14:35', '14:40', '15:35', '16:35', '17:35', '18:35', '19:35', '20:45', '21:45', '22:50', '23:55'],
+    5: ['05:15', '06:15', '07:15', '08:15', '09:25', '10:25', '11:35', '12:35', '13:35', '14:35', '15:35', '16:35', '17:35', '18:35', '19:35', '20:40', '21:40', '22:40', '23:50'],
+    6: ['05:15', '06:15', '07:20', '08:20', '09:20', '10:20', '10:35', '11:40', '12:45', '13:55', '15:10', '16:25', '17:30', '18:35', '19:35', '20:25', '21:35', '22:30', '23:50'],
+  };
+  // 입력한 시작시간 뒤의 첫 그리드 경계 = 종료시간 제안 (마지막 띠는 다음날 첫 경계로 순환)
+  function gridEnd(weekday, start) {
+    const g = DAY_GRID[weekday] || [];
+    if (!g.length || !/^\d{1,2}:\d{2}$/.test(start || '')) return null;
+    const m = U.toMin(start);
+    for (const t of g) if (U.toMin(t) > m) return t;
+    return DAY_GRID[(weekday + 1) % 7] ? DAY_GRID[(weekday + 1) % 7][0] : g[0];
+  }
+  const gridDur = (weekday, start) => { const e = gridEnd(weekday, start); return e ? (U.toMin(e) - U.toMin(start) + 1440) % 1440 : null; };
+
   // 날짜의 고정 시간띠 정의: 날짜별 조정(day.bands) 우선, 없으면 프로그램 고정 스케줄
   function dayBands(state, day) {
     if (!day) return [];
@@ -1415,7 +1436,9 @@
     const b = state.bids.find((x) => x.id === bidId);
     const bands = dayBandsWithExt(state, day);
     const [bandIdx, setBandIdx] = useState(() => initExt ? -1 : bandInitIdx(bands, initBand || null, initStart || null));
-    const [start, setStart] = useState(initStart || '');
+    const [start, _setStart] = useState(initStart || '');
+    // 직접 입력: 시작을 넣으면 요일 그리드로 노출분 자동 제안
+    const setStart = (v) => { _setStart(v); const gd = gridDur(day.weekday, v); if (gd) setDur(String(gd)); };
     const [dur, setDur] = useState(String((b && b.product && b.product.durationMin) || ''));
     function save() {
       const dm = dur.trim() ? parseInt(dur, 10) : null;
@@ -1444,7 +1467,8 @@
     const bands = dayBandsWithExt(state, day);
     const autoStart = (initSlot && initSlot.start) || (initBand && initBand[0]) || initStart || '';
     const [bandIdx, setBandIdx] = useState(() => initExt ? -1 : bandInitIdx(bands, initBand || null, autoStart || null));
-    const [start, setStart] = useState(autoStart);
+    const [start, _setStart] = useState(autoStart);
+    const setStart = (v) => { _setStart(v); const gd = gridDur(day.weekday, v); if (gd) setDur(String(gd)); };
     const [dur, setDur] = useState(String((p && p.durationMin) || ''));
     function save() {
       const dm = dur.trim() ? parseInt(dur, 10) : null;
@@ -1476,7 +1500,8 @@
     const bands = orderMode ? [] : dayBandsWithExt(state, day);
     const [name, setName] = useState('');
     const [dur, setDur] = useState('');
-    const [start, setStart] = useState(initStart || '');
+    const [start, _setStart] = useState(initStart || '');
+    const setStart = (v) => { _setStart(v); const gd = gridDur(day.weekday, v); if (gd) setDur(String(gd)); };
     // 더블클릭·우클릭한 띠를 자동 인식해 선택 — 띠 밖(확장 등)에서 열었으면 직접 입력
     const [bandIdx, setBandIdx] = useState(() => {
       if (!bands.length || !initStart) return -1;
@@ -1518,8 +1543,10 @@
   }
 
   function AddSlotModal({ day, onClose }) {
-    const [start, setStart] = useState('20:45');
-    const [end, setEnd] = useState('21:45');
+    const [start, setStart] = useState('');
+    const [end, setEnd] = useState('');
+    // 시작 입력 → 요일 기본 편성 그리드에 매칭해 종료 자동 제안 (수기 조정 가능)
+    const onStart = (v) => { setStart(v); const ge = gridEnd(day.weekday, v); if (ge) setEnd(ge); };
     function save() {
       if (!/^\d{1,2}:\d{2}$/.test(start) || !/^\d{1,2}:\d{2}$/.test(end)) { alert('시간 형식 HH:MM 으로 입력하세요.'); return; }
       store.addSlot(day.id, { start: start.trim(), end: end.trim() }); onClose();
@@ -1527,10 +1554,10 @@
     return html`
       <${Modal} title=${`${fmtDay(day)} · 시간대 추가`} onClose=${onClose} onSave=${save}>
         <div class="grid grid-cols-2 gap-3">
-          <${Field} label="시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${setStart} /><//>
+          <${Field} label="시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${onStart} /><//>
           <${Field} label="종료 시간 (24시간) *"><${TimeInput} value=${end} onChange=${setEnd} /><//>
         </div>
-        <div class="text-[12px] text-ink-soft">24시간제로 입력하세요 (예: 20:45). 특별편성 등으로 앞뒤 시간대를 추가할 수 있습니다.</div>
+        <div class="text-[12px] text-ink-soft">시작만 넣으면 ${U.WEEKDAY_KO[day.weekday]}요일 기본 편성표에 맞춰 종료가 자동 제안됩니다 (수정 가능).</div>
       <//>`;
   }
 
@@ -2448,16 +2475,31 @@
     const wdName = date && /^\d{4}-\d{2}-\d{2}$/.test(date)
       ? U.WEEKDAY_KO[new Date(date + 'T00:00:00').getDay()] : '';
     const dups = state.days.filter((d) => d.programId === state.activeProgram && d.date === date);
-    // 기존 방송 길이(없으면 2시간)를 기본 길이로 — 시작만 넣으면 종료 자동 제안
+    const wd = /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(date + 'T00:00:00').getDay() : null;
+    const [dur, setDur] = useState('');
+    // 종료 자동 제안: ①요일 기본 편성 그리드 ②기존 방송 길이 ③기본 60분 — 노출분으로도 기입 가능
     const defDur = (() => {
       const at = dups.map((d) => d.airTime).find((t) => /\d{1,2}:\d{2}\s*~\s*\d{1,2}:\d{2}/.test(t || ''));
       if (at) { const m = at.match(/(\d{1,2}:\d{2})\s*~\s*(\d{1,2}:\d{2})/);
         const dm = (U.toMin(m[2]) - U.toMin(m[1]) + 1440) % 1440; if (dm > 0) return dm; }
-      return 120;
+      return 60;
     })();
     const onStart = (v) => {
       setStart(v);
-      if (/^\d{1,2}:\d{2}$/.test(v) && !end) setEnd(U.toHHMM((U.toMin(v) + defDur) % 1440));
+      if (!/^\d{1,2}:\d{2}$/.test(v)) return;
+      const ge = wd != null ? gridEnd(wd, v) : null;
+      const e2 = ge || U.toHHMM((U.toMin(v) + (dur.trim() ? parseInt(dur, 10) : defDur)) % 1440);
+      setEnd(e2);
+      setDur(String((U.toMin(e2) - U.toMin(v) + 1440) % 1440));
+    };
+    const onDur = (v) => {
+      const d2 = v.replace(/[^\d]/g, '');
+      setDur(d2);
+      if (/^\d{1,2}:\d{2}$/.test(start) && d2) setEnd(U.toHHMM((U.toMin(start) + parseInt(d2, 10)) % 1440));
+    };
+    const onEnd = (v) => {
+      setEnd(v);
+      if (/^\d{1,2}:\d{2}$/.test(start) && /^\d{1,2}:\d{2}$/.test(v)) setDur(String((U.toMin(v) - U.toMin(start) + 1440) % 1440));
     };
     function save() {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { alert('날짜를 선택하세요.'); return; }
@@ -2475,12 +2517,17 @@
           ⚠ ${date} (${wdName})에는 이미 방송이 있습니다${dups.some((d) => d.airTime) ? ` (기존 ${dups.map((d) => d.airTime || '시간 미정').join(', ')})` : ''}.<br/>
           <b>추가 방송의 시간을 넣으면 같은 날짜에 별도 편성일 행이 생깁니다</b> — 예: 8/8 08:20~10:25 + 8/8 22:30~01:00.</div>`}
         <${Field} label=${dups.length ? '추가 방송 시간 *' : '방송 시간 (선택)'}>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
             <${TimeInput} value=${start} onChange=${onStart} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
             <span class="text-ink-soft shrink-0">~</span>
-            <${TimeInput} value=${end} onChange=${setEnd} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+            <${TimeInput} value=${end} onChange=${onEnd} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+            <div class="flex items-center rounded border border-slate-300 focus-within:border-brand px-2 w-24" title="노출분으로 기입하면 종료가 자동 계산됩니다">
+              <input value=${dur} onInput=${(e) => onDur(e.target.value)} inputmode="numeric" placeholder="노출분"
+                class="w-full py-1.5 text-[13px] tabular-nums text-right bg-transparent outline-none" />
+              <span class="text-[12px] text-ink-soft pl-0.5">분</span>
+            </div>
           </div>
-          <div class="mt-1 text-[11px] text-ink-soft">숫자만 눌러도 됩니다 (0820 → 08:20). 시작을 넣으면 종료는 ${dups.length ? '기존 방송 길이' : '2시간'} 기준으로 자동 제안됩니다.</div>
+          <div class="mt-1 text-[11px] text-ink-soft">숫자만 눌러도 됩니다 (0820 → 08:20). 시작을 넣으면 ${wd != null ? U.WEEKDAY_KO[wd] + '요일 기본 편성표' : '기본 편성표'}에 맞춰 종료·노출분이 자동 제안되고, 노출분만 고쳐도 종료가 따라갑니다.</div>
         <//>
         ${wdName && !dups.length && html`<div class="text-[12px] text-ink-soft">${date} (${wdName}요일)에 편성일을 추가합니다.</div>`}
       <//>`;
