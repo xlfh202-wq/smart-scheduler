@@ -1109,15 +1109,32 @@
   // 방송 시간(패션: 날짜 옆 표기·수정) — 자유 입력
   function AirTimeButton({ day, dark }) {
     const [open, setOpen] = useState(false);
-    const [v, setV] = useState(day.airTime || '');
-    useEffect(() => setV(day.airTime || ''), [day.airTime]);
-    function save() { store.setDayAirTime(day.id, v); setOpen(false); }
+    // 시작·종료 분리 입력 (요일 그리드 자동완성·종료 자동 제안) — 기존 자유 텍스트도 파싱해 채움
+    const parse = (t) => { const m = (t || '').match(/(\d{1,2}:\d{2})\s*~\s*(\d{1,2}:\d{2})/); return m ? [m[1], m[2]] : ['', '']; };
+    const [start, _setStart] = useState(() => parse(day.airTime)[0]);
+    const [end, setEnd] = useState(() => parse(day.airTime)[1]);
+    useEffect(() => { const p = parse(day.airTime); _setStart(p[0]); setEnd(p[1]); }, [day.airTime]);
+    const setStart = (v2) => { _setStart(v2); const ge = gridEnd(day.weekday, v2); if (ge) setEnd(ge); };
+    const durMin = (/^\d{1,2}:\d{2}$/.test(start) && /^\d{1,2}:\d{2}$/.test(end))
+      ? (U.toMin(end) - U.toMin(start) + 1440) % 1440 : null;
+    function save() {
+      if (!/^\d{1,2}:\d{2}$/.test(start) || !/^\d{1,2}:\d{2}$/.test(end)) { alert('시작·종료 시간을 입력하세요. (시만 넣어도 자동 완성 — 예: 22 → 22:30)'); return; }
+      store.setDayAirTime(day.id, `${start}~${end}`);
+      setOpen(false);
+    }
     return html`
       <button onClick=${() => setOpen(true)}
         class=${`text-[12px] font-bold tabular-nums px-1.5 py-0.5 rounded ${dark ? 'bg-white/25 hover:bg-white/40 text-white' : 'bg-slate-200 hover:bg-slate-300 text-ink'}`}
         title="방송 시간 (클릭해 수정)">${day.airTime || '+ 방송시간'}</button>
       ${open && html`<${Modal} title=${`${fmtDay(day)} · 방송 시간`} onClose=${() => setOpen(false)} onSave=${save}>
-        <${Field} label="방송 시간 (자유 입력)"><input value=${v} onInput=${(e) => setV(e.target.value)} class=${inputCls} placeholder="예: 22:30~01:00" autofocus /><//>
+        <${Field} label=${`방송 시간 *${durMin != null ? ` — ${durMin}분` : ''}`}>
+          <div class="flex items-center gap-2">
+            <${TimeInput} value=${start} onChange=${setStart} completeWd=${day.weekday} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+            <span class="text-ink-soft shrink-0">~</span>
+            <${TimeInput} value=${end} onChange=${setEnd} completeWd=${day.weekday} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+          </div>
+        <//>
+        <div class="text-[12px] text-ink-soft">시작만 넣으면 ${U.WEEKDAY_KO[day.weekday]}요일 기본 편성표에 맞춰 종료가 자동 제안됩니다. 시(時)만 입력해도 완성됩니다.</div>
       <//>`}`;
   }
 
