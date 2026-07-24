@@ -458,6 +458,8 @@
       ${open && html`<${EditSlotTimeModal} slot=${slot} placement=${placement} rippleDefault=${rippleDefault} onClose=${() => setOpen(false)} />`}`;
   }
   function EditSlotTimeModal({ slot, placement, rippleDefault, onClose }) {
+    const fE = U.findSlot ? U.findSlot(slot.id) : null;
+    const wdE = fE && fE.day ? fE.day.weekday : null;
     const [s, setS] = useState(slot.start || '20:45');
     const [e, setE] = useState(slot.end || '21:45');
     const mode = 'time'; // 순번(N부) 수기 입력은 제거 — 부 배정은 '부 나누기'로
@@ -511,12 +513,12 @@
                 </div>
                 <div class="flex items-center gap-2">
                   <span class="text-[12px] text-ink-soft w-10 shrink-0">시간</span>
-                  <${TimeInput} value=${s} onChange=${onStartChange} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+                  <${TimeInput} value=${s} onChange=${onStartChange} completeWd=${wdE} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
                   <span class="text-ink-soft shrink-0">~</span>
-                  <${TimeInput} value=${e} onChange=${onEndChange} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+                  <${TimeInput} value=${e} onChange=${onEndChange} completeWd=${wdE} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
                 </div>
               </div>
-              <div class="text-[11px] text-ink-soft mt-1">노출분 입력 → 종료시간 자동 · 시작을 바꾸면 노출분(${dur || '-'}분)에 맞춰 종료도 이동</div>
+              <div class="text-[11px] text-ink-soft mt-1">노출분 입력 → 종료시간 자동 · 시작을 바꾸면 노출분(${dur || '-'}분)에 맞춰 종료도 이동 · 시(時)만 넣어도 요일 편성표로 완성</div>
               ${shared
                 ? html`<div class="mt-2 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[12px] text-amber-800">
                     이 시간대에 상품 <b>${sharers.length}개</b>가 함께 있습니다 — 저장하면 <b>${placement.productName}</b>만 새 시간으로 분리되고, 나머지 상품의 시간은 그대로 유지됩니다.</div>`
@@ -668,9 +670,9 @@
             </div>
             <div class="flex items-center gap-2">
               <span class="text-[12px] text-ink-soft w-10 shrink-0">시간</span>
-              <${TimeInput} value=${s} onChange=${onStartChange} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+              <${TimeInput} value=${s} onChange=${onStartChange} completeWd=${day.weekday} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
               <span class="text-ink-soft shrink-0">~</span>
-              <${TimeInput} value=${e} onChange=${onEndChange} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+              <${TimeInput} value=${e} onChange=${onEndChange} completeWd=${day.weekday} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
             </div>
           </div>
         <//>
@@ -1474,7 +1476,7 @@
     return html`
       <${Modal} title=${`${fmtDay(day)} · ${before ? '앞' : '뒤'} 확장 시간 조정`} onClose=${onClose} onSave=${save}>
         <${Field} label=${before ? `확장 시작 시간 (종료는 ${boundary}에 물림) *` : `확장 종료 시간 (시작은 ${boundary}에 물림) *`}>
-          <${TimeInput} value=${t} onChange=${setT} />
+          <${TimeInput} value=${t} onChange=${setT} completeWd=${day.weekday} />
         <//>
         <div class="text-[12px] text-ink-soft">
           저장하면 이 날짜의 확장이 <b class="tabular-nums">${before ? `${t.trim() || 'HH:MM'}~${boundary}` : `${boundary}~${t.trim() || 'HH:MM'}`}</b> 로 표시되고,
@@ -1615,7 +1617,7 @@
       <${Modal} title=${`${fmtDay(day)} · 시간대 추가`} onClose=${onClose} onSave=${save}>
         <div class="grid grid-cols-2 gap-3">
           <${Field} label="시작 시간 (24시간) *"><${TimeInput} value=${start} onChange=${onStart} completeWd=${day.weekday} /><//>
-          <${Field} label="종료 시간 (24시간) *"><${TimeInput} value=${end} onChange=${setEnd} /><//>
+          <${Field} label="종료 시간 (24시간) *"><${TimeInput} value=${end} onChange=${setEnd} completeWd=${day.weekday} /><//>
         </div>
         ${fashion && html`
           <${Field} label="이 시간 운영 방식">
@@ -2603,7 +2605,7 @@
           <div class="flex items-center gap-2 flex-wrap">
             <${TimeInput} value=${start} onChange=${onStart} completeWd=${wd} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
             <span class="text-ink-soft shrink-0">~</span>
-            <${TimeInput} value=${end} onChange=${onEnd} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+            <${TimeInput} value=${end} onChange=${onEnd} completeWd=${wd} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
             <div class="flex items-center rounded border border-slate-300 focus-within:border-brand px-2 w-24" title="노출분으로 기입하면 종료가 자동 계산됩니다">
               <input value=${dur} onInput=${(e) => onDur(e.target.value)} inputmode="numeric" placeholder="노출분"
                 class="w-full py-1.5 text-[13px] tabular-nums text-right bg-transparent outline-none" />
@@ -3292,9 +3294,9 @@
                   </div>
                   <div class="flex items-center gap-2">
                     <span class="text-[12px] text-ink-soft w-10 shrink-0">시간</span>
-                    <${TimeInput} value=${start} onChange=${onStartChange} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+                    <${TimeInput} value=${start} onChange=${onStartChange} completeWd=${day ? day.weekday : null} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
                     <span class="text-ink-soft shrink-0">~</span>
-                    <${TimeInput} value=${end} onChange=${onEndChange} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+                    <${TimeInput} value=${end} onChange=${onEndChange} completeWd=${day ? day.weekday : null} className="w-20 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
                   </div>
                 </div>
                 <div class="mt-1 text-[11px] text-ink-soft">노출분 입력 → 종료시간 자동 · 시작시간을 바꾸면 노출분(${durMin || '-'}분)에 맞춰 종료도 이동</div><//>`}
@@ -3978,9 +3980,9 @@
               ${Object.keys(wdSel).sort().map((wd) => html`
                 <div key=${wd} class="flex items-center gap-2 text-[13px]">
                   <span class="w-12 font-semibold text-ink">${WD[wd]}요일</span>
-                  <${TimeInput} value=${wdSel[wd].start} onChange=${(v) => setTime(wd, 'start', v)} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+                  <${TimeInput} value=${wdSel[wd].start} onChange=${(v) => setTime(wd, 'start', v)} completeWd=${parseInt(wd, 10)} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
                   <span class="text-ink-soft">~</span>
-                  <${TimeInput} value=${wdSel[wd].end} onChange=${(v) => setTime(wd, 'end', v)} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
+                  <${TimeInput} value=${wdSel[wd].end} onChange=${(v) => setTime(wd, 'end', v)} completeWd=${parseInt(wd, 10)} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
                 </div>`)}
               ${Object.keys(wdSel).length === 0 && html`<div class="text-[12px] text-slate-400">요일 버튼을 눌러 방송 요일을 선택하세요. (시간대는 편성표에서 추가로 나눌 수 있음)</div>`}
             </div>
