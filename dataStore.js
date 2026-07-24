@@ -1240,6 +1240,12 @@
       removePlacement(placementId) {
         const p = state.placements.find((x) => x.id === placementId);
         if (!p) return;
+        // 원본 입찰의 희망일이 과거 월이면 풀(전월+당월 필터)에서 안 보이므로, 편성돼 있던 날짜로 당겨줌
+        if (p.sourceBidId) {
+          const b = state.bids.find((x) => x.id === p.sourceBidId);
+          const f0 = findSlot(p.slotId);
+          if (b && f0 && b.dayId !== f0.day.id) { b.dayId = f0.day.id; b.slotId = p.slotId; stamp(b); }
+        }
         // 입찰 없이 직접 편성(수기추가 등)한 상품은 삭제 대신 입찰풀로 되돌림
         if (!p.sourceBidId) {
           const f = findSlot(p.slotId);

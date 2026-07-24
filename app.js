@@ -1230,7 +1230,7 @@
       const p = state.placements.find((x) => x.id === pl.id);
       const curDay = p && state.days.find((d) => d.slots.some((s) => s.id === p.slotId));
       const sameDay = curDay && curDay.id === day.id;
-      if (!sameDay && !fashion) { store.movePlacementToDay(pl.id, day.id); return; }
+      if (!sameDay && !fashion) { setMoveTimeFor({ id: pl.id }); return; } // 이 날짜의 시간대 칩으로 확인 후 이동 (원래 시간 복제 방지)
       if (fashion) setPartPick({ pid: pl.id }); // 어느 부에 넣을지 선택 (다른 날짜에서 와도 동일)
       else setMoveTimeFor({ id: pl.id });
     }
@@ -1250,7 +1250,7 @@
             <button onClick=${() => setStatusOpen(true)} class="hover:text-brand" title="이 날짜를 미운영(결방)으로 표기 / 해제">${day.status === 'off' ? '미운영 해제' : '미운영'}</button>
             ${fashion && html`<button onClick=${() => setPartOpen(true)} class="hover:text-brand" title="이 날짜의 상품을 1부·2부…로 한번에 배분">🧩 부 나누기</button>`}
             ${useBands && html`<button onClick=${() => setShowExt(!showExt)} class="hover:text-brand" title="고정 시간띠 앞뒤의 확장 시간대 보기/숨기기">확장 ${showExt ? '▴' : '▾'}</button>`}
-            ${!fashion && html`<button onClick=${() => setAddOpen(true)} class="hover:text-brand">+ 시간대</button>`}
+            <button onClick=${() => setAddOpen(true)} class="hover:text-brand" title=${fashion ? '본방 부와 별도의 시간 회차(아침 방송 등) 추가 — 확장으로 표시' : '시간대 추가'}>+ 시간대</button>
             ${fashion && html`<button onClick=${() => store.addSlot(day.id, { order: true })} class="hover:text-brand" title="순번(1부·2부…) 추가 — 같은 날 다른 시간 방송은 '+ 편성일 추가'에서 만드세요">+ 순번</button>`}
             <button onClick=${() => {
                 const nP = state.placements.filter((x) => day.slots.some((sl) => sl.id === x.slotId)).length;
@@ -1314,6 +1314,7 @@
           : (sortedSlots.length === 0
             ? html`<div class="text-[12px] text-slate-400 py-3 text-center">${fashion ? '순번이 없습니다. “+ 상품” 또는 “+ 순번”으로 추가하세요.' : '시간대가 없습니다. “+ 상품” 또는 “+ 시간대”로 추가하세요.'}</div>`
             : sortedSlots.map((s) => html`<${SlotCell} key=${s.id} state=${state} day=${day} slot=${s} simple=${simple}
+              ext=${fashion && !!s.start}
               onCtxMenu=${(x, y) => setCtxMenu({ x, y, kind: 'slot', slot: s })} />`))}
         </div>
         ${statusOpen && html`<${DayStatusModal} state=${state} day=${day} onClose=${() => setStatusOpen(false)} />`}
@@ -1359,6 +1360,10 @@
                   }, true)}`
                 : html`
                   ${item('➕ 이 시간대에 상품 추가', () => setSlotAddFor(ctxMenu.slot))}
+                  ${!state.placements.some((pp) => pp.slotId === ctxMenu.slot.id) && item('❓ 미정으로 표기 (최종편성안 연동)', () => {
+                    const np = store.addPlacement(ctxMenu.slot.id, { productName: '미정', teamId: 'etc' });
+                    if (np) store.updatePlacementContent(np.id, { pending: true });
+                  })}
                   ${ctxMenu.slot.start && ctxMenu.slot.end && item('⊟ 시간 분할', () => setSplitFor(ctxMenu.slot))}
                   ${item('✕ 시간대 삭제', () => {
                     const n = state.placements.filter((x) => x.slotId === ctxMenu.slot.id).length;
@@ -1807,9 +1812,9 @@
                   ? html`<div class="text-[12px] text-slate-400 py-3 text-center">이 달에는 편성일이 없습니다.${sec.center ? ' “+ 편성일 추가”로 추가하세요.' : ''}</div>`
                   : html`<div class="space-y-4">
                       ${groupByWeek(sec.days).map(([wk, wdays]) => html`
-                        <div key=${wk} class="flex flex-wrap gap-3 items-start">
+                        <div key=${wk} class="grid sm:grid-cols-2 gap-3 items-start">
                           ${wdays.map((d) => html`
-                            <div class="w-full sm:flex-1 sm:min-w-[280px]">
+                            <div class="min-w-0">
                               <${DayBlock} state=${state} day=${d} simple=${simple} />
                             </div>`)}
                         </div>`)}
@@ -2504,8 +2509,12 @@
     function save() {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { alert('날짜를 선택하세요.'); return; }
       const ok = /^\d{1,2}:\d{2}$/.test(start) && /^\d{1,2}:\d{2}$/.test(end);
-      if (dups.length && !ok) { alert('같은 날짜에 이미 방송이 있습니다 — 추가 방송의 시작·종료 시간을 입력하세요.'); return; }
-      store.addDay(date, { allowDup: dups.length > 0, airTime: ok ? `${start}~${end}` : undefined });
+      if (dups.length) { // 같은 날짜가 이미 있으면 그 날짜 블록에 시간대로 붙임 (날짜 행을 늘리지 않음)
+        if (!ok) { alert('같은 날짜에 이미 방송이 있습니다 — 추가할 시간의 시작·종료(또는 노출분)를 입력하세요.'); return; }
+        store.addSlot(dups[0].id, { start, end });
+      } else {
+        store.addDay(date, { airTime: ok ? `${start}~${end}` : undefined });
+      }
       onClose();
     }
     return html`
@@ -2514,8 +2523,8 @@
           <input type="date" value=${date} onInput=${(e) => setDate(e.target.value)} class=${inputCls} />
         <//>
         ${dups.length > 0 && html`<div class="text-[12px] bg-amber-50 border border-amber-200 text-amber-800 rounded px-2.5 py-1.5">
-          ⚠ ${date} (${wdName})에는 이미 방송이 있습니다${dups.some((d) => d.airTime) ? ` (기존 ${dups.map((d) => d.airTime || '시간 미정').join(', ')})` : ''}.<br/>
-          <b>추가 방송의 시간을 넣으면 같은 날짜에 별도 편성일 행이 생깁니다</b> — 예: 8/8 08:20~10:25 + 8/8 22:30~01:00.</div>`}
+          ⚠ ${date} (${wdName})에는 이미 편성일이 있습니다${dups.some((d) => d.airTime) ? ` (방송 ${dups.map((d) => d.airTime || '시간 미정').join(', ')})` : ''}.<br/>
+          <b>시간을 넣으면 그 날짜 블록에 시간대로 추가됩니다</b> — 예: 영스타일 8/26에 20:45~21:45 추가.</div>`}
         <${Field} label=${dups.length ? '추가 방송 시간 *' : '방송 시간 (선택)'}>
           <div class="flex items-center gap-2 flex-wrap">
             <${TimeInput} value=${start} onChange=${onStart} className="w-24 text-[13px] px-2 py-1.5 rounded border border-slate-300 focus:border-brand outline-none" />
