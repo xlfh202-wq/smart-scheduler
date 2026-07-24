@@ -1288,6 +1288,27 @@
               detail: part ? `${part}부로 지정` : '부(순번) 지정 해제' });
         emit();
       },
+      // 빈 시간대의 미정 표기 — '이 시간에 뭘 갈지 미정' 상태 (슬롯 플래그, 최종편성안 빈 행에도 표시)
+      markSlotUndecided(dayId, { slotId, start, end, on }) {
+        const day = state.days.find((d) => d.id === dayId);
+        if (!day) return;
+        let slot = slotId ? day.slots.find((s) => s.id === slotId) : null;
+        if (!slot && start && end) { slot = ensureSlotOnDay(day, start, end); slot.manual = true; }
+        if (!slot) return;
+        if (on) slot.undecided = true; else delete slot.undecided;
+        log({ action: '미정표기', detail: `${day.date} ${slot.start ? slot.start + '~' + slot.end : (slot.label || '')} 시간대 ${on ? '미정' : '미정 해제'}` });
+        emit();
+      },
+      // 미정 표기/해제 (일괄) — '이 상품으로 갈지 미정' 상태. 최종편성안 미정 체크박스와 동일 필드(pending)
+      setPending(placementIds, pending) {
+        let n = 0;
+        (placementIds || []).forEach((id) => {
+          const p = state.placements.find((x) => x.id === id);
+          if (p && !!p.pending !== !!pending) { p.pending = !!pending; stamp(p); n++; }
+        });
+        if (n) { log({ action: '미정표기', detail: `${pending ? '미정' : '확정'} 표기 ${n}건` }); emit(); }
+        return n;
+      },
       updatePlacementMeta(placementId, patch) {
         const p = state.placements.find((x) => x.id === placementId);
         if (!p) return;

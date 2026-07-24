@@ -223,7 +223,7 @@
         onDragStart=${(e) => drag.start(e, 'placement', p.id)}
         onClick=${() => { setStartEdit(false); setInfo(true); }} title="클릭하면 상세 정보 · ✎ 로 바로 수정"
         onContextMenu=${(e) => { e.preventDefault(); e.stopPropagation(); setCtx({ x: e.clientX, y: e.clientY }); }}
-        class=${`card-drag group relative ${simple ? 'w-[168px]' : 'w-[152px]'} rounded-md border border-slate-200 bg-white px-1.5 py-1 shadow-sm hover:shadow hover:border-brand transition`}
+        class=${`card-drag group relative ${simple ? 'w-[168px]' : 'w-[152px]'} rounded-md border px-1.5 py-1 shadow-sm hover:shadow hover:border-brand transition ${p.pending ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200'}`}
         style=${{ borderLeft: `4px solid ${team.color}` }}>
         <div class="flex items-start justify-between gap-0.5">
           <div class="min-w-0 flex-1">
@@ -234,6 +234,7 @@
                   title="세부 시간 — 클릭해 시간 조정">⏱ ${subTime}</button>`
               : html`<div class="text-[10px] font-semibold text-amber-700 tabular-nums" title="세부 시간 (고정 띠 안에 자동 귀속)">⏱ ${subTime}</div>`)}
             <div class="mt-0.5 flex flex-wrap items-center gap-1">
+              ${p.pending && html`<${Badge} color="#d97706" title="미정 — 이 상품으로 갈지 아직 안 정해짐 (최종편성안 미정과 연동)">❓ 미정<//>`}
               <${Badge} color=${team.color}>${team.name}<//>
               ${!simple && items.length > 1 && html`<${Badge} color="#7c3aed" title="동시 노출 착장 수">동시 ${items.length}착장<//>`}
               ${!simple && det.isNew && html`<${Badge} color="#0891b2">신상품<//>`}
@@ -273,6 +274,7 @@
                 style=${{ left: Math.min(ctx.x, window.innerWidth - 272) + 'px', top: Math.min(ctx.y, window.innerHeight - 140) + 'px' }}
                 onClick=${(e) => e.stopPropagation()}>
                 <div class="px-3 py-1 text-[11px] text-ink-soft border-b border-slate-100 truncate">${p.productName}</div>
+                ${item(p.pending ? '✅ 미정 해제 (확정)' : '❓ 미정 표기 (갈지 말지 미정)', () => store.setPending([p.id], !p.pending))}
                 ${onNudge && item('⬅ 앞으로 이동 (띠 안 순서)', () => onNudge(p, -1))}
                 ${onNudge && item('➡ 뒤로 이동 (띠 안 순서)', () => onNudge(p, 1))}
                 ${item('🚫 편성 제외 (입찰 풀로 복귀)', () => {
@@ -808,6 +810,9 @@
     const compColor = compete >= 3 ? '#dc2626' : compete === 2 ? '#f59e0b' : null;
     const splitShare = !compColor && teamsIn.size >= 2; // 여러 팀이 시간을 나눠 쓰는 중
     const dur = isExt ? 0 : (U.toMin(band.end) - U.toMin(band.start) + 1440) % 1440;
+    // 빈 띠의 '시간대 미정' 상태 (백킹 슬롯 undecided)
+    const backSlot = slots.find((s) => !isExt && s.start === band.start && s.end === band.end) || slots[0];
+    const slotUndecided = placements.length === 0 && backSlot && backSlot.undecided;
     // 카드에 표시할 세부 시간 (띠와 완전히 같으면 생략)
     const subTimeOf = (p) => {
       const sl = slots.find((x) => x.id === p.slotId);
@@ -877,6 +882,8 @@
           ${splitShare && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: '#0284c722', color: '#0284c7' }}
             title="여러 팀이 부(순번)·노출분으로 시간을 나눠 쓰는 띠 — 경쟁이 아닙니다">
             <span class="w-1.5 h-1.5 rounded-full shrink-0" style=${{ background: '#0284c7' }}></span>분할 ${teamsIn.size}팀</span>`}
+          ${slotUndecided && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: '#d9770622', color: '#d97706' }}
+            title="이 시간에 뭘 갈지 미정 — 우클릭으로 해제">❓ 미정</span>`}
         </div>
         ${(() => { // 확장 행: 편성이 비어 있는 시간대도 칩으로 표시 — 최종편성안과 동일하게 보이도록
           const emptySlots = isExt ? slots.filter((sl) => sl.start && sl.end && sl.start !== sl.end
@@ -965,6 +972,7 @@
     const compete = ci.compete;
     const compColor = compete >= 3 ? '#dc2626' : compete === 2 ? '#f59e0b' : null;
     const splitShare = !compColor && teamsIn.size >= 2;
+    const slotUndecided = placements.length === 0 && slot.undecided;
 
     function onDrop(e) {
       e.preventDefault(); e.stopPropagation(); setOver(false); // 슬롯에 놓으면 여기서 처리(날짜 드롭존과 분리)
@@ -991,6 +999,8 @@
           ${splitShare && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: '#0284c722', color: '#0284c7' }}
             title="여러 팀이 부(순번)·노출분으로 시간을 나눠 쓰는 시간대 — 경쟁이 아닙니다">
             <span class="w-1.5 h-1.5 rounded-full shrink-0" style=${{ background: '#0284c7' }}></span>분할 ${teamsIn.size}팀</span>`}
+          ${slotUndecided && html`<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1 rounded whitespace-nowrap self-start" style=${{ background: '#d9770622', color: '#d97706' }}
+            title="이 시간에 뭘 갈지 미정 — 우클릭으로 해제">❓ 미정</span>`}
           <div class="mt-auto flex items-center gap-0.5 text-ink-soft">
             ${slot.start && slot.end && html`<button title="시간 분할" onClick=${() => setSplitOpen(true)} class="hover:text-brand text-xs px-0.5">⊟</button>`}
             <button title="시간대 삭제" onClick=${() => { const n = state.placements.filter((x) => x.slotId === slot.id).length;
@@ -1351,6 +1361,20 @@
                 <div class="px-3 py-1 text-[11px] text-ink-soft border-b border-slate-100">${head}</div>
                 ${ctxMenu.kind === 'band' ? html`
                   ${item('➕ 상품 추가 (이 띠 시간)', () => { setQuickInit(ctxMenu.band.start); setQuickOpen(true); })}
+                  ${(() => {
+                    const ids = new Set((ctxMenu.band.slots || []).map((s) => s.id));
+                    const pls = state.placements.filter((pp) => ids.has(pp.slotId));
+                    if (pls.length) {
+                      const anyConfirmed = pls.some((pp) => !pp.pending);
+                      return item(anyConfirmed ? `❓ 이 띠 상품 미정 표기 (${pls.length}건)` : `✅ 이 띠 상품 미정 해제 (${pls.length}건)`,
+                        () => store.setPending(pls.map((pp) => pp.id), anyConfirmed));
+                    }
+                    // 빈 띠: 시간대 자체를 미정으로 표기 (이 시간에 뭘 갈지 미정)
+                    const back = (ctxMenu.band.slots || []).find((s) => s.start === ctxMenu.band.start && s.end === ctxMenu.band.end) || (ctxMenu.band.slots || [])[0];
+                    const on = !(back && back.undecided);
+                    return item(on ? '❓ 이 시간대 미정 표기 (빈 시간)' : '✅ 이 시간대 미정 해제',
+                      () => store.markSlotUndecided(day.id, { slotId: back && back.id, start: ctxMenu.band.start, end: ctxMenu.band.end, on }));
+                  })()}
                   ${item('⏱ 시간띠 조정 — 줄이면 남는 구간 자동 띠', () => setBandEdit({ idx: ctxMenu.idx, start: ctxMenu.band.start, end: ctxMenu.band.end }))}
                   ${item('🗑 이 시간띠 삭제 (이 날짜만)', () => {
                     if (!confirm(`${ctxMenu.band.start}~${ctxMenu.band.end} 시간띠를 삭제할까요?\n이 구간의 상품은 삭제되지 않고 입찰 풀로 돌아갑니다.`)) return;
@@ -1359,6 +1383,14 @@
                   }, true)}`
                 : ctxMenu.kind === 'ext' ? html`
                   ${item('➕ 상품 추가 (이 확장 시간)', () => { const di = extDropInit(ctxMenu.row); setQuickInit(di.band ? di.band[0] : (di.start || '')); setQuickOpen(true); })}
+                  ${(() => {
+                    const ids = new Set((ctxMenu.row.slots || []).map((s) => s.id));
+                    const pls = state.placements.filter((pp) => ids.has(pp.slotId));
+                    if (!pls.length) return '';
+                    const anyConfirmed = pls.some((pp) => !pp.pending);
+                    return item(anyConfirmed ? `❓ 이 확장 상품 미정 표기 (${pls.length}건)` : `✅ 이 확장 상품 미정 해제 (${pls.length}건)`,
+                      () => store.setPending(pls.map((pp) => pp.id), anyConfirmed));
+                  })()}
                   ${item('⏱ 확장 시간 조정', () => setExtEdit(ctxMenu.extKind))}
                   ${item('🗑 확장 삭제 (이 날짜만)', () => {
                     const w = ctxMenu.row.win;
@@ -1368,10 +1400,17 @@
                   }, true)}`
                 : html`
                   ${item('➕ 이 시간대에 상품 추가', () => setSlotAddFor(ctxMenu.slot))}
-                  ${!state.placements.some((pp) => pp.slotId === ctxMenu.slot.id) && item('❓ 미정으로 표기 (최종편성안 연동)', () => {
-                    const np = store.addPlacement(ctxMenu.slot.id, { productName: '미정', teamId: 'etc' });
-                    if (np) store.updatePlacementContent(np.id, { pending: true });
-                  })}
+                  ${(() => {
+                    const pls = state.placements.filter((pp) => pp.slotId === ctxMenu.slot.id);
+                    if (pls.length) {
+                      const anyConfirmed = pls.some((pp) => !pp.pending);
+                      return item(anyConfirmed ? `❓ 이 시간대 상품 미정 표기 (${pls.length}건)` : `✅ 이 시간대 상품 미정 해제 (${pls.length}건)`,
+                        () => store.setPending(pls.map((pp) => pp.id), anyConfirmed));
+                    }
+                    const on = !ctxMenu.slot.undecided;
+                    return item(on ? '❓ 이 시간대 미정 표기 (빈 시간)' : '✅ 이 시간대 미정 해제',
+                      () => store.markSlotUndecided(day.id, { slotId: ctxMenu.slot.id, on }));
+                  })()}
                   ${ctxMenu.slot.start && ctxMenu.slot.end && item('⊟ 시간 분할', () => setSplitFor(ctxMenu.slot))}
                   ${item('✕ 시간대 삭제', () => {
                     const n = state.placements.filter((x) => x.slotId === ctxMenu.slot.id).length;
@@ -2479,7 +2518,9 @@
                           ${(p.items && p.items.length > 1) && html`<ul class="px-2 pb-1 text-[11px] text-ink-soft">${p.items.map((it, k) => html`<li key=${k}>· ${it}</li>`)}</ul>`}
                           <div class="px-2 pb-1 text-[10px] text-slate-400">${teamOf(state, p.teamId).name}</div>
                         </div>`
-                        : html`<span class="px-2 text-slate-300">—</span>`}
+                        : (r.slot && r.slot.undecided
+                          ? html`<span class="px-2 text-[12px] font-bold text-amber-600">❓ 미정 (편성 미확정)</span>`
+                          : html`<span class="px-2 text-slate-300">—</span>`)}
                     </td>
                     <td class=${`${td} p-0`} data-col="group">${p ? Cell(det.groupCode, (val) => store.updatePlacementContent(p.id, { detail: { groupCode: val } }), { ph: '그룹코드', color: 'tabular-nums' }) : ''}</td>
                     ${!slim && html`
