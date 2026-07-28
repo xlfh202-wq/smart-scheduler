@@ -2250,7 +2250,7 @@
           if (error) disableServer(error.message);
           else { lastServerRev = rev; status('saved'); maybeAutoBackup(); }
         } catch (e) { disableServer(e.message); }
-      }, 600);
+      }, 2500); // 저장 디바운스: 연속 수정을 묶어 업로드·실시간 브로드캐스트 횟수 절감 (트래픽 대책, 기존 600ms)
     });
 
     /* ----- 백업/복원 (app_state 테이블에 id='backup_...' 행으로 보관) ----- */
