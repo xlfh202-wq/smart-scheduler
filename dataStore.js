@@ -1027,6 +1027,13 @@
               detail: locked ? '전체 MD 입찰 잠금 (편성 조정 중)' : '전체 MD 입찰 잠금 해제' });
         emit();
       },
+      // 관리자 전용 모드: 켜면 관리자 외 모든 역할의 접속·로그인이 차단됨 (기존 세션은 강제 로그아웃)
+      setAdminOnly(on) {
+        if (on) state.adminOnly = { by: currentUser || '', ts: nowISO() };
+        else delete state.adminOnly;
+        log({ action: '접근제한', detail: on ? '관리자 전용 모드 ON — MD·PD·편성팀 접속 차단' : '관리자 전용 모드 해제' });
+        emit();
+      },
       // 편성 잠금(관리자 전용): 잠그면 입찰보드·최종편성안 조정을 관리자만 할 수 있음 (전체 프로그램·전체 월)
       setBoardLock(locked) {
         if (locked) state.boardLockAll = { by: currentUser || '', ts: nowISO() };

@@ -4072,7 +4072,7 @@
     } catch (e) {}
     return null;
   }
-  function LoginGate({ onLogin, teams, pdTeams }) {
+  function LoginGate({ onLogin, teams, pdTeams, adminOnly }) {
     const roles = window.AUTH.roles;
     const [role, setRole] = useState('pd');
     const [team, setTeam] = useState('');
@@ -4089,6 +4089,7 @@
     const needsName = role !== 'admin';
     function submit(e) {
       e && e.preventDefault();
+      if (adminOnly && role !== 'admin') { setErr('현재 관리자 전용 모드입니다 — 관리자만 접속할 수 있습니다.'); return; }
       if (needsTeam && !team) { setErr('팀(소속)을 선택하세요.'); return; }
       if (needsName && !name.trim()) { setErr('이름을 입력하세요.'); return; }
       if (pw !== r.password) { setErr('비밀번호가 올바르지 않습니다.'); return; }
@@ -4107,11 +4108,14 @@
               <div class="text-[11px] text-ink-soft">롯데홈쇼핑 방송제작부문</div>
             </div>
           </div>
+          ${adminOnly && html`<div class="mt-3 text-[12px] bg-purple-50 border border-purple-200 text-purple-800 rounded px-2.5 py-1.5 font-semibold">
+            🚷 현재 관리자 전용 모드입니다 — 관리자 외 접속이 일시 차단되었습니다.</div>`}
           <div class="text-[12px] font-medium text-ink-soft mt-4 mb-1.5">역할 선택</div>
           <div class="grid grid-cols-2 gap-2">
             ${Object.entries(roles).map(([key, cfg]) => html`
-              <button type="button" key=${key} onClick=${() => { setRole(key); setTeam(''); setErr(''); }}
-                class=${`rounded-lg border px-2 py-2 text-center transition ${role === key ? 'border-transparent text-white shadow' : 'border-slate-300 bg-white text-ink hover:border-slate-400'}`}
+              <button type="button" key=${key} disabled=${adminOnly && key !== 'admin'}
+                onClick=${() => { setRole(key); setTeam(''); setErr(''); }}
+                class=${`rounded-lg border px-2 py-2 text-center transition ${role === key ? 'border-transparent text-white shadow' : 'border-slate-300 bg-white text-ink hover:border-slate-400'} ${adminOnly && key !== 'admin' ? 'opacity-35 cursor-not-allowed' : ''}`}
                 style=${role === key ? { background: cfg.color } : {}}>
                 <div class="font-bold text-sm">${cfg.label}</div>
                 <div class=${`text-[10px] leading-tight mt-0.5 ${role === key ? 'text-white/85' : 'text-ink-soft'}`}>${cfg.desc}</div>
@@ -4291,8 +4295,17 @@
       setAuth(null);
     }
 
+    // 관리자 전용 모드: 비관리자 세션은 즉시 강제 로그아웃
+    useEffect(() => {
+      if (auth && auth.role !== 'admin' && state.adminOnly) {
+        try { localStorage.removeItem(window.AUTH.storageKey); } catch (e) {}
+        store.setUser(null);
+        setAuth(null);
+      }
+    }, [auth, state.adminOnly]);
+
     // 미로그인 → 로그인 화면 (훅은 모두 위에서 실행됨 — 순서 유지)
-    if (!auth) return html`<${LoginGate} onLogin=${doLogin} teams=${state.teams} pdTeams=${state.pdTeams} />`;
+    if (!auth) return html`<${LoginGate} onLogin=${doLogin} teams=${state.teams} pdTeams=${state.pdTeams} adminOnly=${!!state.adminOnly} />`;
 
     return html`
       <div class="flex flex-col min-h-screen md:h-screen">
@@ -4380,6 +4393,13 @@
                 }}
                 class=${`text-[13px] px-3 py-1.5 rounded border whitespace-nowrap shrink-0 ${state.boardLockAll ? 'border-purple-400 text-purple-800 bg-purple-50' : 'border-slate-300 bg-white hover:border-purple-500 hover:text-purple-700'}`}
                 title="입찰보드·최종편성안을 관리자만 조정하도록 잠금 (전체 프로그램·전체 월)">${state.boardLockAll ? '🔓 편성잠금 해제' : '🔒 편성 잠금'}</button>`}
+              ${roleCfg.isAdmin && html`<button onClick=${() => {
+                  const on = !state.adminOnly;
+                  if (on && !confirm('관리자 전용 모드를 켤까요?\nMD·PD·편성팀은 즉시 로그아웃되고 다시 접속할 수 없습니다. (관리자만 사용 가능)')) return;
+                  store.setAdminOnly(on);
+                }}
+                class=${`text-[13px] px-3 py-1.5 rounded border whitespace-nowrap shrink-0 ${state.adminOnly ? 'border-rose-400 text-rose-700 bg-rose-50' : 'border-slate-300 bg-white hover:border-rose-400 hover:text-rose-600'}`}
+                title="관리자 외 모든 역할의 접속 차단 (기존 세션 강제 로그아웃)">${state.adminOnly ? '🚷 전용모드 해제' : '🚷 관리자 전용'}</button>`}
               <button onClick=${() => setHistory(true)}
                 class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0">
                 변경 이력 <span class="text-[11px] text-ink-soft">(${state.changeLog.length}${state.changeLog.length >= 200 ? '+' : ''})</span>
