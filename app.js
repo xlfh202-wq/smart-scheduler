@@ -2378,6 +2378,13 @@
             <button onClick=${() => { close(); fn(); }}
               class=${`w-full text-left px-3 py-1.5 hover:bg-slate-100 ${danger ? 'text-rose-600' : 'text-ink'}`}>${label}</button>`;
           const dnum = Number(r.day.date.slice(8));
+          // 같은 날 안 위/아래 상품과 시간(부) 맞바꿈 — 세부 시간이 달라도 통째로 교환
+          const dayProds = rows.filter((x) => x.day === r.day && x.p && !x.off && !x.mhead && !x.mcollapse);
+          const pi = p ? dayProds.findIndex((x) => x.p.id === p.id) : -1;
+          const nudgeFinal = (dir) => {
+            const q = dayProds[pi + dir];
+            if (q) store.swapPlacementSlots(p.id, q.p.id);
+          };
           return html`
             <div class="fixed inset-0 z-50" onClick=${close} onContextMenu=${(e) => { e.preventDefault(); close(); }}>
               <div class="absolute bg-white rounded-lg shadow-xl border border-slate-200 py-1 w-56 text-[13px]"
@@ -2385,6 +2392,8 @@
                 onClick=${(e) => e.stopPropagation()}>
                 <div class="px-3 py-1 text-[11px] text-ink-soft border-b border-slate-100">
                   ${month}/${dnum}(${U.WEEKDAY_KO[r.day.weekday]}) ${slotName(r.slot)}${p ? ' · ' + p.productName : ''}</div>
+                ${p && pi > 0 && item('⬆ 앞으로 이동 — 윗 상품과 시간 맞바꿈', () => nudgeFinal(-1))}
+                ${p && pi >= 0 && pi < dayProds.length - 1 && item('⬇ 뒤로 이동 — 아랫 상품과 시간 맞바꿈', () => nudgeFinal(1))}
                 ${item(`➕ ${month}/${dnum}에 행 추가 (시간·상품)`, () => setQuickAddDay(r.day))}
                 ${item(`🚫 ${month}/${dnum} 미운영(결방) 표기`, () => setStatusDay(r.day))}
                 ${isFashionProg && item('🧩 부 나누기 (1부~N부 한번에 배분)', () => setPartAssignDay(r.day))}
