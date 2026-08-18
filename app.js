@@ -2004,7 +2004,7 @@
   function ImgColsModal({ slim, onClose, onSave }) {
     const ALL = [
       ['time', '시간'], ['dur', '노출분'], ['status', '상태'], ['product', '상품명'], ['group', '그룹코드'],
-      ['note', '내용/이슈'], ['comp', '구성'], ['prep', '준비물량'], ['price', '가격'], ['margin', '마진'],
+      ['note', '내용/이슈'], ['comp', '구성'], ['prep', '준비물량(금액)'], ['prepqty', '준비수량(실수량)'], ['price', '가격'], ['margin', '마진'],
       ['recent', '최근 달성률'], ['pd', 'PD'], ['host', '쇼호스트'], ['studio', '스튜디오'], ['memo', '비고(PD)'],
     ].filter(([k]) => !slim || ['time', 'dur', 'product', 'group', 'pd', 'host', 'studio'].includes(k));
     const [sel, setSel] = useState(() => {
@@ -2070,7 +2070,7 @@
       if (aEnd) out.push([base[base.length - 1][1], aEnd, 'ext']);
       return out;
     };
-    const COLS = (readOnly && !full ? 8 : 16) + (hasBandCol ? 1 : 0); // 표 전체 열 수 (colspan용)
+    const COLS = (readOnly && !full ? 8 : 17) + (hasBandCol ? 1 : 0); // 표 전체 열 수 (colspan용)
     const [quickAddDay, setQuickAddDay] = useState(null); // 행 추가(시간·상품)
     const [addSlotDay, setAddSlotDay] = useState(null);   // 시간대만 추가
     const [statusDay, setStatusDay] = useState(null);     // 미운영(결방) 표기 팝업
@@ -2087,7 +2087,7 @@
       const bandH = hasBandCol ? ['띠'] : [];
       const header = ['방송일', '요일'].concat(bandH, slim
         ? ['시간', '상품명', '그룹코드', 'PD', '쇼호스트', '스튜디오']
-        : ['시간', '상태', '상품명', '그룹코드', '내용/타이틀', '구성', '준비물량', '가격', '마진', '최근달성률', 'PD 코멘트', 'PD', '쇼호스트', '스튜디오']);
+        : ['시간', '상태', '상품명', '그룹코드', '내용/타이틀', '구성', '준비물량(금액)', '준비수량(실수량)', '가격', '마진', '최근달성률', 'PD 코멘트', 'PD', '쇼호스트', '스튜디오']);
       const aoa = [header]; const merges = []; let ri = 1;
       rows.forEach((r) => {
         if (r.mhead || r.mcollapse || r.day.date.slice(0, 7) !== centerKey) return; // 엑셀은 이번 달만
@@ -2117,7 +2117,7 @@
             timeCell, p ? (p.pending ? '미정' : '확정') : '',
             p ? ((p.productName || '') + items) : '', p ? (det.groupCode || '') : '',
             p ? (det.note || '') : '', p ? (det.comp || '') : '',
-            p ? (det.prep || '') : '', p ? (det.price || '') : '', p ? (det.margin || '') : '',
+            p ? (det.prep || '') : '', p ? (det.prepQty || '') : '', p ? (det.price || '') : '', p ? (det.margin || '') : '',
             p ? recentText(det.recent) : '', p ? (p.memo || '') : '',
             p ? (p.pd || '') : '', p ? (p.host || '') : '', p ? (p.studio || '') : '',
           ]));
@@ -2426,7 +2426,7 @@
           <div class="px-3 py-2 border-b-2 border-brand text-[13px] font-bold text-ink">
             ${prog.name} · ${year}년 ${month}월 최종편성안 <span class="font-normal text-ink-soft">(총 ${total}편성)</span>
           </div>
-          <table class=${`w-full ${slim ? 'min-w-[830px]' : 'min-w-[1610px]'} text-[12px] border-collapse`}>
+          <table class=${`w-full ${slim ? 'min-w-[830px]' : 'min-w-[1690px]'} text-[12px] border-collapse`}>
             <thead class="sticky top-0 z-20">
               <tr>
                 <th class=${th} style=${{ minWidth: '70px' }}>방송일</th>
@@ -2439,7 +2439,8 @@
                 ${!slim && html`
                   <th class=${th} style=${{ minWidth: '170px' }} data-col="note">내용 / 타이틀</th>
                   <th class=${th} style=${{ minWidth: '130px' }} data-col="comp">구성</th>
-                  <th class=${th} style=${{ minWidth: '78px' }} data-col="prep">준비물량</th>
+                  <th class=${th} style=${{ minWidth: '78px' }} data-col="prep">준비물량<br/><span class="font-normal opacity-80">(금액)</span></th>
+                  <th class=${th} style=${{ minWidth: '78px' }} data-col="prepqty">준비수량<br/><span class="font-normal opacity-80">(실수량)</span></th>
                   <th class=${th} style=${{ minWidth: '100px' }} data-col="price">가격</th>
                   <th class=${th} style=${{ minWidth: '64px' }} data-col="margin">마진</th>
                   <th class=${th} style=${{ minWidth: '128px' }} data-col="recent">최근 3회 달성률</th>
@@ -2555,7 +2556,8 @@
                     <td class=${`${td} p-0`} data-col="note">${p ? html`${Cell(det.note, (val) => store.updatePlacementContent(p.id, { detail: { note: val } }), { ph: '내용/타이틀…' })}
                       <div class="border-t border-dashed border-rose-200">${Cell(det.issue, (val) => store.updatePlacementContent(p.id, { detail: { issue: val } }), { ph: '이슈/특이사항…', color: 'text-rose-500' })}</div>` : ''}</td>
                     <td class=${`${td} p-0`} data-col="comp">${p ? Cell(det.comp, (val) => store.updatePlacementContent(p.id, { detail: { comp: val } }), { ph: '구성…' }) : ''}</td>
-                    <td class=${`${td} p-0`} data-col="prep">${p ? Cell(det.prep, (val) => store.updatePlacementContent(p.id, { detail: { prep: val } }), { ph: '00억…', color: 'tabular-nums' }) : ''}</td>
+                    <td class=${`${td} p-0`} data-col="prep">${p ? Cell(det.prep, (val) => store.updatePlacementContent(p.id, { detail: { prep: val } }), { ph: '8.09억…', color: 'tabular-nums' }) : ''}</td>
+                    <td class=${`${td} p-0`} data-col="prepqty">${p ? Cell(det.prepQty, (val) => store.updatePlacementContent(p.id, { detail: { prepQty: val } }), { ph: '2400세트…', color: 'tabular-nums' }) : ''}</td>
                     <td class=${`${td} p-0`} data-col="price">${p ? Cell(det.price, (val) => store.updatePlacementContent(p.id, { detail: { price: val } }), { ph: '가격…', color: 'tabular-nums' }) : ''}</td>
                     <td class=${`${td} p-0`} data-col="margin">${p ? Cell(det.margin, (val) => store.updatePlacementContent(p.id, { detail: { margin: val } }), { ph: '마진…', color: 'tabular-nums' }) : ''}</td>
                     <td class=${`${td} p-0`} data-col="recent">${p ? html`<${Recent3Cell} value=${det.recent} readOnly=${readOnly}
