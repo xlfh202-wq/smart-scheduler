@@ -58,6 +58,16 @@ window.AUTH = {
       color: '#7c3aed',
     },
   },
+  /* ── 이메일 인증 로그인 (공용 비밀번호 대체) ─────────────────────
+   * 아래 allowed 목록의 이메일만 인증번호(메일 발송)를 받을 수 있습니다.
+   * 이메일 → 역할/팀/이름 매핑: 인증 성공 시 해당 프로필로 자동 입장.
+   * 목록 추가: '이메일': { role: 'md'|'pd'|'pgm'|'admin', team: '팀명', name: '이름' } */
+  emailAuth: {
+    enabled: true,
+    allowed: {
+      'sunghyun_kang@lotte.net': { role: 'admin', team: '', name: '강성현' },
+    },
+  },
   // PD 소속 구분 (로그인 드롭다운)
   pdTeams: ['리빙PD팀', '식품PD팀', '잡화뷰티PD팀', '패션레포츠PD팀'],
   // MD 로그인 팀 목록 (고정 리스트 — 자유롭게 추가/수정하세요)

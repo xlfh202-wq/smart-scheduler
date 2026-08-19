@@ -4085,12 +4085,46 @@
   }
   function LoginGate({ onLogin, teams, pdTeams, adminOnly }) {
     const roles = window.AUTH.roles;
+    const emailCfg = window.AUTH.emailAuth || {};
+    const [mode, setMode] = useState(emailCfg.enabled ? 'email' : 'pw'); // email = 이메일 인증, pw = 공용 비밀번호
+    const [email, setEmail] = useState('');
+    const [code, setCode] = useState('');
+    const [sent, setSent] = useState(false);     // 인증번호 발송됨
+    const [busy, setBusy] = useState(false);
     const [role, setRole] = useState('pd');
     const [team, setTeam] = useState('');
     const [name, setName] = useState('');
     const [pw, setPw] = useState('');
     const [err, setErr] = useState('');
     const r = roles[role];
+    const emailProfile = (em) => {
+      const key = Object.keys(emailCfg.allowed || {}).find((k) => k.toLowerCase() === String(em || '').trim().toLowerCase());
+      return key ? { key, ...emailCfg.allowed[key] } : null;
+    };
+    async function sendCode() {
+      setErr('');
+      const prof = emailProfile(email);
+      if (!prof) { setErr('등록되지 않은 이메일입니다 — 관리자에게 등록을 요청하세요.'); return; }
+      if (adminOnly && prof.role !== 'admin') { setErr('현재 관리자 전용 모드입니다 — 관리자만 접속할 수 있습니다.'); return; }
+      if (!store.emailAuth) { setErr('서버 연결 후 사용할 수 있습니다. 잠시 후 다시 시도하세요.'); return; }
+      setBusy(true);
+      const res = await store.emailAuth.send(prof.key);
+      setBusy(false);
+      if (res.error) { setErr('발송 실패: ' + res.error); return; }
+      setSent(true);
+    }
+    async function verifyCode(e) {
+      e && e.preventDefault();
+      setErr('');
+      const prof = emailProfile(email);
+      if (!prof) { setErr('등록되지 않은 이메일입니다.'); return; }
+      if (!code.trim()) { setErr('메일로 받은 인증번호를 입력하세요.'); return; }
+      setBusy(true);
+      const res = await store.emailAuth.verify(prof.key, code);
+      setBusy(false);
+      if (res.error) { setErr('인증 실패: ' + (/expired|invalid/i.test(res.error) ? '인증번호가 틀렸거나 만료되었습니다. 다시 받아 시도하세요.' : res.error)); return; }
+      onLogin({ role: prof.role, team: prof.team || '', name: prof.name || prof.key, email: prof.key });
+    }
     // 팀 목록: MD = 관리되는 전체 입찰팀(팀 관리 반영), PD = 관리되는 PD 편성팀
     const teamList = role === 'md'
       ? Array.from(new Set((teams || []).map((t) => t.name)))
@@ -4121,6 +4155,36 @@
           </div>
           ${adminOnly && html`<div class="mt-3 text-[12px] bg-purple-50 border border-purple-200 text-purple-800 rounded px-2.5 py-1.5 font-semibold">
             🚷 현재 관리자 전용 모드입니다 — 관리자 외 접속이 일시 차단되었습니다.</div>`}
+          ${emailCfg.enabled && mode === 'email' && html`
+            <div class="mt-4">
+              <div class="text-[12px] font-medium text-ink-soft mb-1.5">📧 이메일 인증 로그인</div>
+              <label class="block">
+                <div class="text-[12px] font-medium text-ink-soft mb-1">회사 이메일 <span class="text-brand">*</span></div>
+                <div class="flex gap-2">
+                  <input type="email" value=${email} onInput=${(e) => { setEmail(e.target.value); setSent(false); setCode(''); }}
+                    class=${inputCls} placeholder="hong_gildong@lotte.net" autofocus disabled=${busy} />
+                  <button type="button" onClick=${sendCode} disabled=${busy || !email.trim()}
+                    class="shrink-0 px-3 py-2 rounded-lg text-[13px] font-semibold border border-brand text-brand hover:bg-brand hover:text-white disabled:opacity-40 whitespace-nowrap">
+                    ${busy && !sent ? '발송 중…' : sent ? '재발송' : '인증번호 받기'}</button>
+                </div>
+              </label>
+              ${sent && html`
+                <div class="mt-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800 rounded px-2.5 py-1.5">
+                  인증번호를 메일로 보냈습니다 — 받은편지함(스팸함 포함)을 확인하세요.</div>
+                <label class="block mt-2.5">
+                  <div class="text-[12px] font-medium text-ink-soft mb-1">인증번호 <span class="text-brand">*</span></div>
+                  <input value=${code} onInput=${(e) => setCode(e.target.value)} class=${`${inputCls} tracking-widest`}
+                    placeholder="메일로 받은 인증번호" autofocus disabled=${busy}
+                    onKeyDown=${(e) => { if (e.key === 'Enter') verifyCode(e); }} />
+                </label>
+                <button type="button" onClick=${verifyCode} disabled=${busy || !code.trim()}
+                  class="mt-3 w-full py-2 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark disabled:opacity-40">
+                  ${busy && sent ? '확인 중…' : '인증하고 입장'}</button>`}
+              ${err && html`<div class="mt-2 text-[12px] text-brand">${err}</div>`}
+              <button type="button" onClick=${() => { setMode('pw'); setErr(''); }}
+                class="mt-3 text-[12px] text-slate-400 hover:text-brand underline">공용 비밀번호로 입장 →</button>
+            </div>`}
+          ${!(emailCfg.enabled && mode === 'email') && html`
           <div class="text-[12px] font-medium text-ink-soft mt-4 mb-1.5">역할 선택</div>
           <div class="grid grid-cols-2 gap-2">
             ${Object.entries(roles).map(([key, cfg]) => html`
@@ -4159,6 +4223,8 @@
           <div class="mt-3 text-[11px] text-slate-400 leading-relaxed">
             팀·이름은 필수이며, 모든 수정 내역(변경 이력 · 카드 “마지막 수정”)에 자동 기록됩니다. 비밀번호 입력 후 Enter로도 입장됩니다.
           </div>
+          ${emailCfg.enabled && html`<button type="button" onClick=${() => { setMode('email'); setErr(''); }}
+            class="mt-2 text-[12px] text-slate-400 hover:text-brand underline">📧 이메일 인증으로 입장 →</button>`}`}
         </form>
         </div>
         <${MakerFooter} />

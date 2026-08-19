@@ -2319,6 +2319,26 @@
     }
     store._setBackupAPI({ now: doBackup, list: listBackups, restore: restoreBackup });
 
+    /* ----- 이메일 인증(OTP) 로그인 — Supabase Auth ----- */
+    store.emailAuth = {
+      // 인증번호 메일 발송 (허용 목록 검사는 로그인 화면에서 선행)
+      async send(email) {
+        try {
+          const { error } = await client.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
+          return error ? { error: error.message } : { ok: true };
+        } catch (e) { return { error: e.message }; }
+      },
+      // 인증번호 확인 — 성공 시 Supabase 세션은 즉시 해제(데이터 접근은 기존 공개키 유지)
+      async verify(email, token) {
+        try {
+          const { error } = await client.auth.verifyOtp({ email, token: String(token || '').trim(), type: 'email' });
+          if (error) return { error: error.message };
+          try { await client.auth.signOut(); } catch (e) {}
+          return { ok: true };
+        } catch (e) { return { error: e.message }; }
+      },
+    };
+
     /* ----- 편성 저장본 본문 분리 저장 (app_state snap_* 행 — 메인 문서 비대화 방지) ----- */
     const SNAP_PREFIX = 'snap_';
     // ── 변경 이력 아카이브: 문서에서 넘친 이력을 log_c_<ts> 행으로 보관 ──
