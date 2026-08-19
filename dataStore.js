@@ -2188,7 +2188,9 @@
    *  - 변경 시 디바운스 업서트, 다른 접속자에는 Realtime으로 즉시 반영
    * =================================================================== */
   function connectSupabase(store, cfg) {
-    const client = global.supabase.createClient(cfg.url, cfg.key);
+    // 인증 토큰이 URL로 전달되어도 무시(자동 세션 인식 차단) + 세션 비영속(OTP 확인 직후 폐기 방침과 일치)
+    const client = global.supabase.createClient(cfg.url, cfg.key,
+      { auth: { detectSessionInUrl: false, persistSession: false, autoRefreshToken: false } });
     let ready = false;
     let serverOk = true;   // 테이블 미생성 등으로 실패하면 false → 로컬 모드
     let timer = null;
