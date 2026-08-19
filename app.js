@@ -4083,27 +4083,25 @@
     } catch (e) {}
     return null;
   }
-  function LoginGate({ onLogin, teams, pdTeams, adminOnly }) {
-    const roles = window.AUTH.roles;
+  function LoginGate({ onLogin, adminOnly }) {
+    // 이메일 인증 전용 로그인 — 공용 비밀번호 방식은 보안상 제거(v201)
     const emailCfg = window.AUTH.emailAuth || {};
-    const [mode, setMode] = useState(emailCfg.enabled ? 'email' : 'pw'); // email = 이메일 인증, pw = 공용 비밀번호
-    const [email, setEmail] = useState('');
+    const DOMAIN = emailCfg.domain || 'lotte.net';
+    const [local, setLocal] = useState(''); // 이메일 @ 앞부분
     const [code, setCode] = useState('');
-    const [sent, setSent] = useState(false);     // 인증번호 발송됨
+    const [sent, setSent] = useState(false);
     const [busy, setBusy] = useState(false);
-    const [role, setRole] = useState('pd');
-    const [team, setTeam] = useState('');
-    const [name, setName] = useState('');
-    const [pw, setPw] = useState('');
     const [err, setErr] = useState('');
-    const r = roles[role];
-    const emailProfile = (em) => {
-      const key = Object.keys(emailCfg.allowed || {}).find((k) => k.toLowerCase() === String(em || '').trim().toLowerCase());
+    const fullEmail = () => `${String(local).trim().toLowerCase()}@${DOMAIN}`;
+    const profile = () => {
+      const em = fullEmail();
+      const key = Object.keys(emailCfg.allowed || {}).find((k) => k.toLowerCase() === em);
       return key ? { key, ...emailCfg.allowed[key] } : null;
     };
     async function sendCode() {
       setErr('');
-      const prof = emailProfile(email);
+      if (!String(local).trim()) { setErr('이메일 아이디를 입력하세요.'); return; }
+      const prof = profile();
       if (!prof) { setErr('등록되지 않은 이메일입니다 — 관리자에게 등록을 요청하세요.'); return; }
       if (adminOnly && prof.role !== 'admin') { setErr('현재 관리자 전용 모드입니다 — 관리자만 접속할 수 있습니다.'); return; }
       if (!store.emailAuth) { setErr('서버 연결 후 사용할 수 있습니다. 잠시 후 다시 시도하세요.'); return; }
@@ -4116,7 +4114,7 @@
     async function verifyCode(e) {
       e && e.preventDefault();
       setErr('');
-      const prof = emailProfile(email);
+      const prof = profile();
       if (!prof) { setErr('등록되지 않은 이메일입니다.'); return; }
       if (!code.trim()) { setErr('메일로 받은 인증번호를 입력하세요.'); return; }
       setBusy(true);
@@ -4125,27 +4123,10 @@
       if (res.error) { setErr('인증 실패: ' + (/expired|invalid/i.test(res.error) ? '인증번호가 틀렸거나 만료되었습니다. 다시 받아 시도하세요.' : res.error)); return; }
       onLogin({ role: prof.role, team: prof.team || '', name: prof.name || prof.key, email: prof.key });
     }
-    // 팀 목록: MD = 관리되는 전체 입찰팀(팀 관리 반영), PD = 관리되는 PD 편성팀
-    const teamList = role === 'md'
-      ? Array.from(new Set((teams || []).map((t) => t.name)))
-      : ((pdTeams && pdTeams.length) ? pdTeams : (window.AUTH.pdTeams || []));
-    const fixedTeam = r.fixedTeam || '';           // 편성팀 등: 소속 고정 → 이름만 입력
-    const needsTeam = role !== 'admin' && !fixedTeam;
-    const needsName = role !== 'admin';
-    function submit(e) {
-      e && e.preventDefault();
-      if (adminOnly && role !== 'admin') { setErr('현재 관리자 전용 모드입니다 — 관리자만 접속할 수 있습니다.'); return; }
-      if (needsTeam && !team) { setErr('팀(소속)을 선택하세요.'); return; }
-      if (needsName && !name.trim()) { setErr('이름을 입력하세요.'); return; }
-      if (pw !== r.password) { setErr('비밀번호가 올바르지 않습니다.'); return; }
-      onLogin(needsName
-        ? { role, team: fixedTeam || team, name: name.trim() }
-        : { role, team: '', name: '관리자' });
-    }
     return html`
       <div class="min-h-screen flex flex-col bg-slate-100">
         <div class="flex-1 grid place-items-center p-4">
-        <form onSubmit=${submit} class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+        <form onSubmit=${verifyCode} class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
           <div class="flex items-center gap-2 mb-1">
             <div class="w-9 h-9 rounded-lg bg-brand text-white grid place-items-center font-black text-[11px] leading-none">PGM</div>
             <div>
@@ -4155,76 +4136,36 @@
           </div>
           ${adminOnly && html`<div class="mt-3 text-[12px] bg-purple-50 border border-purple-200 text-purple-800 rounded px-2.5 py-1.5 font-semibold">
             🚷 현재 관리자 전용 모드입니다 — 관리자 외 접속이 일시 차단되었습니다.</div>`}
-          ${emailCfg.enabled && mode === 'email' && html`
-            <div class="mt-4">
-              <div class="text-[12px] font-medium text-ink-soft mb-1.5">📧 이메일 인증 로그인</div>
-              <label class="block">
-                <div class="text-[12px] font-medium text-ink-soft mb-1">회사 이메일 <span class="text-brand">*</span></div>
-                <div class="flex gap-2">
-                  <input type="email" value=${email} onInput=${(e) => { setEmail(e.target.value); setSent(false); setCode(''); }}
-                    class=${inputCls} placeholder="hong_gildong@lotte.net" autofocus disabled=${busy} />
-                  <button type="button" onClick=${sendCode} disabled=${busy || !email.trim()}
-                    class="shrink-0 px-3 py-2 rounded-lg text-[13px] font-semibold border border-brand text-brand hover:bg-brand hover:text-white disabled:opacity-40 whitespace-nowrap">
-                    ${busy && !sent ? '발송 중…' : sent ? '재발송' : '인증번호 받기'}</button>
-                </div>
-              </label>
-              ${sent && html`
-                <div class="mt-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800 rounded px-2.5 py-1.5">
-                  인증번호를 메일로 보냈습니다 — 받은편지함(스팸함 포함)을 확인하세요.</div>
-                <label class="block mt-2.5">
-                  <div class="text-[12px] font-medium text-ink-soft mb-1">인증번호 <span class="text-brand">*</span></div>
-                  <input value=${code} onInput=${(e) => setCode(e.target.value)} class=${`${inputCls} tracking-widest`}
-                    placeholder="메일로 받은 인증번호" autofocus disabled=${busy}
-                    onKeyDown=${(e) => { if (e.key === 'Enter') verifyCode(e); }} />
-                </label>
-                <button type="button" onClick=${verifyCode} disabled=${busy || !code.trim()}
-                  class="mt-3 w-full py-2 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark disabled:opacity-40">
-                  ${busy && sent ? '확인 중…' : '인증하고 입장'}</button>`}
-              ${err && html`<div class="mt-2 text-[12px] text-brand">${err}</div>`}
-              <button type="button" onClick=${() => { setMode('pw'); setErr(''); }}
-                class="mt-3 text-[12px] text-slate-400 hover:text-brand underline">공용 비밀번호로 입장 →</button>
-            </div>`}
-          ${!(emailCfg.enabled && mode === 'email') && html`
-          <div class="text-[12px] font-medium text-ink-soft mt-4 mb-1.5">역할 선택</div>
-          <div class="grid grid-cols-2 gap-2">
-            ${Object.entries(roles).map(([key, cfg]) => html`
-              <button type="button" key=${key} disabled=${adminOnly && key !== 'admin'}
-                onClick=${() => { setRole(key); setTeam(''); setErr(''); }}
-                class=${`rounded-lg border px-2 py-2 text-center transition ${role === key ? 'border-transparent text-white shadow' : 'border-slate-300 bg-white text-ink hover:border-slate-400'} ${adminOnly && key !== 'admin' ? 'opacity-35 cursor-not-allowed' : ''}`}
-                style=${role === key ? { background: cfg.color } : {}}>
-                <div class="font-bold text-sm">${cfg.label}</div>
-                <div class=${`text-[10px] leading-tight mt-0.5 ${role === key ? 'text-white/85' : 'text-ink-soft'}`}>${cfg.desc}</div>
-              </button>`)}
-          </div>
-          <div class="mt-4 space-y-2.5">
-            ${needsTeam && html`
+          <div class="mt-4">
+            <div class="text-[12px] font-medium text-ink-soft mb-1.5">📧 회사 이메일 인증으로 입장합니다</div>
             <label class="block">
-              <div class="text-[12px] font-medium text-ink-soft mb-1">팀 / 소속 <span class="text-brand">*</span></div>
-              <select value=${team} onChange=${(e) => setTeam(e.target.value)} class=${inputCls}>
-                <option value="">${role === 'md' ? '입찰 팀 선택' : 'PD 구분 선택'}</option>
-                ${teamList.map((t) => html`<option key=${t} value=${t}>${t}</option>`)}
-              </select>
-            </label>`}
-            ${needsName && html`
-            <label class="block">
-              <div class="text-[12px] font-medium text-ink-soft mb-1">이름 <span class="text-brand">*</span></div>
-              <input value=${name} onInput=${(e) => setName(e.target.value)} class=${inputCls}
-                placeholder="예: 홍길동" />
-            </label>`}
-            <label class="block">
-              <div class="text-[12px] font-medium text-ink-soft mb-1">${r.label} 공용 비밀번호 <span class="text-brand">*</span></div>
-              <input type="password" value=${pw} onInput=${(e) => setPw(e.target.value)} class=${inputCls} placeholder="비밀번호" autofocus=${!needsName} />
+              <div class="text-[12px] font-medium text-ink-soft mb-1">회사 이메일 <span class="text-brand">*</span></div>
+              <div class="flex items-center gap-1.5">
+                <input value=${local} onInput=${(e) => { setLocal(e.target.value.replace(/@.*$/, '')); setSent(false); setCode(''); }}
+                  class=${`${inputCls} text-right`} placeholder="hong_gildong" autofocus disabled=${busy} autocapitalize="none" autocorrect="off" />
+                <span class="shrink-0 text-[14px] font-semibold text-ink-soft">@${DOMAIN}</span>
+              </div>
             </label>
+            <button type="button" onClick=${sendCode} disabled=${busy || !String(local).trim()}
+              class="mt-2.5 w-full py-2 rounded-lg text-[13px] font-semibold border border-brand text-brand hover:bg-brand hover:text-white disabled:opacity-40">
+              ${busy && !sent ? '발송 중…' : sent ? '인증번호 재발송' : '인증번호 받기'}</button>
+            ${sent && html`
+              <div class="mt-2 text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800 rounded px-2.5 py-1.5">
+                인증번호를 메일로 보냈습니다 — 받은편지함(스팸함 포함)을 확인하세요.</div>
+              <label class="block mt-2.5">
+                <div class="text-[12px] font-medium text-ink-soft mb-1">인증번호 <span class="text-brand">*</span></div>
+                <input value=${code} onInput=${(e) => setCode(e.target.value)} class=${`${inputCls} tracking-widest`}
+                  placeholder="메일로 받은 인증번호" autofocus disabled=${busy}
+                  inputmode="numeric" autocomplete="one-time-code" />
+              </label>
+              <button type="submit" disabled=${busy || !code.trim()}
+                class="mt-3 w-full py-2 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark disabled:opacity-40">
+                ${busy && sent ? '확인 중…' : '인증하고 입장'}</button>`}
+            ${err && html`<div class="mt-2 text-[12px] text-brand">${err}</div>`}
           </div>
-          ${!needsName && html`<div class="mt-2 text-[12px] text-ink-soft">관리자는 비밀번호만 입력하면 입장합니다.</div>`}
-          ${fixedTeam && html`<div class="mt-2 text-[12px] text-ink-soft">${r.label}은 조회 전용입니다 — 이름과 비밀번호만 입력하면 입장합니다.</div>`}
-          ${err && html`<div class="mt-2 text-[12px] text-brand">${err}</div>`}
-          <button type="submit" class="mt-4 w-full py-2 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark">입장</button>
           <div class="mt-3 text-[11px] text-slate-400 leading-relaxed">
-            팀·이름은 필수이며, 모든 수정 내역(변경 이력 · 카드 “마지막 수정”)에 자동 기록됩니다. 비밀번호 입력 후 Enter로도 입장됩니다.
+            등록된 임직원 이메일만 입장할 수 있습니다. 등록·권한 문의: 방송제작부문 식품PD팀 강성현
           </div>
-          ${emailCfg.enabled && html`<button type="button" onClick=${() => { setMode('email'); setErr(''); }}
-            class="mt-2 text-[12px] text-slate-400 hover:text-brand underline">📧 이메일 인증으로 입장 →</button>`}`}
         </form>
         </div>
         <${MakerFooter} />

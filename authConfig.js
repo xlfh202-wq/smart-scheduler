@@ -1,17 +1,11 @@
 /* =====================================================================
- * authConfig.js — 역할별 공용 비밀번호 / 권한 설정
+ * authConfig.js — 로그인(이메일 인증) / 역할 권한 설정
  * ---------------------------------------------------------------------
- * 회사 계정(MS) 연동 없이, 역할별 "공용 비밀번호" 로 접근을 구분합니다.
- *
- *   · MD : 입찰보드만 접근 (상품 입찰)
- *   · PD : 편성표 · 최종편성안 접근/편집 (+ 입찰보드 열람, 관리 기능)
- *
- * 누가 수정했는지는 로그인할 때 입력한 "이름" 으로 변경 이력과
- * 각 카드의 "마지막 수정"에 자동 기록됩니다. (개인별 계정 발급 불필요)
- *
- * ▷ 비밀번호를 바꾸려면 아래 password 값만 고치고 저장 후 새로고침하세요.
- *   (이 파일은 브라우저에 노출되므로, 강력한 보안용이 아니라
- *    내부 역할 구분/오작업 방지 용도입니다.)
+ * 로그인은 "이메일 인증번호" 방식만 사용합니다.
+ *   · emailAuth.allowed 목록의 이메일만 인증번호를 받을 수 있습니다.
+ *   · 이메일 → 역할(MD/PD/편성팀/관리자)·팀·이름이 자동 매핑됩니다.
+ *   · 사용자 추가/삭제 = allowed 목록 수정 후 저장 → 배포.
+ * (공용 비밀번호 방식은 보안상 제거되었습니다 — v201)
  * ===================================================================== */
 window.AUTH = {
   storageKey: 'scheduler-auth-v1',
@@ -19,7 +13,6 @@ window.AUTH = {
     md: {
       label: 'MD',
       desc: '상품 입찰 (입찰보드)',
-      password: 'ltmd2026',
       tabs: ['bids', 'finalview'], // 입찰보드 + 최종편성안 조회(읽기전용)
       canManage: false,            // 엑셀 일괄/초기화 등 관리 기능
       color: '#0891b2',
@@ -27,7 +20,6 @@ window.AUTH = {
     pd: {
       label: 'PD',
       desc: '편성 · 최종편성안',
-      password: 'ltpd2026',
       // 첫 항목이 입장 시 기본 화면 (nav 버튼 순서는 별도 고정)
       // → PD 입장 기본 화면: 최종편성안
       // board = 입찰 보드(상품명·팀명·노출분 간결 조정)
@@ -39,7 +31,6 @@ window.AUTH = {
     pgm: {
       label: '편성팀',
       desc: '입찰 · 최종편성안 조회',
-      password: 'ltpgm2026',
       // 조회 전용: 최종편성안(PD와 동일한 전체 항목, 읽기) + MD 입찰보드(읽기)
       tabs: ['finalpgm', 'bids'],
       canManage: false,
@@ -50,7 +41,6 @@ window.AUTH = {
     admin: {
       label: '관리자',
       desc: '편성 + 관리 권한',
-      password: 'ltpdadmin',
       // → 관리자 입장 기본 화면: 최종편성안
       tabs: ['final', 'board', 'schedule', 'bids'],
       canManage: true,
@@ -64,8 +54,13 @@ window.AUTH = {
    * 목록 추가: '이메일': { role: 'md'|'pd'|'pgm'|'admin', team: '팀명', name: '이름' } */
   emailAuth: {
     enabled: true,
+    domain: 'lotte.net', // 로그인 화면에서 @lotte.net 고정 — 앞부분(아이디)만 입력
     allowed: {
       'sunghyun_kang@lotte.net': { role: 'admin', team: '', name: '강성현' },
+      'chung_sy@lotte.net':      { role: 'admin', team: '', name: '정선영' },
+      // 정보보안팀 검토용 (조회 전용)
+      'sungy0919@lotte.net':     { role: 'pgm', team: '정보보안팀', name: '정보보안팀' },
+      'mkkim1234@lotte.net':     { role: 'pgm', team: '정보보안팀', name: '정보보안팀' },
     },
   },
   // PD 소속 구분 (로그인 드롭다운)
