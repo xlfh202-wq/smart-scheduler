@@ -2188,9 +2188,10 @@
    *  - 변경 시 디바운스 업서트, 다른 접속자에는 Realtime으로 즉시 반영
    * =================================================================== */
   function connectSupabase(store, cfg) {
-    // 인증 토큰이 URL로 전달되어도 무시(자동 세션 인식 차단) + 세션 비영속(OTP 확인 직후 폐기 방침과 일치)
+    // 인증 토큰이 URL로 전달되어도 무시(자동 세션 인식 차단).
+    // 세션은 브라우저에 유지(persistSession) — 데이터 접근(RLS)이 인증 사용자 전용이라 세션이 곧 데이터 열쇠.
     const client = global.supabase.createClient(cfg.url, cfg.key,
-      { auth: { detectSessionInUrl: false, persistSession: false, autoRefreshToken: false } });
+      { auth: { detectSessionInUrl: false, persistSession: true, autoRefreshToken: true } });
     let ready = false;
     let serverOk = true;   // 테이블 미생성 등으로 실패하면 false → 로컬 모드
     let timer = null;
@@ -2321,24 +2322,40 @@
     }
     store._setBackupAPI({ now: doBackup, list: listBackups, restore: restoreBackup });
 
-    /* ----- 이메일 인증(OTP) 로그인 — Supabase Auth ----- */
+    /* ----- 이메일 인증(OTP) 로그인 — Supabase Auth (서버 측 허용 목록) -----
+     * · 발송: 사전 등록(auth 사용자)된 이메일만 가능(shouldCreateUser:false) — 서버가 강제
+     * · 확인: 세션 유지 + app_users 테이블에서 역할/팀/이름 프로필 조회(본인 행만 조회 가능)
+     * · 데이터 테이블(RLS)은 app_users 등록 사용자만 접근 가능 */
     store.emailAuth = {
-      // 인증번호 메일 발송 (허용 목록 검사는 로그인 화면에서 선행)
       async send(email) {
         try {
-          const { error } = await client.auth.signInWithOtp({ email, options: { shouldCreateUser: true } });
-          return error ? { error: error.message } : { ok: true };
+          const { error } = await client.auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
+          if (error) {
+            const msg = /signup|not allowed|user not found/i.test(error.message)
+              ? '등록되지 않은 이메일입니다 — 관리자에게 등록을 요청하세요.' : error.message;
+            return { error: msg };
+          }
+          return { ok: true };
         } catch (e) { return { error: e.message }; }
       },
-      // 인증번호 확인 — 성공 시 Supabase 세션은 즉시 해제(데이터 접근은 기존 공개키 유지)
       async verify(email, token) {
         try {
           const { error } = await client.auth.verifyOtp({ email, token: String(token || '').trim(), type: 'email' });
           if (error) return { error: error.message };
-          try { await client.auth.signOut(); } catch (e) {}
-          return { ok: true };
+          const { data: prof, error: pe } = await client.from('app_users')
+            .select('email,role,team,name').eq('email', email).maybeSingle();
+          if (pe || !prof) {
+            try { await client.auth.signOut(); } catch (e) {}
+            return { error: '인증은 되었으나 사용 권한이 등록되지 않았습니다 — 관리자에게 문의하세요.' };
+          }
+          return { ok: true, profile: prof };
         } catch (e) { return { error: e.message }; }
       },
+      async getSession() {
+        try { const { data } = await client.auth.getSession(); return (data && data.session) || null; }
+        catch (e) { return null; }
+      },
+      async signOut() { try { await client.auth.signOut(); } catch (e) {} },
     };
 
     /* ----- 편성 저장본 본문 분리 저장 (app_state snap_* 행 — 메인 문서 비대화 방지) ----- */
@@ -2495,6 +2512,11 @@
 
     (async () => {
       try {
+        // ── 인증 게이트: 로그인 세션 없으면 데이터 동기화 자체를 시작하지 않음 ──
+        // (RLS가 인증 사용자 전용이라 어차피 읽을 수 없고, 빈 하이드레이트로 인한
+        //  시드 적재·덮어쓰기 시도도 원천 차단. 로그인 성공 시 새로고침으로 재진입)
+        const sess = await store.emailAuth.getSession();
+        if (!sess) { status('authwait'); return; }
         const { data, error } = await client.from('app_state')
           .select('data').eq('id', 'main').maybeSingle();
         if (error) { disableServer(error.message); ready = true; return; }

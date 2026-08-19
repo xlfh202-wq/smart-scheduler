@@ -4099,35 +4099,38 @@
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState('');
     const fullEmail = () => `${String(local).trim().toLowerCase()}@${DOMAIN}`;
-    const profile = () => {
-      const em = fullEmail();
-      const key = Object.keys(emailCfg.allowed || {}).find((k) => k.toLowerCase() === em);
-      return key ? { key, ...emailCfg.allowed[key] } : null;
-    };
+    // 허용 목록은 서버(사전 등록 계정 + app_users)가 판정 — 소스에는 사용자 정보 없음
     async function sendCode() {
       setErr('');
       if (!String(local).trim()) { setErr('이메일 아이디를 입력하세요.'); return; }
-      const prof = profile();
-      if (!prof) { setErr('등록되지 않은 이메일입니다 — 관리자에게 등록을 요청하세요.'); return; }
-      if (adminOnly && prof.role !== 'admin') { setErr('현재 관리자 전용 모드입니다 — 관리자만 접속할 수 있습니다.'); return; }
       if (!store.emailAuth) { setErr('서버 연결 후 사용할 수 있습니다. 잠시 후 다시 시도하세요.'); return; }
       setBusy(true);
-      const res = await store.emailAuth.send(prof.key);
+      const res = await store.emailAuth.send(fullEmail());
       setBusy(false);
-      if (res.error) { setErr('발송 실패: ' + res.error); return; }
+      if (res.error) { setErr(res.error); return; }
       setSent(true);
     }
     async function verifyCode(e) {
       e && e.preventDefault();
       setErr('');
-      const prof = profile();
-      if (!prof) { setErr('등록되지 않은 이메일입니다.'); return; }
       if (!code.trim()) { setErr('메일로 받은 인증번호를 입력하세요.'); return; }
       setBusy(true);
-      const res = await store.emailAuth.verify(prof.key, code);
-      setBusy(false);
-      if (res.error) { setErr('인증 실패: ' + (/expired|invalid/i.test(res.error) ? '인증번호가 틀렸거나 만료되었습니다. 다시 받아 시도하세요.' : res.error)); return; }
-      onLogin({ role: prof.role, team: prof.team || '', name: prof.name || prof.key, email: prof.key });
+      const res = await store.emailAuth.verify(fullEmail(), code);
+      if (res.error) {
+        setBusy(false);
+        setErr('인증 실패: ' + (/expired|invalid/i.test(res.error) ? '인증번호가 틀렸거나 만료되었습니다. 다시 받아 시도하세요.' : res.error));
+        return;
+      }
+      const prof = res.profile;
+      if (adminOnly && prof.role !== 'admin') {
+        setBusy(false);
+        if (store.emailAuth.signOut) store.emailAuth.signOut();
+        setErr('현재 관리자 전용 모드입니다 — 관리자만 접속할 수 있습니다.');
+        return;
+      }
+      onLogin({ role: prof.role, team: prof.team || '', name: prof.name || prof.email, email: prof.email });
+      // 인증 세션으로 데이터 동기화를 시작하기 위해 새로고침 (게이트 재진입)
+      setTimeout(() => window.location.reload(), 50);
     }
     return html`
       <div class="min-h-screen flex flex-col bg-slate-100">
@@ -4243,6 +4246,17 @@
       window.__SB_STATUS = (s) => setSbStatus(s);
       return () => { window.__SB_STATUS = null; };
     }, []);
+    // 앱 세션과 인증(데이터) 세션 정합성: 인증 세션이 없으면 앱 세션도 폐기 → 재로그인
+    useEffect(() => {
+      if (!auth || !store.emailAuth || !store.emailAuth.getSession) return;
+      store.emailAuth.getSession().then((s) => {
+        if (!s) {
+          try { localStorage.removeItem(window.AUTH.storageKey); } catch (e) {}
+          store.setUser(null);
+          setAuth(null);
+        }
+      });
+    }, []);
     // 로그인 식별을 데이터 계층에 반영 → 이후 모든 변경이 이 이름으로 기록됨
     const displayName = (a) => `${a && a.team ? a.team + ' ' : ''}${(a && a.name) || ''}`.trim();
     useEffect(() => { if (auth) store.setUser(displayName(auth), auth.role); }, [auth]);
@@ -4317,6 +4331,10 @@
       try { localStorage.removeItem(window.AUTH.storageKey); } catch (e) {}
       store.setUser(null);
       setAuth(null);
+      // 인증 세션 해제 + 새로고침 — 화면·메모리의 데이터까지 완전 제거
+      const done = () => window.location.reload();
+      if (store.emailAuth && store.emailAuth.signOut) store.emailAuth.signOut().then(done, done);
+      else done();
     }
 
     // 관리자 전용 모드: 비관리자 세션은 즉시 강제 로그아웃

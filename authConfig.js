@@ -50,20 +50,13 @@ window.AUTH = {
       color: '#7c3aed',
     },
   },
-  /* ── 이메일 인증 로그인 (공용 비밀번호 대체) ─────────────────────
-   * 아래 allowed 목록의 이메일만 인증번호(메일 발송)를 받을 수 있습니다.
-   * 이메일 → 역할/팀/이름 매핑: 인증 성공 시 해당 프로필로 자동 입장.
-   * 목록 추가: '이메일': { role: 'md'|'pd'|'pgm'|'admin', team: '팀명', name: '이름' } */
+  /* ── 이메일 인증 로그인 ──────────────────────────────────────────
+   * 허용 사용자 목록은 서버(DB app_users 테이블 + 사전 등록 계정)에서 관리합니다.
+   * 이 파일(브라우저 노출)에는 이메일·이름 등 어떤 사용자 정보도 두지 않습니다.
+   * 사용자 추가: Supabase 대시보드에서 ① Auth 사용자 생성 ② app_users 행 추가 */
   emailAuth: {
     enabled: true,
     domain: 'lotte.net', // 로그인 화면에서 @lotte.net 고정 — 앞부분(아이디)만 입력
-    allowed: {
-      'sunghyun_kang@lotte.net': { role: 'admin', team: '', name: '강성현' },
-      'chung_sy@lotte.net':      { role: 'admin', team: '', name: '정선영' },
-      // 정보보안팀 검토용 (조회 전용)
-      'sungy0919@lotte.net':     { role: 'pgm', team: '정보보안팀', name: '정보보안팀' },
-      'mkkim1234@lotte.net':     { role: 'pgm', team: '정보보안팀', name: '정보보안팀' },
-    },
   },
   // PD 소속 구분 (로그인 드롭다운)
   pdTeams: ['리빙PD팀', '식품PD팀', '잡화뷰티PD팀', '패션레포츠PD팀'],
