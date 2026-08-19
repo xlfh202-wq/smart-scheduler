@@ -4079,7 +4079,13 @@
   function loadAuth() {
     try {
       const raw = localStorage.getItem(window.AUTH.storageKey);
-      if (raw) { const a = JSON.parse(raw); if (a && window.AUTH.roles[a.role]) return a; }
+      if (raw) {
+        const a = JSON.parse(raw);
+        // 세션 유효시간 검사 — 만료된 세션은 폐기(재인증 필요)
+        const ttlMs = (window.AUTH.sessionHours || 24) * 3600 * 1000;
+        if (a && window.AUTH.roles[a.role] && a.ts && Date.now() - a.ts < ttlMs) return a;
+        localStorage.removeItem(window.AUTH.storageKey);
+      }
     } catch (e) {}
     return null;
   }
