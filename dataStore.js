@@ -2571,8 +2571,306 @@
     return store;
   }
 
+  /* ===================================================================
+   *  사내 서버(Flask + SQLite) 연결 — connectSupabase와 동일한 계약
+   *  - 문서 kv(main·backup_*·log_c_*·snap_*) + 행 테이블(bids/placements) + SSE 실시간 + 접속자
+   *  - 로그인: /api/auth (이메일 인증번호 → 장기 세션 쿠키), 프로필은 서버 users 테이블
+   * =================================================================== */
+  function connectLocalServer(store, cfg) {
+    const BASE_URL = (cfg && cfg.base) || '';
+    const api = async (path, opts) => {
+      const o = opts || {};
+      const r = await fetch(BASE_URL + path, {
+        method: o.method || 'GET', credentials: 'same-origin',
+        headers: o.body !== undefined ? { 'Content-Type': 'application/json' } : {},
+        body: o.body !== undefined ? JSON.stringify(o.body) : undefined,
+      });
+      let j = null; try { j = await r.json(); } catch (e) {}
+      if (!r.ok) { const err = new Error((j && j.error) || ('HTTP ' + r.status)); err.status = r.status; throw err; }
+      return j;
+    };
+    const kvGet = async (id, fields) => (await api('/api/kv/' + encodeURIComponent(id) + (fields ? '?fields=' + fields : ''))).row;
+    const kvPut = (id, data) => api('/api/kv/' + encodeURIComponent(id), { method: 'PUT', body: { data } });
+    const kvList = async (q) => (await api('/api/kv?' + new URLSearchParams(q).toString())).rows;
+    const kvDelete = (ids) => api('/api/kv/delete', { method: 'POST', body: { ids } });
+
+    let ready = false, serverOk = true, timer = null;
+    const myRevs = new Set();
+    let lastServerRev = null;
+    const status = (s) => global.__SB_STATUS && global.__SB_STATUS(s);
+    const ROW_TABLES = ['bids', 'placements'];
+    const lastRows = { bids: new Map(), placements: new Map() };
+    async function syncRows(kind, arr) {
+      const cur = new Map((arr || []).map((o) => [o.id, JSON.stringify(o)]));
+      const last = lastRows[kind];
+      const upserts = [];
+      cur.forEach((json, id) => { if (last.get(id) !== json) upserts.push({ id, data: JSON.parse(json) }); });
+      const removed = [];
+      last.forEach((_, id) => { if (!cur.has(id)) removed.push(id); });
+      if (!upserts.length && !removed.length) return;
+      try {
+        await api('/api/rows/' + kind, { method: 'POST', body: { upserts, removed } });
+        lastRows[kind] = cur;
+      } catch (e) { console.warn('[server] ' + kind + ' 행 동기화 실패:', e.message || e); }
+    }
+    function disableServer(reason) {
+      if (!serverOk) return;
+      serverOk = false;
+      console.warn('[server] 서버 저장 비활성화 → 로컬 모드. 이유:', reason);
+      status('local');
+    }
+
+    store._useBackend((state, hold) => {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+      if (hold || !ready || !serverOk) return;
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        try {
+          syncRows('bids', state.bids); syncRows('placements', state.placements);
+          try {
+            const head = await kvGet('main', 'rev');
+            const srvRev = head ? head._rev : null;
+            if (srvRev && srvRev !== lastServerRev && !myRevs.has(srvRev)) {
+              const full = await kvGet('main');
+              if (full && full.data) { lastServerRev = full.data._rev || lastServerRev; store._hydrate(full.data); }
+              console.warn('[guard] 낡은 화면의 저장 차단 → 서버 최신으로 갱신');
+              status('rows');
+              alert('다른 접속자가 먼저 저장한 최신 편성이 있어 화면을 최신으로 갱신했습니다.\n방금 하신 수정이 반영됐는지 확인 후 필요하면 다시 시도해주세요.');
+              return;
+            }
+          } catch (e) {}
+          const rev = uid() + uid();
+          state._rev = rev;
+          myRevs.add(rev);
+          if (myRevs.size > 20) myRevs.delete(myRevs.values().next().value);
+          await kvPut('main', { ...state, bids: [], placements: [] });
+          lastServerRev = rev; status('saved'); maybeAutoBackup();
+        } catch (e) {
+          if (e.status === 403) alert('조회 전용 권한이라 저장되지 않았습니다.');
+          else disableServer(e.message);
+        }
+      }, 2500);
+    });
+
+    /* ----- 백업/복원 ----- */
+    const BK_PREFIX = 'backup_';
+    const AUTO_MIN = 60;
+    const lastAutoTs = () => Number(localStorage.getItem('sched-last-autobackup') || 0);
+    const setLastAutoTs = (t) => { try { localStorage.setItem('sched-last-autobackup', String(t)); } catch (e) {} };
+    async function doBackup(kind) {
+      try {
+        const snap = JSON.parse(JSON.stringify(store._snapshot()));
+        delete snap._rev;
+        const id = BK_PREFIX + new Date().toISOString().replace(/[:.]/g, '-') + '_' + (kind || 'auto');
+        await kvPut(id, snap);
+        if (kind === 'auto') setLastAutoTs(Date.now());
+        pruneBackups();
+        return { ok: true, id };
+      } catch (e) { return { error: e.message }; }
+    }
+    let autoBackupBusy = false;
+    function maybeAutoBackup() {
+      if (!serverOk || autoBackupBusy) return;
+      if (Date.now() - lastAutoTs() >= AUTO_MIN * 60000) {
+        autoBackupBusy = true; setLastAutoTs(Date.now());
+        Promise.resolve(doBackup('auto')).finally(() => { autoBackupBusy = false; });
+      }
+    }
+    async function listBackups() {
+      try {
+        const rows = await kvList({ prefix: BK_PREFIX, order: 'desc', limit: 80 });
+        return { items: rows.map((r) => ({ id: r.id, ts: r.updated_at, kind: r.id.endsWith('_manual') ? 'manual' : 'auto' })) };
+      } catch (e) { return { items: [], error: e.message }; }
+    }
+    async function restoreBackup(id) {
+      try {
+        const row = await kvGet(id);
+        if (!row || !row.data) return { error: '백업을 찾을 수 없습니다.' };
+        await doBackup('auto');
+        const d = row.data; delete d._rev;
+        store._applyRestore(d);
+        return { ok: true };
+      } catch (e) { return { error: e.message }; }
+    }
+    async function pruneBackups(keep = 60) {
+      try {
+        const rows = await kvList({ prefix: BK_PREFIX, order: 'desc', limit: 500 });
+        if (rows.length <= keep) return;
+        await kvDelete(rows.slice(keep).map((r) => r.id));
+      } catch (e) {}
+    }
+    store._setBackupAPI({ now: doBackup, list: listBackups, restore: restoreBackup });
+
+    /* ----- 이메일 인증 로그인 (서버 세션) ----- */
+    store.emailAuth = {
+      async send(email) {
+        try { await api('/api/auth/send', { method: 'POST', body: { email } }); return { ok: true }; }
+        catch (e) { return { error: e.message }; }
+      },
+      async verify(email, code) {
+        try { const r = await api('/api/auth/verify', { method: 'POST', body: { email, code } }); return { ok: true, profile: r.profile, isNew: r.isNew }; }
+        catch (e) { return { error: e.message }; }
+      },
+      async getSession() {
+        try { const r = await api('/api/auth/me'); return r.profile || null; } catch (e) { return null; }
+      },
+      async signOut() {
+        try { await api('/api/presence', { method: 'DELETE' }); } catch (e) {}
+        try { await api('/api/auth/logout', { method: 'POST', body: {} }); } catch (e) {}
+      },
+      async updateProfile(patch) {
+        try { const r = await api('/api/auth/profile', { method: 'PUT', body: patch }); return { ok: true, profile: r.profile }; }
+        catch (e) { return { error: e.message }; }
+      },
+    };
+    // 관리자용 사용자 관리 API (화면은 추후)
+    store.users = {
+      list: () => api('/api/users').then((r) => r.users),
+      update: (email, patch) => api('/api/users/' + encodeURIComponent(email), { method: 'PUT', body: patch }),
+      revoke: (email) => api('/api/users/' + encodeURIComponent(email) + '/revoke', { method: 'POST', body: {} }),
+    };
+
+    /* ----- 저장본·이력 아카이브 ----- */
+    const SNAP_PREFIX = 'snap_';
+    let logBuf = [], logFlushTimer = null;
+    async function flushLogBuf() {
+      if (!logBuf.length || !serverOk) return;
+      const batch = logBuf; logBuf = [];
+      const id = 'log_c_' + new Date().toISOString().replace(/[-:.TZ]/g, '') + '_' + Math.random().toString(36).slice(2, 6);
+      try { await kvPut(id, { entries: batch }); }
+      catch (e) { logBuf = batch.concat(logBuf); console.warn('[server] 이력 아카이브 실패(재시도 예정):', e.message || e); }
+    }
+    store._setLogArchive({
+      push(entries) { logBuf.push(...entries); clearTimeout(logFlushTimer); logFlushTimer = setTimeout(flushLogBuf, 5000); },
+      async clear() {
+        try { const rows = await kvList({ prefix: 'log_c_', limit: 2000 }); if (rows.length) await kvDelete(rows.map((r) => r.id)); }
+        catch (e) { console.warn('[server] 이력 아카이브 삭제 실패:', e.message || e); }
+      },
+    });
+    store._logFetch = async (excludeIds) => {
+      try {
+        const rows = await kvList({ prefix: 'log_c_', by: 'id', order: 'desc', limit: 2000 });
+        const next = rows.map((r) => r.id).filter((id) => !(excludeIds || []).includes(id)).slice(0, 3);
+        if (!next.length) return [];
+        const full = await kvList({ ids: next.join(',') });
+        return full.sort((a, b) => b.id.localeCompare(a.id)).map((r) => ({ id: r.id, entries: (r.data && r.data.entries) || [] }));
+      } catch (e) { return []; }
+    };
+    store._setSnapAPI({
+      put: async (id, data) => { try { await kvPut(SNAP_PREFIX + id, data); } catch (e) {} },
+      get: async (id) => { try { const r = await kvGet(SNAP_PREFIX + id); return r && r.data; } catch (e) { return null; } },
+      remove: async (id) => { try { await kvDelete([SNAP_PREFIX + id]); } catch (e) {} },
+    });
+    async function migrateSnapshots() {
+      try {
+        const inline = (store.getState().snapshots || []).filter((s) => s.placements && s.placements.length >= 0 && !s.ext);
+        if (!inline.length) return;
+        for (const s of inline) await kvPut(SNAP_PREFIX + s.id, { placements: s.placements });
+        store._externalizeSnapshots(inline.map((s) => s.id));
+      } catch (e) {}
+    }
+
+    /* ----- 행 테이블 ----- */
+    async function initRows() {
+      const local = store._snapshot();
+      const bidRows = (await api('/api/rows/bids')).rows.map((r) => r.data);
+      const plRows = (await api('/api/rows/placements')).rows.map((r) => r.data);
+      const empty = bidRows.length === 0 && plRows.length === 0;
+      const localHas = (local.bids && local.bids.length) || (local.placements && local.placements.length);
+      if (empty && localHas) {
+        await api('/api/rows/bids', { method: 'POST', body: { upserts: (local.bids || []).map((o) => ({ id: o.id, data: o })), removed: [] } });
+        await api('/api/rows/placements', { method: 'POST', body: { upserts: (local.placements || []).map((o) => ({ id: o.id, data: o })), removed: [] } });
+        (local.bids || []).forEach((o) => lastRows.bids.set(o.id, JSON.stringify(o)));
+        (local.placements || []).forEach((o) => lastRows.placements.set(o.id, JSON.stringify(o)));
+      } else {
+        store._setRows('bids', bidRows); store._setRows('placements', plRows);
+        lastRows.bids = new Map(bidRows.map((o) => [o.id, JSON.stringify(o)]));
+        lastRows.placements = new Map(plRows.map((o) => [o.id, JSON.stringify(o)]));
+      }
+    }
+    function applyRowsEvent(ev) {
+      const kind = ev.kind; if (!ROW_TABLES.includes(kind)) return;
+      const ups = [];
+      (ev.upserts || []).forEach((row) => {
+        const json = JSON.stringify(row.data);
+        if (lastRows[kind].get(row.id) === json) return; // echo·동일값
+        lastRows[kind].set(row.id, json); ups.push(row.data);
+      });
+      const rem = (ev.removed || []).filter((id) => lastRows[kind].has(id));
+      rem.forEach((id) => lastRows[kind].delete(id));
+      if (ups.length || rem.length) store._mergeRemote(kind, ups, rem);
+    }
+
+    /* ----- 접속자 (하트비트) ----- */
+    let me = null, presenceTimer = null;
+    async function heartbeat() {
+      if (!me || !me.name) return;
+      try { await api('/api/presence', { method: 'POST', body: me }); } catch (e) {}
+    }
+    const origSetUser = store.setUser.bind(store);
+    store.setUser = (name, role) => {
+      origSetUser(name);
+      me = name ? { name, role: role || null } : null;
+      clearInterval(presenceTimer);
+      if (me) { heartbeat(); presenceTimer = setInterval(heartbeat, 30000); }
+    };
+
+    /* ----- SSE 실시간 ----- */
+    function subscribeEvents() {
+      const es = new EventSource(BASE_URL + '/api/events', { withCredentials: true });
+      es.onmessage = (m) => {
+        let ev; try { ev = JSON.parse(m.data); } catch (e) { return; }
+        if (ev.type === 'hello') { global.__PRESENCE_UPDATE && global.__PRESENCE_UPDATE(ev.presence || []); return; }
+        if (ev.type === 'presence') { global.__PRESENCE_UPDATE && global.__PRESENCE_UPDATE(ev.list || []); return; }
+        if (ev.type === 'kv' && ev.id === 'main' && (ev.ns || 'pgm') === 'pgm') {
+          const incoming = ev.data; if (!incoming) return;
+          if (incoming._rev) lastServerRev = incoming._rev;
+          if (incoming._rev && myRevs.has(incoming._rev)) return;
+          store._hydrate(incoming); return;
+        }
+        if (ev.type === 'rows') { applyRowsEvent(ev); return; }
+        if (ev.type === 'reload') { setTimeout(() => location.reload(), 500); }
+      };
+      es.onerror = () => { /* EventSource가 자동 재접속 */ };
+    }
+
+    (async () => {
+      try {
+        const sess = await store.emailAuth.getSession();
+        if (!sess) { status('authwait'); return; }
+        const main = await kvGet('main');
+        if (main && main.data) { lastServerRev = main.data._rev || null; store._hydrate(main.data); }
+        else await kvPut('main', { ...store._snapshot(), bids: [], placements: [] }).catch(() => {});
+        await initRows();
+        store._setRowMode(true);
+        status('rows');
+        ready = true;
+        try { store.repairOrphans(); } catch (e) {}
+        try { store._archiveOverflowLogs(); } catch (e) {}
+        maybeAutoBackup();
+        migrateSnapshots();
+        subscribeEvents();
+        const refreshFromServer = async () => {
+          try {
+            const cur = await kvGet('main');
+            if (cur && cur.data && cur.data._rev !== lastServerRev) {
+              lastServerRev = cur.data._rev || lastServerRev;
+              if (!(cur.data._rev && myRevs.has(cur.data._rev))) store._hydrate(cur.data);
+            }
+            await initRows();
+          } catch (e) {}
+        };
+        document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshFromServer(); });
+        window.addEventListener('online', refreshFromServer);
+      } catch (e) { disableServer(e.message); ready = true; }
+    })();
+    return store;
+  }
+
   global.createDataStore = function () {
     const store = LocalStore();
+    const local = global.LOCAL_SERVER;
+    if (local && local.enabled) return connectLocalServer(store, local);
     const cfg = global.SUPABASE;
     if (cfg && cfg.enabled && global.supabase && global.supabase.createClient) {
       return connectSupabase(store, cfg);
