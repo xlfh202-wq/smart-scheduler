@@ -1581,18 +1581,21 @@
         // 시간을 늘려 이웃 띠와 겹치면 이웃을 잘라내거나(부분 겹침) 흡수(완전 겹침) — 겹침 띠가 남으면
         // 슬롯 귀속이 꼬여 '빈 띠 삭제 시 위 띠 상품까지 삭제'되는 사고가 나므로 정의 단계에서 차단
         const cut = [];
+        const slotMoves = []; // 잘린 이웃 띠에 정확히 물려 있던 슬롯도 함께 이동 (안 하면 늘어난 띠 밑으로 끌려가 겹침)
         const meIdx = base.findIndex((b) => b[0] === start && b[1] === end);
         for (let k = base.length - 1; k >= 0; k--) {
           if (k === meIdx) continue;
           const [s2, e2] = base[k];
           if (!(toMin(s2) < toMin(end) && toMin(start) < toMin(e2))) continue; // 안 겹침
           if (toMin(s2) >= toMin(start) && toMin(e2) <= toMin(end)) { cut.push(`${s2}~${e2} 흡수`); base.splice(k, 1); }
-          else if (toMin(s2) < toMin(start)) { cut.push(`${s2}~${e2}→${s2}~${start}`); base[k] = [s2, start]; }
-          else { cut.push(`${s2}~${e2}→${end}~${e2}`); base[k] = [end, e2]; }
+          else if (toMin(s2) < toMin(start)) { cut.push(`${s2}~${e2}→${s2}~${start}`); base[k] = [s2, start]; slotMoves.push([s2, e2, s2, start]); }
+          else { cut.push(`${s2}~${e2}→${end}~${e2}`); base[k] = [end, e2]; slotMoves.push([s2, e2, end, e2]); }
         }
         day.bands = base;
         day.slots.forEach((sl) => {
-          if (sl.start === oldS && sl.end === oldE) { sl.start = start; sl.end = end; }
+          if (sl.start === oldS && sl.end === oldE) { sl.start = start; sl.end = end; return; }
+          const mv = slotMoves.find(([s2, e2]) => sl.start === s2 && sl.end === e2);
+          if (mv) { sl.start = mv[2]; sl.end = mv[3]; }
         });
         day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
         log({ action: '시간띠조정', from: `${oldS}~${oldE}`, to: `${start}~${end}`,
@@ -1760,6 +1763,9 @@
           log({ action: '순번추가', to: (slot.time ? slot.time + ' ' : '') + slot.label, detail: `${day.date} ${(slot.time ? slot.time + ' ' : '')}${slot.label} 추가` });
         } else {
           const { start, end } = opts;
+          // 같은 시간대가 이미 있으면 중복 생성 없이 그 슬롯을 수기 슬롯으로 승격만
+          const dup = day.slots.find((s) => s.start === start && s.end === end);
+          if (dup) { if (!dup.manual) { dup.manual = true; emit(); } return; }
           const slot = { id: 'slot_' + uid(), start, end, manual: true };
           day.slots.push(slot);
           day.slots.sort((a, b) => (toMin(a.start || '00:00')) - (toMin(b.start || '00:00')));
