@@ -2079,6 +2079,16 @@
       s.year === state.view.year && s.month === state.view.month && s.programId === state.activeProgram).length;
     const capRef = useRef(null);
     const [saving, setSaving] = useState(false);
+    const [wide, setWide] = useState(false); // 표가 화면보다 넓음 → 가로 스크롤 안내
+    useEffect(() => {
+      const el = capRef.current; if (!el) return;
+      const chk = () => setWide(el.scrollWidth > el.clientWidth + 4);
+      chk();
+      const ro = (typeof ResizeObserver !== 'undefined') ? new ResizeObserver(chk) : null;
+      if (ro) ro.observe(el);
+      window.addEventListener('resize', chk);
+      return () => { if (ro) ro.disconnect(); window.removeEventListener('resize', chk); };
+    });
     const { year, month } = state.view;
     const castOpts = castingOf(state, state.activeProgram);
     function saveExcel() {
@@ -2341,7 +2351,8 @@
         <div ref=${topBarRef}
           class="sticky top-0 z-30 -mx-4 px-4 pt-3 pb-2 mb-3 bg-slate-100 border-b border-slate-200 shadow-sm flex items-center justify-between gap-3 flex-wrap">
           <h2 class="text-base font-bold text-ink">${prog.name} · ${year}년 ${month}월 최종편성안
-            <span class="text-[12px] font-normal text-ink-soft">총 ${total}편성${readOnly ? ' · 조회 전용' : ' · 셀 클릭=수정 · 행 우클릭=추가/삭제 · ⠿ 드래그=이동'}</span></h2>
+            <span class="text-[12px] font-normal text-ink-soft">총 ${total}편성${readOnly ? ' · 조회 전용' : ' · 셀 클릭=수정 · 행 우클릭=추가/삭제 · ⠿ 드래그=이동'}</span>
+            ${wide && html`<span class="ml-2 inline-flex items-center gap-1 text-[11px] font-semibold text-brand bg-brand-light rounded px-1.5 py-0.5 align-middle" title="표가 화면보다 넓습니다. 표 아래 가로 스크롤바 또는 Shift+마우스휠로 좌우 이동">↔ 가로 스크롤</span>`}</h2>
           <div class="flex items-center gap-2">
             ${!readOnly && html`<button onClick=${() => setMemoOpen(true)}
               class=${`text-xs px-2.5 py-1 rounded border whitespace-nowrap shrink-0 ${hasMemo ? 'border-amber-400 text-amber-700 bg-amber-50' : 'border-slate-300 bg-white hover:border-brand hover:text-brand'}`}
@@ -4031,7 +4042,7 @@
     }, [state.placements, state.days, ym]);
     const meta = state.programMeta || {};
     return html`
-      <div class="flex items-stretch gap-0.5 px-2 pt-1.5 bg-slate-200/70 overflow-x-auto">
+      <div class="flex flex-wrap items-stretch gap-0.5 px-2 pt-1.5 bg-slate-200/70">
         ${(state.programs || []).map((p) => {
           const active = p.id === state.activeProgram;
           const custom = meta[p.id] && meta[p.id].custom;
