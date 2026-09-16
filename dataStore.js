@@ -2364,6 +2364,20 @@
       async signOut() { try { await client.auth.signOut(); } catch (e) {} },
     };
 
+    // 전체 내보내기(JSON) — 사내 서버 이관용: 메인 문서·이력 아카이브·저장본·행 테이블·사용자 (자동백업 제외)
+    store.exportAll = async () => {
+      const kv = await client.from('app_state').select('id,data,updated_at').not('id', 'like', 'backup_%');
+      if (kv.error) throw new Error(kv.error.message);
+      const bids = await client.from('bids').select('id,data,updated_at');
+      const pls = await client.from('placements').select('id,data,updated_at');
+      const users = await client.from('app_users').select('email,role,team,name');
+      return {
+        exportedAt: new Date().toISOString(), source: 'supabase',
+        kv: kv.data || [], bids: bids.data || [], placements: pls.data || [],
+        users: (users.data || []).map((u) => ({ email: u.email, name: u.name, team: u.team, role_pgm: u.role, role_casting: u.role === 'admin' ? 'admin' : 'viewer' })),
+      };
+    };
+
     /* ----- 편성 저장본 본문 분리 저장 (app_state snap_* 행 — 메인 문서 비대화 방지) ----- */
     const SNAP_PREFIX = 'snap_';
     // ── 변경 이력 아카이브: 문서에서 넘친 이력을 log_c_<ts> 행으로 보관 ──
@@ -2595,6 +2609,7 @@
     const kvDelete = (ids) => api('/api/kv/delete', { method: 'POST', body: { ids } });
 
     let ready = false, serverOk = true, timer = null;
+    let readOnly = false; // 조회 전용 역할: 서버 쓰기(저장·백업·이력 아카이브) 시도 자체를 생략 (403 소음 방지)
     const myRevs = new Set();
     let lastServerRev = null;
     const status = (s) => global.__SB_STATUS && global.__SB_STATUS(s);
@@ -2622,7 +2637,7 @@
 
     store._useBackend((state, hold) => {
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
-      if (hold || !ready || !serverOk) return;
+      if (hold || !ready || !serverOk || readOnly) return;
       clearTimeout(timer);
       timer = setTimeout(async () => {
         try {
@@ -2670,7 +2685,7 @@
     }
     let autoBackupBusy = false;
     function maybeAutoBackup() {
-      if (!serverOk || autoBackupBusy) return;
+      if (!serverOk || autoBackupBusy || readOnly) return;
       if (Date.now() - lastAutoTs() >= AUTO_MIN * 60000) {
         autoBackupBusy = true; setLastAutoTs(Date.now());
         Promise.resolve(doBackup('auto')).finally(() => { autoBackupBusy = false; });
@@ -2723,18 +2738,20 @@
         catch (e) { return { error: e.message }; }
       },
     };
-    // 관리자용 사용자 관리 API (화면은 추후)
+    // 관리자용 사용자 관리 API
     store.users = {
       list: () => api('/api/users').then((r) => r.users),
       update: (email, patch) => api('/api/users/' + encodeURIComponent(email), { method: 'PUT', body: patch }),
       revoke: (email) => api('/api/users/' + encodeURIComponent(email) + '/revoke', { method: 'POST', body: {} }),
     };
+    // 전체 내보내기(JSON) — 서버 이전·백업용 (관리자)
+    store.exportAll = () => api('/api/admin/export');
 
     /* ----- 저장본·이력 아카이브 ----- */
     const SNAP_PREFIX = 'snap_';
     let logBuf = [], logFlushTimer = null;
     async function flushLogBuf() {
-      if (!logBuf.length || !serverOk) return;
+      if (!logBuf.length || !serverOk || readOnly) return;
       const batch = logBuf; logBuf = [];
       const id = 'log_c_' + new Date().toISOString().replace(/[-:.TZ]/g, '') + '_' + Math.random().toString(36).slice(2, 6);
       try { await kvPut(id, { entries: batch }); }
@@ -2838,6 +2855,7 @@
       try {
         const sess = await store.emailAuth.getSession();
         if (!sess) { status('authwait'); return; }
+        readOnly = sess.role === 'pgm'; // 조회 전용 역할 — 서버 쓰기 생략
         const main = await kvGet('main');
         if (main && main.data) { lastServerRev = main.data._rev || null; store._hydrate(main.data); }
         else await kvPut('main', { ...store._snapshot(), bids: [], placements: [] }).catch(() => {});

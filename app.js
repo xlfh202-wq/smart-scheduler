@@ -3784,6 +3784,75 @@
   /* =====================================================================
    *  백업 / 복원
    * ===================================================================== */
+  /* =====================================================================
+   *  사용자·역할 관리 (관리자, 사내 서버 모드) — 누구나 메일 인증으로 들어오되 기본은 조회,
+   *  여기서 MD/PD/관리자 편집 권한을 부여한다. 강제 로그아웃 = 그 사용자의 모든 기기 세션 종료.
+   * ===================================================================== */
+  function UserManagerModal({ me, onClose }) {
+    const [users, setUsers] = useState(null);
+    const [msg, setMsg] = useState('');
+    const [q, setQ] = useState('');
+    const roles = window.AUTH.roles;
+    const ROLE_LABEL = { pgm: '조회 (편성팀)', md: 'MD (입찰)', pd: 'PD (편성)', admin: '관리자' };
+    const CAST_LABEL = { viewer: '조회', requester: '요청자 (PD·MD)', editor: '편집 (SH파트)', admin: '관리자' };
+    async function refresh() {
+      try { setUsers(await store.users.list()); } catch (e) { setMsg('목록 오류: ' + e.message); }
+    }
+    useEffect(() => { refresh(); }, []);
+    async function patch(email, p) {
+      setMsg('');
+      try { await store.users.update(email, p); setMsg('✓ 저장'); refresh(); }
+      catch (e) { setMsg('저장 실패: ' + e.message); }
+    }
+    async function revoke(u) {
+      if (!confirm(`${u.name}(${u.email})의 모든 기기에서 로그아웃시킬까요?\n다음 접속 시 메일 인증을 다시 해야 합니다.`)) return;
+      try { await store.users.revoke(u.email); setMsg('✓ 강제 로그아웃 완료'); } catch (e) { setMsg('실패: ' + e.message); }
+    }
+    const list = (users || []).filter((u) => !q.trim() || [u.email, u.name, u.team].join(' ').toLowerCase().includes(q.trim().toLowerCase()));
+    const fmt = (ts) => ts ? new Date(ts).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
+    return html`
+      <div class="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick=${onClose}>
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col" onClick=${(e) => e.stopPropagation()}>
+          <div class="flex items-center justify-between px-4 py-3 border-b border-slate-200">
+            <h3 class="font-bold text-ink">👥 사용자 · 역할 관리 <span class="text-[12px] font-normal text-ink-soft">(${(users || []).length}명)</span></h3>
+            <button onClick=${onClose} class="text-ink-soft hover:text-brand text-lg leading-none">✕</button>
+          </div>
+          <div class="px-4 py-2 border-b border-slate-200 flex items-center gap-2 flex-wrap">
+            <input value=${q} onInput=${(e) => setQ(e.target.value)} placeholder="이메일·이름·팀 검색" class="text-[13px] px-2.5 py-1.5 rounded border border-slate-300 w-56" />
+            <button onClick=${refresh} class="text-[13px] px-2.5 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand">새로고침</button>
+            ${msg && html`<span class=${`text-[12px] ${msg.startsWith('✓') ? 'text-emerald-600' : 'text-brand'}`}>${msg}</span>`}
+          </div>
+          <div class="px-4 py-2 text-[11px] text-ink-soft border-b border-slate-100 bg-slate-50">
+            회사 메일 인증을 통과한 사람은 자동으로 <b>조회</b> 권한으로 등록됩니다. 여기서 <b>테마PGM 역할</b>(MD/PD/관리자)과 <b>캐스팅 역할</b>을 부여하세요 — 변경은 그 사람의 다음 화면 갱신부터 적용됩니다.
+          </div>
+          <div class="flex-1 overflow-y-auto">
+            ${users === null ? html`<div class="text-center text-slate-400 py-10 text-sm">불러오는 중…</div>` : html`
+            <table class="w-full text-[12.5px]">
+              <thead class="sticky top-0 bg-white"><tr class="text-left text-ink-soft border-b border-slate-200">
+                <th class="px-3 py-2">이메일</th><th class="px-2 py-2">이름</th><th class="px-2 py-2">팀</th>
+                <th class="px-2 py-2">테마PGM 역할</th><th class="px-2 py-2">캐스팅 역할</th><th class="px-2 py-2">최근 로그인</th><th class="px-2 py-2"></th></tr></thead>
+              <tbody>
+                ${list.map((u) => html`<tr key=${u.email} class="border-b border-slate-100 hover:bg-slate-50">
+                  <td class="px-3 py-1.5 tabular-nums">${u.email}${me && me.email === u.email ? html`<span class="ml-1 text-[10px] text-brand">(나)</span>` : ''}</td>
+                  <td class="px-2 py-1.5"><input defaultValue=${u.name} onBlur=${(e) => { if (e.target.value.trim() && e.target.value.trim() !== u.name) patch(u.email, { name: e.target.value.trim() }); }} class="w-20 px-1.5 py-1 rounded border border-slate-200 focus:border-brand outline-none" /></td>
+                  <td class="px-2 py-1.5"><input defaultValue=${u.team} onBlur=${(e) => { if (e.target.value.trim() !== (u.team || '')) patch(u.email, { team: e.target.value.trim() }); }} class="w-28 px-1.5 py-1 rounded border border-slate-200 focus:border-brand outline-none" /></td>
+                  <td class="px-2 py-1.5"><select value=${u.role} onChange=${(e) => patch(u.email, { role: e.target.value })}
+                      disabled=${me && me.email === u.email} class=${`px-1.5 py-1 rounded border ${u.role === 'admin' ? 'border-violet-300 bg-violet-50 text-violet-800' : u.role === 'pgm' ? 'border-slate-200 text-ink-soft' : 'border-brand/40 bg-brand-light/40'}`}>
+                      ${Object.keys(roles).map((k) => html`<option key=${k} value=${k}>${ROLE_LABEL[k] || k}</option>`)}</select></td>
+                  <td class="px-2 py-1.5"><select value=${u.roleCasting || 'viewer'} onChange=${(e) => patch(u.email, { roleCasting: e.target.value })}
+                      class="px-1.5 py-1 rounded border border-slate-200">
+                      ${Object.keys(CAST_LABEL).map((k) => html`<option key=${k} value=${k}>${CAST_LABEL[k]}</option>`)}</select></td>
+                  <td class="px-2 py-1.5 text-ink-soft tabular-nums">${fmt(u.lastLogin)}</td>
+                  <td class="px-2 py-1.5"><button onClick=${() => revoke(u)} class="text-[11px] text-rose-600 hover:underline whitespace-nowrap">강제 로그아웃</button></td>
+                </tr>`)}
+                ${list.length === 0 && html`<tr><td colSpan="7" class="text-center text-slate-400 py-8">사용자가 없습니다</td></tr>`}
+              </tbody>
+            </table>`}
+          </div>
+        </div>
+      </div>`;
+  }
+
   function BackupModal({ onClose, isAdmin }) {
     const [items, setItems] = useState(null);
     const [busy, setBusy] = useState('');
@@ -3831,6 +3900,23 @@
               ${busy === 'now' ? '백업 중…' : '지금 백업'}</button>
             <button onClick=${download}
               class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand">JSON 내보내기</button>
+            ${isAdmin && store.exportAll && html`<button onClick=${async () => {
+                setBusy('export'); setMsg('');
+                try {
+                  const dump = await store.exportAll();
+                  const blob = new Blob([JSON.stringify(dump)], { type: 'application/json' });
+                  const a = document.createElement('a');
+                  a.href = URL.createObjectURL(blob);
+                  a.download = `pgm-full-export-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+                  document.body.appendChild(a); a.click(); a.remove();
+                  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+                  setMsg(`✓ 전체 내보내기 완료 (문서 ${dump.kv.length} · 입찰 ${dump.bids.length} · 편성 ${dump.placements.length} · 사용자 ${dump.users.length})`);
+                } catch (e) { setMsg('전체 내보내기 실패: ' + e.message); }
+                setBusy('');
+              }} disabled=${busy === 'export'}
+              class="text-[13px] px-3 py-1.5 rounded border border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50 disabled:opacity-50"
+              title="서버 이전용: 메인 문서·이력·저장본·입찰·편성·사용자를 한 파일로 (자동백업 제외)">
+              ${busy === 'export' ? '내보내는 중…' : '💾 전체 내보내기 (서버 이전용)'}</button>`}
             <button onClick=${refresh}
               class="text-[13px] px-2.5 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand">새로고침</button>
             ${msg && html`<span class="text-[12px] ${msg.startsWith('✓') ? 'text-emerald-600' : 'text-brand'}">${msg}</span>`}
@@ -4128,14 +4214,35 @@
         setErr('현재 관리자 전용 모드입니다 — 관리자만 접속할 수 있습니다.');
         return;
       }
+      // 첫 로그인(소속 미입력) + 서버가 프로필 수정을 지원하면 이름·팀 입력 단계로
+      if ((res.isNew || !prof.team) && store.emailAuth.updateProfile) {
+        setBusy(false);
+        setProfileStep({ name: prof.name && prof.name !== prof.email.split('@')[0] ? prof.name : '', team: prof.team || '', role: prof.role, email: prof.email });
+        return;
+      }
+      finishLogin(prof);
+    }
+    function finishLogin(prof) {
       onLogin({ role: prof.role, team: prof.team || '', name: prof.name || prof.email, email: prof.email });
       // 인증 세션으로 데이터 동기화를 시작하기 위해 새로고침 (게이트 재진입)
       setTimeout(() => window.location.reload(), 50);
     }
+    const [profileStep, setProfileStep] = useState(null); // {name, team, role, email}
+    async function saveProfile(e) {
+      e && e.preventDefault();
+      if (!profileStep.name.trim()) { setErr('이름을 입력하세요.'); return; }
+      if (!profileStep.team.trim()) { setErr('소속 팀을 선택하세요.'); return; }
+      setBusy(true); setErr('');
+      const r = await store.emailAuth.updateProfile({ name: profileStep.name.trim(), team: profileStep.team.trim() });
+      setBusy(false);
+      if (r.error) { setErr('저장 실패: ' + r.error); return; }
+      finishLogin(r.profile);
+    }
+    const teamOptions = Array.from(new Set([...(window.AUTH.mdTeams || []), ...(window.AUTH.pdTeams || []), '편성팀', '방송전략팀', '기타']));
     return html`
       <div class="min-h-screen flex flex-col bg-slate-100">
         <div class="flex-1 grid place-items-center p-4">
-        <form onSubmit=${verifyCode} class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+        <form onSubmit=${profileStep ? saveProfile : verifyCode} class="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
           <div class="flex items-center gap-2 mb-1">
             <div class="w-9 h-9 rounded-lg bg-brand text-white grid place-items-center font-black text-[11px] leading-none">PGM</div>
             <div>
@@ -4145,7 +4252,32 @@
           </div>
           ${adminOnly && html`<div class="mt-3 text-[12px] bg-purple-50 border border-purple-200 text-purple-800 rounded px-2.5 py-1.5 font-semibold">
             🚷 현재 관리자 전용 모드입니다 — 관리자 외 접속이 일시 차단되었습니다.</div>`}
-          <div class="mt-4">
+          ${profileStep && html`
+            <div class="mt-4">
+              <div class="text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800 rounded px-2.5 py-1.5 font-semibold">
+                ✓ 인증 완료 — 처음 오셨네요. 이름과 소속만 알려주세요 (1회)</div>
+              <label class="block mt-3">
+                <div class="text-[12px] font-medium text-ink-soft mb-1">이름 <span class="text-brand">*</span></div>
+                <input value=${profileStep.name} onInput=${(e) => setProfileStep({ ...profileStep, name: e.target.value })}
+                  class=${inputCls} placeholder="홍길동" autofocus disabled=${busy} />
+              </label>
+              <label class="block mt-2.5">
+                <div class="text-[12px] font-medium text-ink-soft mb-1">소속 팀 <span class="text-brand">*</span></div>
+                <select value=${teamOptions.includes(profileStep.team) ? profileStep.team : (profileStep.team ? '__etc' : '')}
+                  onChange=${(e) => setProfileStep({ ...profileStep, team: e.target.value === '__etc' ? ' ' : e.target.value })} class=${inputCls} disabled=${busy}>
+                  <option value="">팀 선택</option>
+                  ${teamOptions.map((t) => html`<option key=${t} value=${t}>${t}</option>`)}
+                  <option value="__etc">직접 입력…</option>
+                </select>
+                ${profileStep.team && !teamOptions.includes(profileStep.team) && html`<input value=${profileStep.team.trim()} onInput=${(e) => setProfileStep({ ...profileStep, team: e.target.value || ' ' })}
+                  class=${`${inputCls} mt-1.5`} placeholder="팀 이름 직접 입력" disabled=${busy} />`}
+              </label>
+              <div class="mt-2 text-[11px] text-ink-soft">처음 입장은 <b>조회 권한</b>입니다. 입찰·편성 등 편집 권한은 관리자가 부여합니다 (${profileStep.email}).</div>
+              ${err && html`<div class="mt-2 text-[12px] text-brand">${err}</div>`}
+              <button type="submit" disabled=${busy}
+                class="mt-3 w-full py-2 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark disabled:opacity-40">${busy ? '저장 중…' : '저장하고 입장'}</button>
+            </div>`}
+          <div class="mt-4" hidden=${!!profileStep}>
             <div class="text-[12px] font-medium text-ink-soft mb-1.5">📧 회사 이메일 인증으로 입장합니다</div>
             <label class="block">
               <div class="text-[12px] font-medium text-ink-soft mb-1">회사 이메일 <span class="text-brand">*</span></div>
@@ -4173,7 +4305,9 @@
             ${err && html`<div class="mt-2 text-[12px] text-brand">${err}</div>`}
           </div>
           <div class="mt-3 text-[11px] text-slate-400 leading-relaxed">
-            등록된 임직원 이메일만 입장할 수 있습니다. 등록·권한 문의: 방송제작부문 식품PD팀 강성현
+            ${store.emailAuth && store.emailAuth.updateProfile
+              ? '회사 이메일(@lotte.net)로 인증하면 누구나 조회로 입장할 수 있습니다. 편집 권한 문의: 방송제작부문 식품PD팀 강성현'
+              : '등록된 임직원 이메일만 입장할 수 있습니다. 등록·권한 문의: 방송제작부문 식품PD팀 강성현'}
           </div>
         </form>
         </div>
@@ -4239,6 +4373,7 @@
     const [history, setHistory] = useState(false);
     const [backup, setBackup] = useState(false);
     const [teamMgr, setTeamMgr] = useState(false);
+    const [userMgr, setUserMgr] = useState(false); // 사용자·역할 관리 (사내 서버 모드)
     const [castMgr, setCastMgr] = useState(false);
     const [sbStatus, setSbStatus] = useState(
       (window.SUPABASE && window.SUPABASE.enabled) ? 'connecting' : null);
@@ -4246,7 +4381,8 @@
       window.__SB_STATUS = (s) => setSbStatus(s);
       return () => { window.__SB_STATUS = null; };
     }, []);
-    // 앱 세션과 인증(데이터) 세션 정합성: 인증 세션이 없으면 앱 세션도 폐기 → 재로그인
+    // 앱 세션과 인증(데이터) 세션 정합성: 인증 세션이 없으면 앱 세션도 폐기 → 재로그인.
+    // 서버 프로필(역할·팀·이름)이 바뀌었으면 앱 세션에 반영 → 관리자가 권한을 바꾸면 다음 접속부터 적용
     useEffect(() => {
       if (!auth || !store.emailAuth || !store.emailAuth.getSession) return;
       store.emailAuth.getSession().then((s) => {
@@ -4254,6 +4390,14 @@
           try { localStorage.removeItem(window.AUTH.storageKey); } catch (e) {}
           store.setUser(null);
           setAuth(null);
+          return;
+        }
+        if (s.email && s.role && window.AUTH.roles[s.role]
+            && (s.role !== auth.role || (s.team || '') !== (auth.team || '') || (s.name && s.name !== auth.name))) {
+          const next = { ...auth, role: s.role, team: s.team || '', name: s.name || auth.name, email: s.email };
+          try { localStorage.setItem(window.AUTH.storageKey, JSON.stringify({ ...next, ts: auth.ts || Date.now() })); } catch (e) {}
+          setAuth(next);
+          setTab(window.AUTH.roles[s.role].tabs[0]);
         }
       });
     }, []);
@@ -4446,6 +4590,9 @@
                 class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0">
                 변경 이력 <span class="text-[11px] text-ink-soft">(${state.changeLog.length}${state.changeLog.length >= 200 ? '+' : ''})</span>
               </button>
+              ${roleCfg.isAdmin && store.users && html`<button onClick=${() => setUserMgr(true)}
+                class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0"
+                title="로그인한 사용자 목록 · 역할(조회/MD/PD/관리자) 부여 · 강제 로그아웃">👥 사용자 관리</button>`}
               ${roleCfg.isAdmin && html`<button onClick=${() => setTeamMgr(true)}
                 class="text-[13px] px-3 py-1.5 rounded border border-slate-300 bg-white hover:border-brand hover:text-brand whitespace-nowrap shrink-0"
                 title="입찰팀 추가/수정/삭제 (조직개편)">🏷 팀 관리</button>`}
@@ -4494,6 +4641,7 @@
         ${history && html`<${HistoryModal} state=${state} isAdmin=${roleCfg.isAdmin} onClose=${() => setHistory(false)} />`}
         ${backup && html`<${BackupModal} isAdmin=${roleCfg.isAdmin} onClose=${() => setBackup(false)} />`}
         ${teamMgr && html`<${TeamManagerModal} state=${state} onClose=${() => setTeamMgr(false)} />`}
+        ${userMgr && html`<${UserManagerModal} me=${auth} onClose=${() => setUserMgr(false)} />`}
         ${castMgr && html`<${CastingManagerModal} state=${state} onClose=${() => setCastMgr(false)} />`}
         <${MakerFooter} />
       </div>`;
