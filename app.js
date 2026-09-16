@@ -4239,6 +4239,18 @@
       finishLogin(r.profile);
     }
     const teamOptions = Array.from(new Set([...(window.AUTH.mdTeams || []), ...(window.AUTH.pdTeams || []), '편성팀', '방송전략팀', '기타']));
+    // 대문(온에어 플래너)에서 이미 인증한 세션이 있으면 다시 묻지 않고 입장
+    const [checking, setChecking] = useState(!!(store.emailAuth && store.emailAuth.updateProfile));
+    useEffect(() => {
+      if (!checking) return;
+      store.emailAuth.getSession().then((p) => {
+        if (p && p.email && window.AUTH.roles[p.role]) {
+          if (!p.team) { setProfileStep({ name: p.name && p.name !== p.email.split('@')[0] ? p.name : '', team: '', role: p.role, email: p.email }); }
+          else { onLogin({ role: p.role, team: p.team || '', name: p.name || p.email, email: p.email }); return; }
+        }
+        setChecking(false);
+      }).catch(() => setChecking(false));
+    }, []);
     return html`
       <div class="min-h-screen flex flex-col bg-slate-100">
         <div class="flex-1 grid place-items-center p-4">
@@ -4247,11 +4259,12 @@
             <div class="w-9 h-9 rounded-lg bg-brand text-white grid place-items-center font-black text-[11px] leading-none">PGM</div>
             <div>
               <div class="font-extrabold text-ink leading-tight">테마PGM 편성 스케줄러</div>
-              <div class="text-[11px] text-ink-soft">롯데홈쇼핑 방송제작부문</div>
+              <div class="text-[11px] text-ink-soft">${store.emailAuth && store.emailAuth.updateProfile ? html`<a href="../" class="text-brand hover:underline">온에어 플래너</a> · 롯데홈쇼핑` : '롯데홈쇼핑 방송제작부문'}</div>
             </div>
           </div>
           ${adminOnly && html`<div class="mt-3 text-[12px] bg-purple-50 border border-purple-200 text-purple-800 rounded px-2.5 py-1.5 font-semibold">
             🚷 현재 관리자 전용 모드입니다 — 관리자 외 접속이 일시 차단되었습니다.</div>`}
+          ${checking && !profileStep && html`<div class="mt-4 text-[13px] text-ink-soft text-center py-6">세션 확인 중…</div>`}
           ${profileStep && html`
             <div class="mt-4">
               <div class="text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800 rounded px-2.5 py-1.5 font-semibold">
@@ -4277,7 +4290,7 @@
               <button type="submit" disabled=${busy}
                 class="mt-3 w-full py-2 rounded-lg bg-brand text-white font-semibold hover:bg-brand-dark disabled:opacity-40">${busy ? '저장 중…' : '저장하고 입장'}</button>
             </div>`}
-          <div class="mt-4" hidden=${!!profileStep}>
+          <div class="mt-4" hidden=${!!profileStep || checking}>
             <div class="text-[12px] font-medium text-ink-soft mb-1.5">📧 회사 이메일 인증으로 입장합니다</div>
             <label class="block">
               <div class="text-[12px] font-medium text-ink-soft mb-1">회사 이메일 <span class="text-brand">*</span></div>
