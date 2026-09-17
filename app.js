@@ -2212,6 +2212,19 @@
     }
     const centerKey = monthKey(state.view);
     const winKeys = [monthKey(shiftMonth(state.view, -1)), centerKey, monthKey(shiftMonth(state.view, 1))];
+    // 사내 서버: 주간편성캐스팅과의 연결 정보(시간칸 → 캐스팅 쇼호스트) — 앞뒤 달 포함, 1분마다·창으로 돌아올 때 갱신
+    const [castLinks, setCastLinks] = useState(null);
+    useEffect(() => {
+      if (!(window.LOCAL_SERVER && window.LOCAL_SERVER.enabled)) return;
+      let dead = false;
+      const a = shiftMonth(state.view, -1), b = shiftMonth(state.view, 1);
+      const from = `${monthKey(a)}-01`, to = `${monthKey(b)}-${String(new Date(b.year, b.month, 0).getDate()).padStart(2, '0')}`;
+      const load = () => fetch(`../api/link?from=${from}&to=${to}`, { credentials: 'same-origin' }).then((r) => r.ok ? r.json() : null).then((d) => {
+        if (dead || !d) return; const m = {}; (d.items || []).forEach((it) => { if (it.casting && (it.status === 'auto' || it.status === 'manual')) m[it.pgmSlotId] = it.casting; }); setCastLinks(m);
+      }).catch(() => {});
+      load(); const t = setInterval(load, 60000); const onFocus = () => load(); window.addEventListener('focus', onFocus);
+      return () => { dead = true; clearInterval(t); window.removeEventListener('focus', onFocus); };
+    }, [centerKey]);
     // 전체 월을 스크롤에 표시 — 이전~다음달은 펼침, 먼 달은 접힌 헤더(클릭해 펼침)
     const allProgDays = state.days.filter((d) => d.programId === state.activeProgram)
       .slice().sort((a, b) => a.date.localeCompare(b.date));
@@ -2338,11 +2351,20 @@
         : html`<${EditCell} value=${value} onCommit=${onCommit} placeholder=${o.ph || ''} color=${o.color || ''} />`;
     };
     // 캐스팅(PD/쇼호스트/스튜디오): 추천목록(datalist) + 자유입력 통일
+    // 주간편성캐스팅에 연결된 편성의 쇼호스트(참고 표시 전용 — 값은 자동으로 바꾸지 않음, 이미지·엑셀에는 미포함)
+    const castHint = (p, field) => {
+      if (field !== 'host' || !castLinks) return null;
+      const lk = castLinks[p.slotId];
+      if (!lk || !lk.hosts) return null;
+      const same = (p.host || '').replace(/\s/g, '') === lk.hosts.replace(/\s/g, '');
+      return html`<div class=${'no-capture px-2 pb-1 -mt-0.5 text-[10px] leading-tight truncate ' + (same ? 'text-emerald-600' : 'text-violet-700')}
+        title=${'주간편성캐스팅 ' + lk.start + '~' + lk.end + ' 편성의 쇼호스트' + (lk.pending ? ' (미확정)' : '') + (same ? ' — 입력값과 같음' : ' — 참고용, 자동 입력되지 않습니다')}>🎤 ${same ? '캐스팅 일치' : lk.hosts}${lk.pending ? ' (미확정)' : ''}</div>`;
+    };
     const castCell = (p, field) => {
       const v = p[field] || '';
-      if (readOnly) return html`<div class="px-2 py-1.5 text-[12px]">${v}</div>`;
+      if (readOnly) return html`<div class="px-2 py-1.5 text-[12px]">${v}</div>${castHint(p, field)}`;
       return html`<${EditCell} value=${v} list=${castOpts && castOpts[field] ? 'cast-' + field + '-dl' : undefined}
-        onCommit=${(val) => store.updatePlacementMeta(p.id, { [field]: val })} />`;
+        onCommit=${(val) => store.updatePlacementMeta(p.id, { [field]: val })} />${castHint(p, field)}`;
     };
 
     return html`
