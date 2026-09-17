@@ -4259,6 +4259,8 @@
           if (!p.team) { setProfileStep({ name: p.name && p.name !== p.email.split('@')[0] ? p.name : '', team: '', role: p.role, email: p.email }); }
           else { onLogin({ role: p.role, team: p.team || '', name: p.name || p.email, email: p.email }); return; }
         }
+        // 사내 서버: 로그인(사번·PIN 또는 메일 인증)과 첫 프로필 등록은 대문에서만 → 세션이 없으면 대문으로
+        if (!(p && p.email)) { location.replace('../'); return; }
         setChecking(false);
       }).catch(() => setChecking(false));
     }, []);
