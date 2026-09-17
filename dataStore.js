@@ -2608,7 +2608,7 @@
     const kvList = async (q) => (await api('/api/kv?' + new URLSearchParams(q).toString())).rows;
     const kvDelete = (ids) => api('/api/kv/delete', { method: 'POST', body: { ids } });
 
-    let ready = false, serverOk = true, timer = null;
+    let ready = false, serverOk = true, timer = null, pendingRun = null;
     let readOnly = false; // 조회 전용 역할: 서버 쓰기(저장·백업·이력 아카이브) 시도 자체를 생략 (403 소음 방지)
     const myRevs = new Set();
     let lastServerRev = null;
@@ -2639,9 +2639,10 @@
       try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
       if (hold || !ready || !serverOk || readOnly) return;
       clearTimeout(timer);
-      timer = setTimeout(async () => {
+      const run = async () => {
+        timer = null; pendingRun = null;
         try {
-          syncRows('bids', state.bids); syncRows('placements', state.placements);
+          await Promise.all([syncRows('bids', state.bids), syncRows('placements', state.placements)]);
           try {
             const head = await kvGet('main', 'rev');
             const srvRev = head ? head._rev : null;
@@ -2664,8 +2665,12 @@
           if (e.status === 403) alert('조회 전용 권한이라 저장되지 않았습니다.');
           else disableServer(e.message);
         }
-      }, 2500);
+      };
+      pendingRun = run;
+      timer = setTimeout(run, 2500);
     });
+    // 다른 화면(대문·주간편성캐스팅)으로 넘어가기 직전: 저장 대기 중인 수정을 즉시 서버에 반영
+    store.flushNow = async () => { if (!pendingRun) return; clearTimeout(timer); const r = pendingRun; await r(); };
 
     /* ----- 백업/복원 ----- */
     const BK_PREFIX = 'backup_';

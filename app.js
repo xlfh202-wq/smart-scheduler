@@ -4186,6 +4186,25 @@
     } catch (e) {}
     return null;
   }
+  // 온에어 플래너(사내 서버) 공통 전환 버튼: 대문 · 테마PGM 편성 · 주간편성캐스팅 — 두 화면을 오가며 쓰도록
+  function AppSwitcher() {
+    const [casting, setCasting] = useState(true);
+    const [busy, setBusy] = useState('');
+    useEffect(() => { fetch('../api/apps', { credentials: 'same-origin' }).then((r) => r.json()).then((a) => setCasting(a.casting !== false)).catch(() => {}); }, []);
+    const go = async (e, href, key) => {
+      e.preventDefault(); if (busy) return; setBusy(key);
+      try { if (store.flushNow) await Promise.race([store.flushNow(), new Promise((r) => setTimeout(r, 4000))]); } catch (err) {}
+      try { if (key !== 'home') localStorage.setItem('onair-last', key); } catch (err) {}
+      location.href = href;
+    };
+    const base = 'px-2.5 py-1 rounded-md text-[12px] font-semibold whitespace-nowrap transition';
+    return html`<nav class="flex items-center gap-0.5 p-0.5 rounded-lg bg-slate-100 border border-slate-200 shrink-0" aria-label="온에어 플래너 화면 전환">
+      <a href="../" onClick=${(e) => go(e, '../', 'home')} class=${base + ' text-ink-soft hover:bg-white hover:text-ink'} title="온에어 플래너 대문">${busy === 'home' ? '저장 중…' : '⌂ 대문'}</a>
+      <span class=${base + ' bg-white text-brand shadow-sm cursor-default'} aria-current="page">📺 테마PGM 편성</span>
+      ${casting && html`<a href="../casting/" onClick=${(e) => go(e, '../casting/', 'casting')} class=${base + ' text-ink-soft hover:bg-white hover:text-ink'} title="주간편성캐스팅으로 이동 (수정 중인 내용은 저장 후 이동)">${busy === 'casting' ? '저장 중…' : '🎤 주간편성캐스팅'}</a>`}
+    </nav>`;
+  }
+
   function LoginGate({ onLogin, adminOnly }) {
     // 이메일 인증 전용 로그인 — 공용 비밀번호 방식은 보안상 제거(v201)
     const emailCfg = window.AUTH.emailAuth || {};
@@ -4523,6 +4542,7 @@
       <div class="flex flex-col min-h-screen md:h-screen">
         <header class="shrink-0 bg-white border-b border-slate-200">
           <div class="flex items-center gap-x-3 gap-y-2 px-4 py-2 flex-wrap">
+            ${window.LOCAL_SERVER && window.LOCAL_SERVER.enabled && html`<${AppSwitcher} />`}
             <div class="flex items-center gap-2 shrink-0">
               <div class="w-8 h-8 rounded-lg bg-brand text-white grid place-items-center font-black text-[11px] leading-none shrink-0">PGM</div>
               <div class="min-w-0">
