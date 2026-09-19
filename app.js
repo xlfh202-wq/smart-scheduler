@@ -4293,9 +4293,12 @@
     const teamOptions = Array.from(new Set([...(window.AUTH.mdTeams || []), ...(window.AUTH.pdTeams || []), '편성팀', '방송전략팀', '기타']));
     // 대문(온에어 플래너)에서 이미 인증한 세션이 있으면 다시 묻지 않고 입장
     const [checking, setChecking] = useState(!!(store.emailAuth && store.emailAuth.updateProfile));
+    const [checkErr, setCheckErr] = useState('');
     useEffect(() => {
       if (!checking) return;
-      store.emailAuth.getSession().then((p) => {
+      // 서버가 8초 안에 답하지 않으면 무한 대기 대신 원인 안내 (서버 멈춤·DB 잠김·경로 문제 진단용)
+      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('서버가 응답하지 않습니다 (/api/auth/me 8초 초과)')), 8000));
+      Promise.race([store.emailAuth.getSession(), timeout]).then((p) => {
         if (p && p.email && window.AUTH.roles[p.role]) {
           if (!p.team) { setProfileStep({ name: p.name && p.name !== p.email.split('@')[0] ? p.name : '', team: '', role: p.role, email: p.email }); }
           else { onLogin({ role: p.role, team: p.team || '', name: p.name || p.email, email: p.email }); return; }
@@ -4303,7 +4306,7 @@
         // 사내 서버: 로그인(사번·PIN 또는 메일 인증)과 첫 프로필 등록은 대문에서만 → 세션이 없으면 대문으로
         if (!(p && p.email)) { location.replace('../'); return; }
         setChecking(false);
-      }).catch(() => setChecking(false));
+      }).catch((e) => { setCheckErr((e && e.message) || '세션 확인 실패'); });
     }, []);
     return html`
       <div class="min-h-screen flex flex-col bg-slate-100">
@@ -4318,7 +4321,12 @@
           </div>
           ${adminOnly && html`<div class="mt-3 text-[12px] bg-purple-50 border border-purple-200 text-purple-800 rounded px-2.5 py-1.5 font-semibold">
             🚷 현재 관리자 전용 모드입니다 — 관리자 외 접속이 일시 차단되었습니다.</div>`}
-          ${checking && !profileStep && html`<div class="mt-4 text-[13px] text-ink-soft text-center py-6">세션 확인 중…</div>`}
+          ${checking && !profileStep && !checkErr && html`<div class="mt-4 text-[13px] text-ink-soft text-center py-6">세션 확인 중…</div>`}
+          ${checking && !profileStep && checkErr && html`<div class="mt-4 text-[13px] text-center py-4">
+            <div class="text-brand font-semibold">${checkErr}</div>
+            <div class="text-[11px] text-ink-soft mt-2 leading-relaxed">서버 PC에서 <span class="font-mono">logs\server.log</span>(또는 서버 창)를 확인하세요. 서버 폴더가 OneDrive·다운로드 폴더 안에 있으면 DB가 잠겨 이런 증상이 납니다 → <span class="font-mono">C:\onair</span> 같은 곳으로 옮기세요.</div>
+            <div class="mt-3 flex justify-center gap-2"><button type="button" class="px-3 py-1.5 rounded-lg bg-brand text-white text-[12px] font-semibold" onClick=${() => location.reload()}>다시 시도</button><a href="../" class="px-3 py-1.5 rounded-lg border text-[12px] font-semibold">← 대문</a></div>
+          </div>`}
           ${profileStep && html`
             <div class="mt-4">
               <div class="text-[12px] bg-emerald-50 border border-emerald-200 text-emerald-800 rounded px-2.5 py-1.5 font-semibold">
