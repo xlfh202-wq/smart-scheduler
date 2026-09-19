@@ -142,15 +142,44 @@
     'pgm_룩앳미':    [{ wd: 4, slots: [['07:15', '09:25']] }],
     'pgm_최희히트템': [{ wd: 4, slots: [['18:30', '19:35']] }, { wd: 6, slots: [['17:30', '18:35']] }],
     'pgm_유리네':    [{ wd: 3, slots: [['19:35', '20:45']] }, { wd: 0, slots: [['08:50', '10:00']] }],
-    'pgm_영스타일':  [{ wd: 3, slots: [['21:45', '22:55']] }, { wd: 5, slots: [['08:15', '10:25']] }],
+    'pgm_영스타일수': [{ wd: 3, slots: [['21:45', '22:55']] }],
+    'pgm_영스타일금': [{ wd: 5, slots: [['08:15', '10:25']] }],
     'pgm_쇼핑리스트': [{ wd: 0, slots: [['15:00', '16:10']] }],
   };
   // 패션 프로그램 (날짜 단위 입찰 → 고정 시간대 슬롯에 담김)
-  const FASHION_PROGRAMS = new Set(['pgm_엘쇼', 'pgm_룩앳미', 'pgm_영스타일', 'pgm_최희히트템']);
+  const FASHION_PROGRAMS = new Set(['pgm_엘쇼', 'pgm_룩앳미', 'pgm_영스타일수', 'pgm_영스타일금', 'pgm_최희히트템']);
   const PROGRAM_COLORS = ['#da291c', '#2563eb', '#0891b2', '#db2777', '#16a34a', '#ea580c',
     '#7c3aed', '#d97706', '#0d9488', '#e11d48', '#4f46e5', '#65a30d', '#9333ea', '#475569'];
-  // 영스타일 수/금 → 하나로 병합, 리빙통합/패션통합 탭 제외
-  const PROGRAM_MERGE = { 'pgm_영스타일수': 'pgm_영스타일', 'pgm_영스타일금': 'pgm_영스타일' };
+  // (2026-09) 영스타일은 수/금 두 탭으로 분리 — 예전 병합 데이터(pgm_영스타일)는 splitYoungstyle 이 요일별로 나눔
+  const PROGRAM_MERGE = {};
+  const YS_OLD = 'pgm_영스타일', YS_WED = 'pgm_영스타일수', YS_FRI = 'pgm_영스타일금';
+  const ysTarget = (weekday, dateStr) => { const wd = (weekday == null && dateStr) ? new Date(dateStr + 'T00:00:00').getDay() : weekday; return wd === 5 || wd === 6 ? YS_FRI : YS_WED; };
+  function splitYoungstyle(s) {
+    if (!s || !s.programs) return s;
+    const idx = s.programs.findIndex((p) => p.id === YS_OLD);
+    if (idx < 0) return s;
+    const color = s.programs[idx].color;
+    const has = (id) => s.programs.some((p) => p.id === id);
+    const repl = [];
+    if (!has(YS_WED)) repl.push({ id: YS_WED, name: '영스타일(수)', color });
+    if (!has(YS_FRI)) repl.push({ id: YS_FRI, name: '영스타일(금)', color: PROGRAM_COLORS[(idx + 3) % PROGRAM_COLORS.length] });
+    s.programs.splice(idx, 1, ...repl);
+    const dayMap = {}; // old dayId → new dayId
+    (s.days || []).forEach((d) => {
+      if (d.programId !== YS_OLD) return;
+      const to = ysTarget(d.weekday, d.date); const nid = `day_${to}_${d.date}`;
+      dayMap[d.id] = nid; d.id = nid; d.programId = to;
+    });
+    const slotProg = {}; (s.days || []).forEach((d) => d.slots.forEach((sl) => { slotProg[sl.id] = d.programId; }));
+    (s.placements || []).forEach((p) => { if (p.programId === YS_OLD) p.programId = slotProg[p.slotId] || YS_WED; });
+    (s.bids || []).forEach((b) => { if (dayMap[b.dayId]) b.dayId = dayMap[b.dayId]; if (b.programId === YS_OLD) b.programId = slotProg[b.slotId] || YS_WED; });
+    (s.snapshots || []).forEach((x) => { if (x.programId === YS_OLD) x.programId = YS_WED; });
+    ['programTeamIds', 'programMeta', 'programSchedules'].forEach((k) => { if (s[k] && s[k][YS_OLD]) { const v = s[k][YS_OLD]; [YS_WED, YS_FRI].forEach((t) => { if (!s[k][t]) s[k][t] = JSON.parse(JSON.stringify(v)); }); delete s[k][YS_OLD]; } });
+    if (s.castingMemo) Object.keys(s.castingMemo).forEach((k) => { if (k.startsWith(YS_OLD + '|')) { s.castingMemo[YS_WED + k.slice(YS_OLD.length)] = s.castingMemo[k]; delete s.castingMemo[k]; } });
+    if (s.hiddenDays) s.hiddenDays = s.hiddenDays.map((k) => k.startsWith(YS_OLD + '|') ? ysTarget(null, k.split('|')[1]) + k.slice(YS_OLD.length) : k);
+    if (s.activeProgram === YS_OLD) s.activeProgram = YS_WED;
+    return s;
+  }
   const EXCLUDE_PROGRAMS = new Set(['pgm_리빙통합', 'pgm_패션통합', 'pgm_레포츠PGM텐션업']);
   const normProgId = (id) => PROGRAM_MERGE[id] || id;
   // 겹치는 빈 고정(std) 슬롯 자동 정리 (더블링 방지 — 로드/동기화 시 항상 실행)
@@ -205,6 +234,7 @@
   // 제외 프로그램(텐션업 등)의 잔여 데이터를 상태에서 정리
   function pruneExcluded(s) {
     if (!s) return s;
+    splitYoungstyle(s);
     if (s.programs) s.programs = s.programs.filter((p) => !EXCLUDE_PROGRAMS.has(p.id));
     if (s.days) s.days = s.days.filter((d) => !EXCLUDE_PROGRAMS.has(d.programId));
     if (s.placements) s.placements = s.placements.filter((p) => !EXCLUDE_PROGRAMS.has(p.programId));
@@ -263,7 +293,7 @@
       const id = normProgId(p.id);
       if (seen.has(id)) return;
       seen.add(id);
-      out.push({ id, name: id === 'pgm_영스타일' ? '영스타일' : p.name });
+      out.push({ id, name: p.name });
     });
     out.sort((a, b) => (a.id === MAIN_PROGRAM ? -1 : b.id === MAIN_PROGRAM ? 1 : 0));
     return out.map((p, i) => ({ ...p, color: PROGRAM_COLORS[i % PROGRAM_COLORS.length] }));
